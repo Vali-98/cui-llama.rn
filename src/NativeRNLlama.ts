@@ -16,9 +16,8 @@ export type NativeContextParams = {
   use_mlock?: boolean
   use_mmap?: boolean
 
-  memory_f16?: number
-
   lora?: string // lora_adaptor
+  lora_scaled?: number
   lora_base?: string
 
   rope_freq_base?: number
@@ -36,15 +35,16 @@ export type NativeCompletionParams = {
 
   temperature?: number // -> temp
 
-  repeat_last_n?: number
-  repeat_penalty?: number
-  presence_penalty?: number
-  frequency_penalty?: number
+  penalty_last_n?: number
+  penalty_repeat?: number
+  penalty_freq?: number
+  penalty_present?: number
   mirostat?: number
   mirostat_tau?: number
   mirostat_eta?: number
   top_k?: number
   top_p?: number
+  min_p?: number
   tfs_z?: number
   typical_p?: number
 
@@ -105,15 +105,24 @@ export type NativeLlamaContext = {
   reasonNoGPU: string
 }
 
+export type NativeSessionLoadResult = {
+  tokens_loaded: number
+  prompt: string
+}
+
 export interface Spec extends TurboModule {
   setContextLimit(limit: number): Promise<void>;
   initContext(params: NativeContextParams): Promise<NativeLlamaContext>;
 
+  loadSession(contextId: number, filepath: string): Promise<NativeSessionLoadResult>;
+  saveSession(contextId: number, filepath: string, size: number): Promise<number>;
   completion(contextId: number, params: NativeCompletionParams): Promise<NativeCompletionResult>;
   stopCompletion(contextId: number): Promise<void>;
   tokenize(contextId: number, text: string): Promise<NativeTokenizeResult>;
   detokenize(contextId: number, tokens: number[]): Promise<string>;
   embedding(contextId: number, text: string): Promise<NativeEmbeddingResult>;
+  bench(contextId: number, pp: number, tg: number, pl: number, nr: number): Promise<string>;
+
   releaseContext(contextId: number): Promise<void>;
 
   releaseAllContexts(): Promise<void>;

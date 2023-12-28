@@ -55,10 +55,11 @@
     }
     if (params[@"n_batch"]) defaultParams.n_batch = [params[@"n_batch"] intValue];
     if (params[@"use_mmap"]) defaultParams.use_mmap = [params[@"use_mmap"] boolValue];
-    if (params[@"memory_f16"]) defaultParams.memory_f16 = [params[@"memory_f16"] boolValue];
 
     if (params[@"lora"]) {
-        defaultParams.lora_adapter = [params[@"lora"] UTF8String];
+        float lora_scaled = 1.0f;
+        if (params[@"lora_scaled"]) lora_scaled = [params[@"lora_scaled"] floatValue];
+        defaultParams.lora_adapter.push_back({[params[@"lora"] UTF8String], lora_scaled});
         defaultParams.use_mmap = false;
     }
     if (params[@"lora_base"]) defaultParams.lora_base = [params[@"lora_base"] UTF8String];
@@ -131,12 +132,6 @@
 
     llama->params.prompt = [prompt UTF8String];
 
-    if (params[@"grammar"]) {
-        llama->params.grammar = [params[@"grammar"] UTF8String];
-    }
-
-    if (params[@"temperature"]) llama->params.temp = [params[@"temperature"] doubleValue];
-
     if (params[@"n_threads"]) {
         int nThreads = params[@"n_threads"] ? [params[@"n_threads"] intValue] : llama->params.n_threads;
         const int maxThreads = (int) [[NSProcessInfo processInfo] processorCount];
@@ -145,22 +140,32 @@
         llama->params.n_threads = nThreads > 0 ? nThreads : defaultNThreads;
     }
     if (params[@"n_predict"]) llama->params.n_predict = [params[@"n_predict"] intValue];
-    if (params[@"n_probs"]) llama->params.n_probs = [params[@"n_probs"] intValue];
 
-    if (params[@"repeat_last_n"]) llama->params.repeat_last_n = [params[@"repeat_last_n"] intValue];
-    if (params[@"repeat_penalty"]) llama->params.repeat_penalty = [params[@"repeat_penalty"] doubleValue];
-    if (params[@"presence_penalty"]) llama->params.presence_penalty = [params[@"presence_penalty"] doubleValue];
-    if (params[@"frequency_penalty"]) llama->params.frequency_penalty = [params[@"frequency_penalty"] doubleValue];
+    auto & sparams = llama->params.sparams;
 
-    if (params[@"mirostat"]) llama->params.mirostat = [params[@"mirostat"] intValue];
-    if (params[@"mirostat_tau"]) llama->params.mirostat_tau = [params[@"mirostat_tau"] doubleValue];
-    if (params[@"mirostat_eta"]) llama->params.mirostat_eta = [params[@"mirostat_eta"] doubleValue];
+    if (params[@"temperature"]) sparams.temp = [params[@"temperature"] doubleValue];
 
-    if (params[@"top_k"]) llama->params.top_k = [params[@"top_k"] intValue];
-    if (params[@"top_p"]) llama->params.top_p = [params[@"top_p"] doubleValue];
-    if (params[@"tfs_z"]) llama->params.tfs_z = [params[@"tfs_z"] doubleValue];
+    if (params[@"n_probs"]) sparams.n_probs = [params[@"n_probs"] intValue];
 
-    if (params[@"typical_p"]) llama->params.typical_p = [params[@"typical_p"] doubleValue];
+    if (params[@"penalty_last_n"]) sparams.penalty_last_n = [params[@"penalty_last_n"] intValue];
+    if (params[@"penalty_repeat"]) sparams.penalty_repeat = [params[@"penalty_repeat"] doubleValue];
+    if (params[@"penalty_freq"]) sparams.penalty_freq = [params[@"penalty_freq"] doubleValue];
+    if (params[@"penalty_present"]) sparams.penalty_present = [params[@"penalty_present"] doubleValue];
+
+    if (params[@"mirostat"]) sparams.mirostat = [params[@"mirostat"] intValue];
+    if (params[@"mirostat_tau"]) sparams.mirostat_tau = [params[@"mirostat_tau"] doubleValue];
+    if (params[@"mirostat_eta"]) sparams.mirostat_eta = [params[@"mirostat_eta"] doubleValue];
+
+    if (params[@"top_k"]) sparams.top_k = [params[@"top_k"] intValue];
+    if (params[@"top_p"]) sparams.top_p = [params[@"top_p"] doubleValue];
+    if (params[@"min_p"]) sparams.min_p = [params[@"min_p"] doubleValue];
+    if (params[@"tfs_z"]) sparams.tfs_z = [params[@"tfs_z"] doubleValue];
+
+    if (params[@"typical_p"]) sparams.typical_p = [params[@"typical_p"] doubleValue];
+
+    if (params[@"grammar"]) {
+        sparams.grammar = [params[@"grammar"] UTF8String];
+    }
 
     llama->params.antiprompt.clear();
     if (params[@"stop"]) {
@@ -170,32 +175,31 @@
         }
     }
 
-    llama->params.logit_bias.clear();
+    sparams.logit_bias.clear();
     if (params[@"ignore_eos"] && [params[@"ignore_eos"] boolValue]) {
-        llama->params.logit_bias[llama_token_eos(llama->ctx)] = -INFINITY;
+        sparams.logit_bias[llama_token_eos(llama->model)] = -INFINITY;
     }
 
     if (params[@"logit_bias"] && [params[@"logit_bias"] isKindOfClass:[NSArray class]]) {
-        const int n_vocab = llama_n_vocab(llama->ctx);
+        const int n_vocab = llama_n_vocab(llama_get_model(llama->ctx));
         NSArray *logit_bias = params[@"logit_bias"];
         for (NSArray *el in logit_bias) {
             if ([el isKindOfClass:[NSArray class]] && [el count] == 2) {
                 llama_token tok = [el[0] intValue];
                 if (tok >= 0 && tok < n_vocab) {
                     if ([el[1] isKindOfClass:[NSNumber class]]) {
-                        llama->params.logit_bias[tok] = [el[1] doubleValue];
+                        sparams.logit_bias[tok] = [el[1] doubleValue];
                     } else if ([el[1] isKindOfClass:[NSNumber class]] && ![el[1] boolValue]) {
-                        llama->params.logit_bias[tok] = -INFINITY;
+                        sparams.logit_bias[tok] = -INFINITY;
                     }
                 }
             }
         }
     }
 
-    if (!llama->loadGrammar()) {
-        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to load grammar" userInfo:nil];
+    if (!llama->initSampling()) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to initialize sampling" userInfo:nil];
     }
-
     llama->loadPrompt();
     llama->beginCompletion();
 
@@ -241,7 +245,7 @@
             NSMutableDictionary *tokenResult = [[NSMutableDictionary alloc] init];
             tokenResult[@"token"] = [NSString stringWithUTF8String:to_send.c_str()];
 
-            if (llama->params.n_probs > 0) {
+            if (llama->params.sparams.n_probs > 0) {
                 const std::vector<llama_token> to_send_toks = llama_tokenize(llama->ctx, to_send, false);
                 size_t probs_pos = std::min(sent_token_probs_index, llama->generated_token_probs.size());
                 size_t probs_stop_pos = std::min(sent_token_probs_index + to_send_toks.size(), llama->generated_token_probs.size());
@@ -335,12 +339,46 @@
     return embeddingResult;
 }
 
-- (void)invalidate {
-    if (llama->grammar != nullptr) {
-        llama_grammar_free(llama->grammar);
+- (NSDictionary *)loadSession:(NSString *)path {
+    if (!path || [path length] == 0) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Session path is empty" userInfo:nil];
     }
-    delete llama;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Session file does not exist" userInfo:nil];
+    }
 
+    size_t n_token_count_out = 0;
+    llama->embd.resize(llama->params.n_ctx);
+    if (!llama_load_session_file(llama->ctx, [path UTF8String], llama->embd.data(), llama->embd.capacity(), &n_token_count_out)) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to load session" userInfo:nil];
+    }
+    llama->embd.resize(n_token_count_out);
+    const std::string text = rnllama::tokens_to_str(llama->ctx, llama->embd.cbegin(), llama->embd.cend());
+    return @{
+        @"tokens_loaded": @(n_token_count_out),
+        @"prompt": [NSString stringWithUTF8String:text.c_str()]
+    };
+}
+
+- (int)saveSession:(NSString *)path size:(int)size {
+    if (!path || [path length] == 0) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Session path is empty" userInfo:nil];
+    }
+    std::vector<llama_token> session_tokens = llama->embd;
+    int default_size = session_tokens.size();
+    int save_size = size > 0 && size <= default_size ? size : default_size;
+    if (!llama_save_session_file(llama->ctx, [path UTF8String], session_tokens.data(), save_size)) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to save session" userInfo:nil];
+    }
+    return session_tokens.size();
+}
+
+- (NSString *)bench:(int)pp tg:(int)tg pl:(int)pl nr:(int)nr {
+    return [NSString stringWithUTF8String:llama->bench(pp, tg, pl, nr).c_str()];
+}
+
+- (void)invalidate {
+    delete llama;
     // llama_backend_free();
 }
 

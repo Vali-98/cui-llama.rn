@@ -1,4 +1,4 @@
-import { NativeEventEmitter } from 'react-native'
+import { NativeEventEmitter, DeviceEventEmitter, Platform } from 'react-native'
 import type { DeviceEventEmitterStatic } from 'react-native'
 import RNLlama from './NativeRNLlama'
 import type {
@@ -6,8 +6,10 @@ import type {
   NativeLlamaContext,
   NativeCompletionParams,
   NativeCompletionTokenProb,
+  NativeCompletionResult,
   NativeTokenizeResult,
   NativeEmbeddingResult,
+  NativeSessionLoadResult,
 } from './NativeRNLlama'
 import { SchemaGrammarConverter, convertJsonSchemaToGrammar } from './grammar'
 
@@ -15,9 +17,14 @@ export { SchemaGrammarConverter, convertJsonSchemaToGrammar }
 
 const EVENT_ON_TOKEN = '@RNLlama_onToken'
 
-const EventEmitter: NativeEventEmitter | DeviceEventEmitterStatic =
+let EventEmitter: NativeEventEmitter | DeviceEventEmitterStatic
+if (Platform.OS === 'ios') {
   // @ts-ignore
-  new NativeEventEmitter(RNLlama)
+  EventEmitter = new NativeEventEmitter(RNLlama)
+}
+if (Platform.OS === 'android') {
+  EventEmitter = DeviceEventEmitter
+}
 
 export type TokenData = {
   token: string
@@ -32,6 +39,16 @@ type TokenNativeEvent = {
 export type ContextParams = NativeContextParams
 
 export type CompletionParams = Omit<NativeCompletionParams, 'emit_partial_completion'>
+
+export type BenchResult = {
+  modelDesc: string
+  modelSize: number
+  modelNParams: number
+  ppAvg: number
+  ppStd: number
+  tgAvg: number
+  tgStd: number
+}
 
 export class LlamaContext {
   id: number
@@ -50,10 +67,24 @@ export class LlamaContext {
     this.reasonNoGPU = reasonNoGPU
   }
 
+  /**
+   * Load cached prompt & completion state from a file.
+   */
+  async loadSession(filepath: string): Promise<NativeSessionLoadResult> {
+    return RNLlama.loadSession(this.id, filepath)
+  }
+
+  /**
+   * Save current cached prompt & completion state to a file.
+   */
+  async saveSession(filepath: string, options?: { tokenSize: number }): Promise<number> {
+    return RNLlama.saveSession(this.id, filepath, options?.tokenSize || -1)
+  }
+
   async completion(
     params: CompletionParams,
     callback?: (data: TokenData) => void,
-  ) {
+  ): Promise<NativeCompletionResult> {
     let tokenListener: any = callback && EventEmitter.addListener(
       EVENT_ON_TOKEN,
       (evt: TokenNativeEvent) => {
@@ -93,6 +124,28 @@ export class LlamaContext {
 
   embedding(text: string): Promise<NativeEmbeddingResult> {
     return RNLlama.embedding(this.id, text)
+  }
+
+  async bench(pp: number, tg: number, pl: number, nr: number): Promise<BenchResult> {
+    const result = await RNLlama.bench(this.id, pp, tg, pl, nr)
+    const [
+      modelDesc,
+      modelSize,
+      modelNParams,
+      ppAvg,
+      ppStd,
+      tgAvg,
+      tgStd,
+    ] = JSON.parse(result)
+    return {
+      modelDesc,
+      modelSize,
+      modelNParams,
+      ppAvg,
+      ppStd,
+      tgAvg,
+      tgStd,
+    }
   }
 
   async release(): Promise<void> {

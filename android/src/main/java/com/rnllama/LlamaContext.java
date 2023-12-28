@@ -52,16 +52,16 @@ public class LlamaContext {
       params.hasKey("use_mlock") ? params.getBoolean("use_mlock") : true,
       // boolean use_mmap,
       params.hasKey("use_mmap") ? params.getBoolean("use_mmap") : true,
-      // boolean memory_f16,
-      params.hasKey("memory_f16") ? params.getBoolean("memory_f16") : true,
       // String lora,
       params.hasKey("lora") ? params.getString("lora") : "",
+      // float lora_scaled,
+      params.hasKey("lora_scaled") ? (float) params.getDouble("lora_scaled") : 1.0f,
       // String lora_base,
       params.hasKey("lora_base") ? params.getString("lora_base") : "",
       // float rope_freq_base,
-      params.hasKey("rope_freq_base") ? (float) params.getDouble("rope_freq_base") : 10000.0f,
+      params.hasKey("rope_freq_base") ? (float) params.getDouble("rope_freq_base") : 0.0f,
       // float rope_freq_scale
-      params.hasKey("rope_freq_scale") ? (float) params.getDouble("rope_freq_scale") : 1.0f
+      params.hasKey("rope_freq_scale") ? (float) params.getDouble("rope_freq_scale") : 0.0f
     );
     this.reactContext = reactContext;
     eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
@@ -91,6 +91,28 @@ public class LlamaContext {
       if (!emitNeeded) return;
       context.emitPartialCompletion(tokenResult);
     }
+  }
+
+  public WritableMap loadSession(String path) {
+    if (path == null || path.isEmpty()) {
+      throw new IllegalArgumentException("File path is empty");
+    }
+    File file = new File(path);
+    if (!file.exists()) {
+      throw new IllegalArgumentException("File does not exist: " + path);
+    }
+    WritableMap result = loadSession(this.context, path);
+    if (result.hasKey("error")) {
+      throw new IllegalStateException(result.getString("error"));
+    }
+    return result;
+  }
+
+  public int saveSession(String path, int size) {
+    if (path == null || path.isEmpty()) {
+      throw new IllegalArgumentException("File path is empty");
+    }
+    return saveSession(this.context, path, size);
   }
 
   public WritableMap completion(ReadableMap params) {
@@ -125,14 +147,14 @@ public class LlamaContext {
       params.hasKey("n_predict") ? params.getInt("n_predict") : -1,
       // int n_probs,
       params.hasKey("n_probs") ? params.getInt("n_probs") : 0,
-      // int repeat_last_n,
-      params.hasKey("repeat_last_n") ? params.getInt("repeat_last_n") : 64,
-      // float repeat_penalty,
-      params.hasKey("repeat_penalty") ? (float) params.getDouble("repeat_penalty") : 1.10f,
-      // float presence_penalty,
-      params.hasKey("presence_penalty") ? (float) params.getDouble("presence_penalty") : 0.00f,
-      // float frequency_penalty,
-      params.hasKey("frequency_penalty") ? (float) params.getDouble("frequency_penalty") : 0.00f,
+      // int penalty_last_n,
+      params.hasKey("penalty_last_n") ? params.getInt("penalty_last_n") : 64,
+      // float penalty_repeat,
+      params.hasKey("penalty_repeat") ? (float) params.getDouble("penalty_repeat") : 1.10f,
+      // float penalty_freq,
+      params.hasKey("penalty_freq") ? (float) params.getDouble("penalty_freq") : 0.00f,
+      // float penalty_present,
+      params.hasKey("penalty_present") ? (float) params.getDouble("penalty_present") : 0.00f,
       // float mirostat,
       params.hasKey("mirostat") ? (float) params.getDouble("mirostat") : 0.00f,
       // float mirostat_tau,
@@ -143,6 +165,8 @@ public class LlamaContext {
       params.hasKey("top_k") ? params.getInt("top_k") : 40,
       // float top_p,
       params.hasKey("top_p") ? (float) params.getDouble("top_p") : 0.95f,
+      // float min_p,
+      params.hasKey("min_p") ? (float) params.getDouble("min_p") : 0.05f,
       // float tfs_z,
       params.hasKey("tfs_z") ? (float) params.getDouble("tfs_z") : 1.00f,
       // float typical_p,
@@ -192,12 +216,39 @@ public class LlamaContext {
     return result;
   }
 
+  public String bench(int pp, int tg, int pl, int nr) {
+    return bench(this.context, pp, tg, pl, nr);
+  }
+
   public void release() {
     freeContext(context);
   }
 
   static {
-    if (LlamaContext.isArm64V8a() == true || LlamaContext.isX86_64() == true) {
+    Log.d(NAME, "Primary ABI: " + Build.SUPPORTED_ABIS[0]);
+    if (LlamaContext.isArm64V8a()) {
+      boolean loadV8fp16 = false;
+      if (LlamaContext.isArm64V8a()) {
+        // ARMv8.2a needs runtime detection support
+        String cpuInfo = LlamaContext.cpuInfo();
+        if (cpuInfo != null) {
+          Log.d(NAME, "CPU info: " + cpuInfo);
+          if (cpuInfo.contains("fphp")) {
+            Log.d(NAME, "CPU supports fp16 arithmetic");
+            loadV8fp16 = true;
+          }
+        }
+      }
+
+      if (loadV8fp16) {
+        Log.d(NAME, "Loading librnllama_v8fp16_va.so");
+        System.loadLibrary("rnllama_v8fp16_va");
+      } else {
+        Log.d(NAME, "Loading librnllama.so");
+        System.loadLibrary("rnllama");
+      }
+    } else if (LlamaContext.isX86_64()) {
+      Log.d(NAME, "Loading librnllama.so");
       System.loadLibrary("rnllama");
     }
   }
@@ -236,11 +287,20 @@ public class LlamaContext {
     int n_gpu_layers, // TODO: Support this
     boolean use_mlock,
     boolean use_mmap,
-    boolean memory_f16,
     String lora,
+    float lora_scaled,
     String lora_base,
     float rope_freq_base,
     float rope_freq_scale
+  );
+  protected static native WritableMap loadSession(
+    long contextPtr,
+    String path
+  );
+  protected static native int saveSession(
+    long contextPtr,
+    String path,
+    int size
   );
   protected static native WritableMap doCompletion(
     long context_ptr,
@@ -250,15 +310,16 @@ public class LlamaContext {
     int n_threads,
     int n_predict,
     int n_probs,
-    int repeat_last_n,
-    float repeat_penalty,
-    float presence_penalty,
-    float frequency_penalty,
+    int penalty_last_n,
+    float penalty_repeat,
+    float penalty_freq,
+    float penalty_present,
     float mirostat,
     float mirostat_tau,
     float mirostat_eta,
     int top_k,
     float top_p,
+    float min_p,
     float tfs_z,
     float typical_p,
     String[] stop,
@@ -272,5 +333,6 @@ public class LlamaContext {
   protected static native String detokenize(long contextPtr, int[] tokens);
   protected static native boolean isEmbeddingEnabled(long contextPtr);
   protected static native WritableArray embedding(long contextPtr, String text);
+  protected static native String bench(long contextPtr, int pp, int tg, int pl, int nr);
   protected static native void freeContext(long contextPtr);
 }

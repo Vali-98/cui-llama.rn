@@ -15,9 +15,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.PushbackInputStream;
 
-@ReactModule(name = RNLlamaModule.NAME)
+@ReactModule(name = RNLlama.NAME)
 public class RNLlamaModule extends NativeRNLlamaSpec {
-  public static final String NAME = "RNLlama";
+  public static final String NAME = RNLlama.NAME;
 
   private RNLlama rnllama = null;
 
@@ -43,6 +43,16 @@ public class RNLlamaModule extends NativeRNLlamaSpec {
   }
 
   @ReactMethod
+  public void loadSession(double id, String path, Promise promise) {
+    rnllama.loadSession(id, path, promise);
+  }
+
+  @ReactMethod
+  public void saveSession(double id, String path, double size, Promise promise) {
+    rnllama.saveSession(id, path, size, promise);
+  }
+
+  @ReactMethod
   public void completion(double id, final ReadableMap params, final Promise promise) {
     rnllama.completion(id, params, promise);
   }
@@ -65,6 +75,11 @@ public class RNLlamaModule extends NativeRNLlamaSpec {
   @ReactMethod
   public void embedding(double id, final String text, final Promise promise) {
     rnllama.embedding(id, text, promise);
+  }
+
+  @ReactMethod
+  public void bench(double id, final double pp, final double tg, final double pl, final double nr, final Promise promise) {
+    rnllama.bench(id, pp, tg, pl, nr, promise);
   }
 
   @ReactMethod

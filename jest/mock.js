@@ -2,11 +2,13 @@ const { NativeModules, DeviceEventEmitter } = require('react-native')
 
 if (!NativeModules.RNLlama) {
   NativeModules.RNLlama = {
-    initContext: jest.fn(() => Promise.resolve({
-      contextId: 1,
-      gpu: false,
-      reasonNoGPU: 'Test',
-    })),
+    initContext: jest.fn(() =>
+      Promise.resolve({
+        contextId: 1,
+        gpu: false,
+        reasonNoGPU: 'Test',
+      }),
+    ),
 
     completion: jest.fn(async (contextId, jobId) => {
       const testResult = {
@@ -143,6 +145,17 @@ if (!NativeModules.RNLlama) {
     tokenize: jest.fn(async () => []),
     detokenize: jest.fn(async () => ''),
     embedding: jest.fn(async () => []),
+
+    loadSession: jest.fn(async () => ({
+      tokens_loaded: 1,
+      prompt: 'Hello',
+    })),
+    saveSession: jest.fn(async () => 1),
+
+    bench: jest.fn(
+      async () =>
+        '["test 3B Q4_0",1600655360,2779683840,16.211304,0.021748,38.570646,1.195800]',
+    ),
 
     releaseContext: jest.fn(() => Promise.resolve()),
     releaseAllContexts: jest.fn(() => Promise.resolve()),

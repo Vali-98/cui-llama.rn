@@ -5,18 +5,25 @@ project(llama.rn)
 set(CMAKE_CXX_STANDARD 11)
 set(RNLLAMA_LIB_DIR ${CMAKE_SOURCE_DIR}/../../../cpp)
 
+include_directories(${RNLLAMA_LIB_DIR})
+
 set(
     SOURCE_FILES
     ${RNLLAMA_LIB_DIR}/ggml-alloc.c
+    ${RNLLAMA_LIB_DIR}/ggml-backend.c
     ${RNLLAMA_LIB_DIR}/ggml.c
+
     ${RNLLAMA_LIB_DIR}/ggml-opencl.cpp
     ${RNLLAMA_LIB_DIR}/k_quants.c
+
     ${RNLLAMA_LIB_DIR}/common.cpp
     ${RNLLAMA_LIB_DIR}/grammar-parser.cpp
+    ${RNLLAMA_LIB_DIR}/sampling.cpp
     ${RNLLAMA_LIB_DIR}/llama.cpp
     ${RNLLAMA_LIB_DIR}/rn-llama.hpp
     ${CMAKE_SOURCE_DIR}/jni.cpp
 )
+
 
 set(KERNELS copy_fast copy_pad transpose_fast transpose_pad xaxpy xdot xger
             xgemm xgemm_direct xgemv invert xconvgemm)
@@ -114,7 +121,9 @@ add_library(
     ${OPENCL_HEADERS}
 )
 
-find_library(LOG_LIB log)
+
+    target_link_libraries(${target_name} ${LOG_LIB} android)
+
 
 # Build stub
 add_subdirectory(libopencl-stub)
@@ -136,17 +145,22 @@ target_include_directories(${RNLLAMA_LIBRARY_NAME} PRIVATE
 
 target_compile_options(${RNLLAMA_LIBRARY_NAME} PRIVATE -DLM_GGML_USE_K_QUANTS -DLM_GGML_USE_CLBLAST -DUSE_STUB_OPENCL -DOPENCL_API)
 
-# NOTE: If you want to debug the native code, you can uncomment if and endif
-# if (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+
+    target_compile_options(${target_name} PRIVATE -O3 -DNDEBUG)
+    target_compile_options(${target_name} PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+    target_compile_options(${target_name} PRIVATE -ffunction-sections -fdata-sections)
+
 
 target_compile_options(${RNLLAMA_LIBRARY_NAME} PRIVATE -O3 -DNDEBUG)
 target_compile_options(${RNLLAMA_LIBRARY_NAME} PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
 target_compile_options(${RNLLAMA_LIBRARY_NAME} PRIVATE -ffunction-sections -fdata-sections)
 
-target_link_options(${RNLLAMA_LIBRARY_NAME} PRIVATE -Wl,--gc-sections)
-target_link_options(${RNLLAMA_LIBRARY_NAME} PRIVATE -Wl,--exclude-libs,ALL)
-target_link_options(${RNLLAMA_LIBRARY_NAME} PRIVATE -flto)
 
-# endif ()
+    # endif ()
+endfunction()
 
-# target_compile_features(${RNLLAMA_LIBRARY_NAME} PRIVATE exceptions)
+build_library("rnllama") # Default target
+
+if (${ANDROID_ABI} STREQUAL "arm64-v8a")
+    build_library("rnllama_v8fp16_va")
+endif ()

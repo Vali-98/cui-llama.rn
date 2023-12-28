@@ -22,12 +22,16 @@ import java.io.FileInputStream;
 import java.io.PushbackInputStream;
 
 public class RNLlama implements LifecycleEventListener {
+  public static final String NAME = "RNLlama";
+
   private ReactApplicationContext reactContext;
 
   public RNLlama(ReactApplicationContext reactContext) {
     reactContext.addLifecycleEventListener(this);
     this.reactContext = reactContext;
   }
+
+  private HashMap<AsyncTask, String> tasks = new HashMap<>();
 
   private HashMap<Integer, LlamaContext> contexts = new HashMap<>();
 
@@ -39,7 +43,7 @@ public class RNLlama implements LifecycleEventListener {
   }
 
   public void initContext(final ReadableMap params, final Promise promise) {
-    new AsyncTask<Void, Void, WritableMap>() {
+    AsyncTask task = new AsyncTask<Void, Void, WritableMap>() {
       private Exception exception;
 
       @Override
@@ -63,19 +67,87 @@ public class RNLlama implements LifecycleEventListener {
       }
 
       @Override
-      protected void onPostExecute(WritableMap id) {
+      protected void onPostExecute(WritableMap result) {
         if (exception != null) {
           promise.reject(exception);
           return;
         }
-        promise.resolve(id);
+        promise.resolve(result);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "initContext");
+  }
+
+  public void loadSession(double id, final String path, Promise promise) {
+    final int contextId = (int) id;
+    AsyncTask task = new AsyncTask<Void, Void, WritableMap>() {
+      private Exception exception;
+
+      @Override
+      protected WritableMap doInBackground(Void... voids) {
+        try {
+          LlamaContext context = contexts.get(contextId);
+          if (context == null) {
+            throw new Exception("Context not found");
+          }
+          WritableMap result = context.loadSession(path);
+          return result;
+        } catch (Exception e) {
+          exception = e;
+        }
+        return null;
+      }
+
+      @Override
+      protected void onPostExecute(WritableMap result) {
+        if (exception != null) {
+          promise.reject(exception);
+          return;
+        }
+        promise.resolve(result);
+        tasks.remove(this);
+      }
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "loadSession-" + contextId);
+  }
+
+  public void saveSession(double id, final String path, double size, Promise promise) {
+    final int contextId = (int) id;
+    AsyncTask task = new AsyncTask<Void, Void, Integer>() {
+      private Exception exception;
+
+      @Override
+      protected Integer doInBackground(Void... voids) {
+        try {
+          LlamaContext context = contexts.get(contextId);
+          if (context == null) {
+            throw new Exception("Context not found");
+          }
+          Integer count = context.saveSession(path, (int) size);
+          return count;
+        } catch (Exception e) {
+          exception = e;
+        }
+        return -1;
+      }
+
+      @Override
+      protected void onPostExecute(Integer result) {
+        if (exception != null) {
+          promise.reject(exception);
+          return;
+        }
+        promise.resolve(result);
+        tasks.remove(this);
+      }
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "saveSession-" + contextId);
   }
 
   public void completion(double id, final ReadableMap params, final Promise promise) {
     final int contextId = (int) id;
-    new AsyncTask<Void, Void, WritableMap>() {
+    AsyncTask task = new AsyncTask<Void, Void, WritableMap>() {
       private Exception exception;
 
       @Override
@@ -103,13 +175,15 @@ public class RNLlama implements LifecycleEventListener {
           return;
         }
         promise.resolve(result);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "completion-" + contextId);
   }
 
   public void stopCompletion(double id, final Promise promise) {
     final int contextId = (int) id;
-    new AsyncTask<Void, Void, Void>() {
+    AsyncTask task = new AsyncTask<Void, Void, Void>() {
       private Exception exception;
 
       @Override
@@ -120,6 +194,13 @@ public class RNLlama implements LifecycleEventListener {
             throw new Exception("Context not found");
           }
           context.stopCompletion();
+          AsyncTask completionTask = null;
+          for (AsyncTask task : tasks.keySet()) {
+            if (tasks.get(task).equals("completion-" + contextId)) {
+              task.get();
+              break;
+            }
+          }
         } catch (Exception e) {
           exception = e;
         }
@@ -133,13 +214,15 @@ public class RNLlama implements LifecycleEventListener {
           return;
         }
         promise.resolve(result);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "stopCompletion-" + contextId);
   }
 
   public void tokenize(double id, final String text, final Promise promise) {
     final int contextId = (int) id;
-    new AsyncTask<Void, Void, WritableMap>() {
+    AsyncTask task = new AsyncTask<Void, Void, WritableMap>() {
       private Exception exception;
 
       @Override
@@ -163,13 +246,15 @@ public class RNLlama implements LifecycleEventListener {
           return;
         }
         promise.resolve(result);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "tokenize-" + contextId);
   }
 
   public void detokenize(double id, final ReadableArray tokens, final Promise promise) {
     final int contextId = (int) id;
-    new AsyncTask<Void, Void, String>() {
+    AsyncTask task = new AsyncTask<Void, Void, String>() {
       private Exception exception;
 
       @Override
@@ -193,13 +278,15 @@ public class RNLlama implements LifecycleEventListener {
           return;
         }
         promise.resolve(result);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "detokenize-" + contextId);
   }
 
   public void embedding(double id, final String text, final Promise promise) {
     final int contextId = (int) id;
-    new AsyncTask<Void, Void, WritableMap>() {
+    AsyncTask task = new AsyncTask<Void, Void, WritableMap>() {
       private Exception exception;
 
       @Override
@@ -223,13 +310,47 @@ public class RNLlama implements LifecycleEventListener {
           return;
         }
         promise.resolve(result);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "embedding-" + contextId);
+  }
+
+  public void bench(double id, final double pp, final double tg, final double pl, final double nr, final Promise promise) {
+    final int contextId = (int) id;
+    AsyncTask task = new AsyncTask<Void, Void, String>() {
+      private Exception exception;
+
+      @Override
+      protected String doInBackground(Void... voids) {
+        try {
+          LlamaContext context = contexts.get(contextId);
+          if (context == null) {
+            throw new Exception("Context not found");
+          }
+          return context.bench((int) pp, (int) tg, (int) pl, (int) nr);
+        } catch (Exception e) {
+          exception = e;
+        }
+        return null;
+      }
+
+      @Override
+      protected void onPostExecute(String result) {
+        if (exception != null) {
+          promise.reject(exception);
+          return;
+        }
+        promise.resolve(result);
+        tasks.remove(this);
+      }
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "bench-" + contextId);
   }
 
   public void releaseContext(double id, Promise promise) {
     final int contextId = (int) id;
-    new AsyncTask<Void, Void, Void>() {
+    AsyncTask task = new AsyncTask<Void, Void, Void>() {
       private Exception exception;
 
       @Override
@@ -238,6 +359,14 @@ public class RNLlama implements LifecycleEventListener {
           LlamaContext context = contexts.get(contextId);
           if (context == null) {
             throw new Exception("Context " + id + " not found");
+          }
+          context.stopCompletion();
+          AsyncTask completionTask = null;
+          for (AsyncTask task : tasks.keySet()) {
+            if (tasks.get(task).equals("completion-" + contextId)) {
+              task.get();
+              break;
+            }
           }
           context.release();
           contexts.remove(contextId);
@@ -254,12 +383,14 @@ public class RNLlama implements LifecycleEventListener {
           return;
         }
         promise.resolve(null);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "releaseContext-" + contextId);
   }
 
   public void releaseAllContexts(Promise promise) {
-    new AsyncTask<Void, Void, Void>() {
+    AsyncTask task = new AsyncTask<Void, Void, Void>() {
       private Exception exception;
 
       @Override
@@ -279,8 +410,10 @@ public class RNLlama implements LifecycleEventListener {
           return;
         }
         promise.resolve(null);
+        tasks.remove(this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "releaseAllContexts");
   }
 
   @Override
@@ -293,6 +426,17 @@ public class RNLlama implements LifecycleEventListener {
 
   @Override
   public void onHostDestroy() {
+    for (LlamaContext context : contexts.values()) {
+      context.stopCompletion();
+    }
+    for (AsyncTask task : tasks.keySet()) {
+      try {
+        task.get();
+      } catch (Exception e) {
+        Log.e(NAME, "Failed to wait for task", e);
+      }
+    }
+    tasks.clear();
     for (LlamaContext context : contexts.values()) {
       context.release();
     }

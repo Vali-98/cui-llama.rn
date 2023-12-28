@@ -9,6 +9,7 @@
 
 NSMutableDictionary *llamaContexts;
 double llamaContextLimit = 1;
+dispatch_queue_t llamaDQueue;
 
 RCT_EXPORT_MODULE()
 
@@ -24,6 +25,10 @@ RCT_EXPORT_METHOD(initContext:(NSDictionary *)contextParams
                  withResolver:(RCTPromiseResolveBlock)resolve
                  withRejecter:(RCTPromiseRejectBlock)reject)
 {
+    if (llamaDQueue == nil) {
+      llamaDQueue = dispatch_queue_create("com.rnllama", DISPATCH_QUEUE_SERIAL);
+    }
+
     if (llamaContexts == nil) {
         llamaContexts = [[NSMutableDictionary alloc] init];
     }
@@ -51,6 +56,58 @@ RCT_EXPORT_METHOD(initContext:(NSDictionary *)contextParams
     });
 }
 
+RCT_EXPORT_METHOD(loadSession:(double)contextId
+                 withFilePath:(NSString *)filePath
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+    if ([context isPredicting]) {
+        reject(@"llama_error", @"Context is busy", nil);
+        return;
+    }
+    dispatch_async(llamaDQueue, ^{
+        @try {
+            @autoreleasepool {
+                resolve([context loadSession:filePath]);
+            }
+        } @catch (NSException *exception) {
+            reject(@"llama_cpp_error", exception.reason, nil);
+        }
+    });
+}
+
+RCT_EXPORT_METHOD(saveSession:(double)contextId
+                 withFilePath:(NSString *)filePath
+                 withSize:(double)size
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+    if ([context isPredicting]) {
+        reject(@"llama_error", @"Context is busy", nil);
+        return;
+    }
+    dispatch_async(llamaDQueue, ^{
+        @try {
+            @autoreleasepool {
+                int count = [context saveSession:filePath size:(int)size];
+                resolve(@(count));
+            }
+        } @catch (NSException *exception) {
+            reject(@"llama_cpp_error", exception.reason, nil);
+        }
+    });
+}
+
 - (NSArray *)supportedEvents {
   return@[
     @"@RNLlama_onToken",
@@ -71,7 +128,7 @@ RCT_EXPORT_METHOD(completion:(double)contextId
         reject(@"llama_error", @"Context is busy", nil);
         return;
     }
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    dispatch_async(llamaDQueue, ^{
         @try {
             @autoreleasepool {
                 NSDictionary* completionResult = [context completion:completionParams
@@ -158,6 +215,27 @@ RCT_EXPORT_METHOD(embedding:(double)contextId
     }
 }
 
+RCT_EXPORT_METHOD(bench:(double)contextId
+                  pp:(int)pp
+                  tg:(int)tg
+                  pl:(int)pl
+                  nr:(int)nr
+                  withResolver:(RCTPromiseResolveBlock)resolve
+                  withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+    @try {
+        NSString *benchResults = [context bench:pp tg:tg pl:pl nr:nr];
+        resolve(benchResults);
+    } @catch (NSException *exception) {
+        reject(@"llama_cpp_error", exception.reason, nil);
+    }
+}
+
 RCT_EXPORT_METHOD(releaseContext:(double)contextId
                  withResolver:(RCTPromiseResolveBlock)resolve
                  withRejecter:(RCTPromiseRejectBlock)reject)
@@ -168,6 +246,7 @@ RCT_EXPORT_METHOD(releaseContext:(double)contextId
         return;
     }
     [context stopCompletion];
+    dispatch_barrier_sync(llamaDQueue, ^{});
     [context invalidate];
     [llamaContexts removeObjectForKey:[NSNumber numberWithDouble:contextId]];
     resolve(nil);
@@ -188,12 +267,19 @@ RCT_EXPORT_METHOD(releaseAllContexts:(RCTPromiseResolveBlock)resolve
 
     for (NSNumber *contextId in llamaContexts) {
         RNLlamaContext *context = llamaContexts[contextId];
+        [context stopCompletion];
+        dispatch_barrier_sync(llamaDQueue, ^{});
         [context invalidate];
     }
 
     [llamaContexts removeAllObjects];
     [llamaContexts release];
     llamaContexts = nil;
+
+    if (llamaDQueue != nil) {
+        dispatch_release(llamaDQueue);
+        llamaDQueue = nil;
+    }
 
     [super invalidate];
 }

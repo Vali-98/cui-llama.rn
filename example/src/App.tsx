@@ -11,6 +11,8 @@ import ReactNativeBlobUtil from 'react-native-blob-util'
 import { initLlama, LlamaContext, convertJsonSchemaToGrammar } from 'llama.rn'
 import { Bubble } from './Bubble'
 
+const { dirs } = ReactNativeBlobUtil.fs
+
 const randId = () => Math.random().toString(36).substr(2, 9)
 
 const user = { id: 'y9d7f8pgn' }
@@ -52,12 +54,7 @@ const renderBubble = ({
 }: {
   child: ReactNode
   message: MessageType.Any
-}) => (
-  <Bubble
-    child={child}
-    message={message}
-  />
-)
+}) => <Bubble child={child} message={message} />
 
 export default function App() {
   const [context, setContext] = useState<LlamaContext | undefined>(undefined)
@@ -76,14 +73,14 @@ export default function App() {
     }
   }
 
-  const addSystemMessage = (text: string) => {
+  const addSystemMessage = (text: string, metadata = {} ) => {
     const textMessage: MessageType.Text = {
       author: system,
       createdAt: Date.now(),
       id: randId(),
       text,
       type: 'text',
-      metadata: { system: true },
+      metadata: { system: true, ...metadata },
     }
     addMessage(textMessage)
   }
@@ -117,6 +114,7 @@ export default function App() {
             ctx.reasonNoGPU
           })\n\n` +
             'You can use the following commands:\n\n' +
+            '- /bench: to benchmark the model\n' +
             '- /release: release the context\n' +
             '- /stop: stop the current completion\n' +
             '- /reset: reset the conversation',
@@ -128,15 +126,20 @@ export default function App() {
   }
 
   const handlePickModel = async () => {
-    DocumentPicker.pick() // TODO: Is there a way to filter GGUF model files?
+    DocumentPicker.pick({
+      type: Platform.OS === 'ios' ? 'public.data' : 'application/octet-stream',
+    })
       .then(async (res) => {
         let [file] = res
         if (file) {
           if (Platform.OS === 'android' && file.uri.startsWith('content://')) {
             const dir = `${ReactNativeBlobUtil.fs.dirs.CacheDir}/models`
-            if (!(await ReactNativeBlobUtil.fs.isDir(dir))) await ReactNativeBlobUtil.fs.mkdir(dir)
+            if (!(await ReactNativeBlobUtil.fs.isDir(dir)))
+              await ReactNativeBlobUtil.fs.mkdir(dir)
 
-            const filepath = `${dir}/${file.uri.split('/').pop() || 'model'}.gguf`
+            const filepath = `${dir}/${
+              file.uri.split('/').pop() || 'model'
+            }.gguf`
             if (await ReactNativeBlobUtil.fs.exists(filepath)) {
               handleInitContext({ uri: filepath } as DocumentPickerResponse)
               return
@@ -160,6 +163,37 @@ export default function App() {
   const handleSendPress = async (message: MessageType.PartialText) => {
     if (context) {
       switch (message.text) {
+        case '/bench':
+          addSystemMessage('Heating up the model...')
+          const t0 = Date.now()
+          await context.bench(8, 4, 1, 1)
+          const tHeat = Date.now() - t0
+          if (tHeat > 1E4) {
+            addSystemMessage('Heat up time is too long, please try again.')
+            return
+          }
+          addSystemMessage(`Heat up time: ${tHeat}ms`)
+
+          addSystemMessage('Benchmarking the model...')
+          const {
+            modelDesc,
+            modelSize,
+            modelNParams,
+            ppAvg,
+            ppStd,
+            tgAvg,
+            tgStd,
+           } = await context.bench(512, 128, 1, 3)
+
+          const size = `${(modelSize / 1024.0 / 1024.0 / 1024.0).toFixed(2)} GiB`
+          const nParams = `${(modelNParams / 1e9).toFixed(2)}B`
+          const md =
+            '| model | size | params | test | t/s |\n' +
+            '| --- | --- | --- | --- | --- |\n' +
+            `| ${modelDesc} | ${size} | ${nParams} | pp 512 | ${ppAvg.toFixed(2)} ± ${ppStd.toFixed(2)} |\n` +
+            `| ${modelDesc} | ${size} | ${nParams} | tg 128 | ${tgAvg.toFixed(2)} ± ${tgStd.toFixed(2)}`
+          addSystemMessage(md, { copyable: true })
+          return
         case '/release':
           await handleReleaseContext()
           return
@@ -168,13 +202,24 @@ export default function App() {
           return
         case '/reset':
           conversationIdRef.current = randId()
-          addMessage({
-            author: system,
-            createdAt: Date.now(),
-            id: randId(),
-            text: 'Conversation reset!',
-            type: 'text',
-            metadata: { system: true },
+          addSystemMessage('Conversation reset!')
+          return
+        case '/save-session':
+          context.saveSession(`${dirs.DocumentDir}/llama-session.bin`).then(tokensSaved => {
+            console.log('Session tokens saved:', tokensSaved)
+            addSystemMessage(`Session saved! ${tokensSaved} tokens saved.`)
+          }).catch(e => {
+            console.log('Session save failed:', e)
+            addSystemMessage(`Session save failed: ${e.message}`)
+          })
+          return
+        case '/load-session':
+          context.loadSession(`${dirs.DocumentDir}/llama-session.bin`).then(details => {
+            console.log('Session loaded:', details)
+            addSystemMessage(`Session loaded! ${details.tokens_loaded} tokens loaded.`)
+          }).catch(e => {
+            console.log('Session load failed:', e)
+            addSystemMessage(`Session load failed: ${e.message}`)
           })
           return
       }
@@ -276,14 +321,14 @@ export default function App() {
           prompt,
           n_predict: 400,
           temperature: 0.7,
-          repeat_last_n: 256, // 0 = disable penalty, -1 = context size
-          repeat_penalty: 1.18, // 1.0 = disabled
           top_k: 40, // <= 0 to use vocab size
           top_p: 0.5, // 1.0 = disabled
           tfs_z: 1.0, // 1.0 = disabled
           typical_p: 1.0, // 1.0 = disabled
-          presence_penalty: 0.0, // 0.0 = disabled
-          frequency_penalty: 0.0, // 0.0 = disabled
+          penalty_last_n: 256, // 0 = disable penalty, -1 = context size
+          penalty_repeat: 1.18, // 1.0 = disabled
+          penalty_freq: 0.0, // 0.0 = disabled
+          penalty_present: 0.0, // 0.0 = disabled
           mirostat: 0, // 0/1/2
           mirostat_tau: 5, // target entropy
           mirostat_eta: 0.1, // learning rate

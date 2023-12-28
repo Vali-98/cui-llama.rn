@@ -16,9 +16,18 @@ React Native binding of [llama.cpp](https://github.com/ggerganov/llama.cpp).
 npm install llama.rn
 ```
 
-For iOS, please re-run `npx pod-install` again.
+#### iOS
 
-For Android, it's recommended to use `ndkVersion = "24.0.8215888"` (or above) in your root project build configuration for Apple Silicon Macs.
+Please re-run `npx pod-install` again.
+
+#### Android
+
+Add proguard rule if it's enabled in project (android/app/proguard-rules.pro):
+
+```proguard
+# llama.rn
+-keep class com.rnllama.** { *; }
+```
 
 ## Obtain the model
 
@@ -55,7 +64,50 @@ You can also search the available models in HuggingFace (Keyword: [`GGUF`](https
 
 ## Usage
 
-Documentation is WIP. Currently you can visit the [example](example) to see how to use it.
+```js
+import { initLlama } from 'llama.rn'
+
+// Initial a Llama context with the model (may take a while)
+const context = await initLlama({
+  model: 'file://<path to gguf model>',
+  use_mlock: true,
+  n_ctx: 2048,
+  n_gpu_layers: 1, // > 0: enable Metal on iOS
+  // embedding: true, // use embedding
+})
+
+// Do completion
+const { text, timings } = await context.completion(
+  {
+    prompt: 'This is a conversation between user and llama, a friendly chatbot. respond in simple markdown.\n\nUser: Hello!\nLlama:',
+    n_predict: 100,
+    stop: ['</s>', 'Llama:', 'User:'],
+    // n_threads: 4,
+  },
+  (data) => {
+    // This is a partial completion callback
+    const { token } = data
+  },
+)
+console.log('Result:', text)
+console.log('Timings:', timings)
+```
+
+The binding’s deisgn inspired by [server.cpp](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) example in llama.cpp, so you can map its API to LlamaContext:
+
+- `/completion`: `context.completion(params, partialCompletionCallback)`
+- `/tokenize`: `context.tokenize(content)`
+- `/detokenize`: `context.detokenize(tokens)`
+- `/embedding`: `context.embedding(content)`
+- Other methods
+  - `context.loadSession(path)`
+  - `context.saveSession(path)`
+  - `context.stopCompletion()`
+  - `context.release()`
+
+Please visit the [Documentation](docs/API) for more details.
+
+You can also visit the [example](example) to see how to use it.
 
 Run the example:
 ```bash
@@ -79,6 +131,145 @@ This example used [react-native-document-picker](https://github.com/rnmods/react
 - iOS: You can move the model to iOS Simulator, or iCloud for real device.
 - Android: Selected file will be copied or downloaded to cache directory so it may be slow.
 
+## Grammar Sampling
+
+GBNF (GGML BNF) is a format for defining [formal grammars](https://en.wikipedia.org/wiki/Formal_grammar) to constrain model outputs in `llama.cpp`. For example, you can use it to force the model to generate valid JSON, or speak only in emojis.
+
+You can see [GBNF Guide](https://github.com/ggerganov/llama.cpp/tree/master/grammars) for more details.
+
+`llama.rn` provided a built-in function to convert JSON Schema to GBNF:
+
+```js
+import { initLlama, convertJsonSchemaToGrammar } from 'llama.rn'
+
+const schema = { /* JSON Schema, see below */ }
+
+const context = await initLlama({
+  model: 'file://<path to gguf model>',
+  use_mlock: true,
+  n_ctx: 2048,
+  n_gpu_layers: 1, // > 0: enable Metal on iOS
+  // embedding: true, // use embedding
+  grammar: convertJsonSchemaToGrammar({
+    schema,
+    propOrder: { function: 0, arguments: 1 },
+  })
+})
+
+const { text } = await context.completion({
+  prompt: 'Schedule a birthday party on Aug 14th 2023 at 8pm.',
+})
+console.log('Result:', text)
+// Example output:
+// {"function": "create_event","arguments":{"date": "Aug 14th 2023", "time": "8pm", "title": "Birthday Party"}}
+```
+
+<details>
+<summary>JSON Schema example (Define function get_current_weather / create_event / image_search)</summary>
+
+```json5
+{
+  oneOf: [
+    {
+      type: "object",
+      name: "get_current_weather",
+      description: "Get the current weather in a given location",
+      properties: {
+        function: {
+          const: "get_current_weather",
+        },
+        arguments: {
+          type: "object",
+          properties: {
+            location: {
+              type: "string",
+              description: "The city and state, e.g. San Francisco, CA",
+            },
+            unit: {
+              type: "string",
+              enum: ["celsius", "fahrenheit"],
+            },
+          },
+          required: ["location"],
+        },
+      },
+    },
+    {
+      type: "object",
+      name: "create_event",
+      description: "Create a calendar event",
+      properties: {
+        function: {
+          const: "create_event",
+        },
+        arguments: {
+          type: "object",
+          properties: {
+            title: {
+              type: "string",
+              description: "The title of the event",
+            },
+            date: {
+              type: "string",
+              description: "The date of the event",
+            },
+            time: {
+              type: "string",
+              description: "The time of the event",
+            },
+          },
+          required: ["title", "date", "time"],
+        },
+      },
+    },
+    {
+      type: "object",
+      name: "image_search",
+      description: "Search for an image",
+      properties: {
+        function: {
+          const: "image_search",
+        },
+        arguments: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "The search query",
+            },
+          },
+          required: ["query"],
+        },
+      },
+    },
+  ],
+}
+```
+</details>
+
+<details>
+<summary>Converted GBNF looks like</summary>
+
+```bnf
+space ::= " "?
+0-function ::= "\"get_current_weather\""
+string ::=  "\"" (
+        [^"\\] |
+        "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
+      )* "\"" space
+0-arguments-unit ::= "\"celsius\"" | "\"fahrenheit\""
+0-arguments ::= "{" space "\"location\"" space ":" space string "," space "\"unit\"" space ":" space 0-arguments-unit "}" space
+0 ::= "{" space "\"function\"" space ":" space 0-function "," space "\"arguments\"" space ":" space 0-arguments "}" space
+1-function ::= "\"create_event\""
+1-arguments ::= "{" space "\"date\"" space ":" space string "," space "\"time\"" space ":" space string "," space "\"title\"" space ":" space string "}" space
+1 ::= "{" space "\"function\"" space ":" space 1-function "," space "\"arguments\"" space ":" space 1-arguments "}" space
+2-function ::= "\"image_search\""
+2-arguments ::= "{" space "\"query\"" space ":" space string "}" space
+2 ::= "{" space "\"function\"" space ":" space 2-function "," space "\"arguments\"" space ":" space 2-arguments "}" space
+root ::= 0 | 1 | 2
+```
+</details>
+
 ## Mock `llama.rn`
 
 We have provided a mock version of `llama.rn` for testing purpose you can use on Jest:
@@ -97,6 +288,7 @@ iOS:
 
 Android:
 - Currently only supported arm64-v8a / x86_64 platform, this means you can't initialize a context on another platforms. The 64-bit platform are recommended because it can allocate more memory for the model.
+- No integrated any GPU backend yet.
 
 ## Contributing
 
