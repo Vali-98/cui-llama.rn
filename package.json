@@ -1,7 +1,7 @@
 {
-  "name": "llama.rn",
-  "version": "0.3.2",
-  "description": "React Native binding of llama.cpp",
+  "name": "cui-llama.rn",
+  "version": "0.1.0",
+  "description": "Fork of llama.rn for ChatterUI",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
   "types": "lib/typescript/index.d.ts",
@@ -51,13 +51,13 @@
     "llama",
     "llama-2"
   ],
-  "repository": "https://github.com/mybigday/llama.rn",
-  "author": "Jhen-Jie Hong <developer@jhen.me> (https://github.com/mybigday)",
+  "repository": "https://github.com/Vali-98/cui-llama.rn",
+  "author": "Original: Jhen-Jie Hong <developer@jhen.me> (https://github.com/mybigday), Fork: Vali-98 (https://github.com/Vali-98/cui-llama.rn) ",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/mybigday/llama.rn/issues"
+    "url": "https://github.com/Vali-98/cui-llama.rn/issues"
   },
-  "homepage": "https://github.com/mybigday/llama.rn#readme",
+  "homepage": "https://github.com/Vali-98/cui-llama.rn#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
