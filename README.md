@@ -1,3 +1,9 @@
+# cui-llama.rn
+
+This is a fork of llama.rn meant for ChatterUI
+
+Original repo README.md below.
+
 # llama.rn
 
 [![Actions Status](https://github.com/mybigday/llama.rn/workflows/CI/badge.svg)](https://github.com/mybigday/llama.rn/actions)
@@ -34,10 +40,12 @@ You can search HuggingFace for available models (Keyword: [`GGUF`](https://huggi
 For create a GGUF model manually, for example in Llama 2:
 
 Download the Llama 2 model
+
 1. Request access from [here](https://ai.meta.com/llama)
 2. Download the model from HuggingFace [here](https://huggingface.co/meta-llama/Llama-2-7b-chat) (`Llama-2-7b-chat`)
 
 Convert the model to ggml format
+
 ```bash
 # Start with submodule in this repo (or you can clone the repo https://github.com/ggerganov/llama.cpp.git)
 yarn && yarn bootstrap
@@ -79,7 +87,8 @@ const context = await initLlama({
 // Do completion
 const { text, timings } = await context.completion(
   {
-    prompt: 'This is a conversation between user and llama, a friendly chatbot. respond in simple markdown.\n\nUser: Hello!\nLlama:',
+    prompt:
+      'This is a conversation between user and llama, a friendly chatbot. respond in simple markdown.\n\nUser: Hello!\nLlama:',
     n_predict: 100,
     stop: ['</s>', 'Llama:', 'User:'],
     // n_threads: 4,
@@ -110,6 +119,7 @@ Please visit the [Documentation](docs/API) for more details.
 You can also visit the [example](example) to see how to use it.
 
 Run the example:
+
 ```bash
 yarn && yarn bootstrap
 
@@ -142,7 +152,9 @@ You can see [GBNF Guide](https://github.com/ggerganov/llama.cpp/tree/master/gram
 ```js
 import { initLlama, convertJsonSchemaToGrammar } from 'llama.rn'
 
-const schema = { /* JSON Schema, see below */ }
+const schema = {
+  /* JSON Schema, see below */
+}
 
 const context = await initLlama({
   model: 'file://<path to gguf model>',
@@ -153,7 +165,7 @@ const context = await initLlama({
   grammar: convertJsonSchemaToGrammar({
     schema,
     propOrder: { function: 0, arguments: 1 },
-  })
+  }),
 })
 
 const { text } = await context.completion({
@@ -171,80 +183,81 @@ console.log('Result:', text)
 {
   oneOf: [
     {
-      type: "object",
-      name: "get_current_weather",
-      description: "Get the current weather in a given location",
+      type: 'object',
+      name: 'get_current_weather',
+      description: 'Get the current weather in a given location',
       properties: {
         function: {
-          const: "get_current_weather",
+          const: 'get_current_weather',
         },
         arguments: {
-          type: "object",
+          type: 'object',
           properties: {
             location: {
-              type: "string",
-              description: "The city and state, e.g. San Francisco, CA",
+              type: 'string',
+              description: 'The city and state, e.g. San Francisco, CA',
             },
             unit: {
-              type: "string",
-              enum: ["celsius", "fahrenheit"],
+              type: 'string',
+              enum: ['celsius', 'fahrenheit'],
             },
           },
-          required: ["location"],
+          required: ['location'],
         },
       },
     },
     {
-      type: "object",
-      name: "create_event",
-      description: "Create a calendar event",
+      type: 'object',
+      name: 'create_event',
+      description: 'Create a calendar event',
       properties: {
         function: {
-          const: "create_event",
+          const: 'create_event',
         },
         arguments: {
-          type: "object",
+          type: 'object',
           properties: {
             title: {
-              type: "string",
-              description: "The title of the event",
+              type: 'string',
+              description: 'The title of the event',
             },
             date: {
-              type: "string",
-              description: "The date of the event",
+              type: 'string',
+              description: 'The date of the event',
             },
             time: {
-              type: "string",
-              description: "The time of the event",
+              type: 'string',
+              description: 'The time of the event',
             },
           },
-          required: ["title", "date", "time"],
+          required: ['title', 'date', 'time'],
         },
       },
     },
     {
-      type: "object",
-      name: "image_search",
-      description: "Search for an image",
+      type: 'object',
+      name: 'image_search',
+      description: 'Search for an image',
       properties: {
         function: {
-          const: "image_search",
+          const: 'image_search',
         },
         arguments: {
-          type: "object",
+          type: 'object',
           properties: {
             query: {
-              type: "string",
-              description: "The search query",
+              type: 'string',
+              description: 'The search query',
             },
           },
-          required: ["query"],
+          required: ['query'],
         },
       },
     },
   ],
 }
 ```
+
 </details>
 
 <details>
@@ -268,6 +281,7 @@ string ::=  "\"" (
 2 ::= "{" space "\"function\"" space ":" space 2-function "," space "\"arguments\"" space ":" space 2-arguments "}" space
 root ::= 0 | 1 | 2
 ```
+
 </details>
 
 ## Mock `llama.rn`
@@ -281,12 +295,14 @@ jest.mock('llama.rn', () => require('llama.rn/jest/mock'))
 ## NOTE
 
 iOS:
+
 - The [Extended Virtual Addressing](https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_developer_kernel_extended-virtual-addressing) capability is recommended to enable on iOS project.
 - Metal:
   - We have tested to know some devices is not able to use Metal ('params.n_gpu_layers > 0') due to llama.cpp used SIMD-scoped operation, you can check if your device is supported in [Metal feature set tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf), Apple7 GPU will be the minimum requirement.
   - It's also not supported in iOS simulator due to [this limitation](https://developer.apple.com/documentation/metal/developing_metal_apps_that_run_in_simulator#3241609), we used constant buffers more than 14.
 
 Android:
+
 - Currently only supported arm64-v8a / x86_64 platform, this means you can't initialize a context on another platforms. The 64-bit platform are recommended because it can allocate more memory for the model.
 - No integrated any GPU backend yet.
 

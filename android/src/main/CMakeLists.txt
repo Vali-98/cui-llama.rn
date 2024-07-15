@@ -9,6 +9,7 @@ include_directories(${RNLLAMA_LIB_DIR})
 
 set(
     SOURCE_FILES
+    ${RNLLAMA_LIB_DIR}/ggml-aarch64.c
     ${RNLLAMA_LIB_DIR}/ggml-alloc.c
     ${RNLLAMA_LIB_DIR}/ggml-backend.c
     ${RNLLAMA_LIB_DIR}/ggml.c
