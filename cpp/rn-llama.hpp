@@ -358,6 +358,13 @@ struct llama_rn_context
                 return result;
             }
             n_past += n_eval;
+            
+            if(is_interrupted) {
+                LOG("Decoding Interrupted");
+                embd.resize(n_past);
+                has_next_token = false;
+                return result;
+            }
         }
 
         if (params.n_predict == 0)
