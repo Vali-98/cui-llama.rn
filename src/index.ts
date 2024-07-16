@@ -38,7 +38,10 @@ type TokenNativeEvent = {
 
 export type ContextParams = NativeContextParams
 
-export type CompletionParams = Omit<NativeCompletionParams, 'emit_partial_completion'>
+export type CompletionParams = Omit<
+  NativeCompletionParams,
+  'emit_partial_completion'
+>
 
 export type BenchResult = {
   modelDesc: string
@@ -59,12 +62,7 @@ export class LlamaContext {
 
   model: Object = {}
 
-  constructor({
-    contextId,
-    gpu,
-    reasonNoGPU,
-    model,
-  }: NativeLlamaContext) {
+  constructor({ contextId, gpu, reasonNoGPU, model }: NativeLlamaContext) {
     this.id = contextId
     this.gpu = gpu
     this.reasonNoGPU = reasonNoGPU
@@ -75,13 +73,18 @@ export class LlamaContext {
    * Load cached prompt & completion state from a file.
    */
   async loadSession(filepath: string): Promise<NativeSessionLoadResult> {
-    return RNLlama.loadSession(this.id, filepath)
+    let path = filepath
+    if (filepath.startsWith(`file://`)) path = path.slice(7)
+    return RNLlama.loadSession(this.id, path)
   }
 
   /**
    * Save current cached prompt & completion state to a file.
    */
-  async saveSession(filepath: string, options?: { tokenSize: number }): Promise<number> {
+  async saveSession(
+    filepath: string,
+    options?: { tokenSize: number },
+  ): Promise<number> {
     return RNLlama.saveSession(this.id, filepath, options?.tokenSize || -1)
   }
 
@@ -89,14 +92,13 @@ export class LlamaContext {
     params: CompletionParams,
     callback?: (data: TokenData) => void,
   ): Promise<NativeCompletionResult> {
-    let tokenListener: any = callback && EventEmitter.addListener(
-      EVENT_ON_TOKEN,
-      (evt: TokenNativeEvent) => {
+    let tokenListener: any =
+      callback &&
+      EventEmitter.addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
         const { contextId, tokenResult } = evt
         if (contextId !== this.id) return
         callback(tokenResult)
-      },
-    )
+      })
     const promise = RNLlama.completion(this.id, {
       ...params,
       emit_partial_completion: !!callback,
@@ -130,17 +132,15 @@ export class LlamaContext {
     return RNLlama.embedding(this.id, text)
   }
 
-  async bench(pp: number, tg: number, pl: number, nr: number): Promise<BenchResult> {
+  async bench(
+    pp: number,
+    tg: number,
+    pl: number,
+    nr: number,
+  ): Promise<BenchResult> {
     const result = await RNLlama.bench(this.id, pp, tg, pl, nr)
-    const [
-      modelDesc,
-      modelSize,
-      modelNParams,
-      ppAvg,
-      ppStd,
-      tgAvg,
-      tgStd,
-    ] = JSON.parse(result)
+    const [modelDesc, modelSize, modelNParams, ppAvg, ppStd, tgAvg, tgStd] =
+      JSON.parse(result)
     return {
       modelDesc,
       modelSize,
@@ -168,12 +168,16 @@ export async function initLlama({
 }: ContextParams): Promise<LlamaContext> {
   let path = model
   if (path.startsWith('file://')) path = path.slice(7)
-  const { contextId, gpu, reasonNoGPU, model: modelDetails } =
-    await RNLlama.initContext({
-      model: path,
-      is_model_asset: !!isModelAsset,
-      ...rest,
-    })
+  const {
+    contextId,
+    gpu,
+    reasonNoGPU,
+    model: modelDetails,
+  } = await RNLlama.initContext({
+    model: path,
+    is_model_asset: !!isModelAsset,
+    ...rest,
+  })
   return new LlamaContext({ contextId, gpu, reasonNoGPU, model: modelDetails })
 }
 
