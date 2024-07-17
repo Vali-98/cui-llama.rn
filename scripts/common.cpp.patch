@@ -1,6 +1,6 @@
 --- common.cpp.orig	2024-05-29 09:16:58
 +++ common.cpp	2024-05-29 09:16:59
-@@ -47,6 +47,12 @@
+@@ -51,6 +51,12 @@
  #include <thread>
  #include <future>
  #endif
@@ -13,3 +13,7 @@
 
  #if defined(_MSC_VER)
  #pragma warning(disable: 4244 4267) // possible loss of data
+@@ -2148,2 +2148,3 @@
+    auto mparams = llama_model_default_params();
+
++   mparams.vocab_only      = params.vocab_only;

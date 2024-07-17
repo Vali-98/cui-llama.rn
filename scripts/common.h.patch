@@ -18,3 +18,7 @@
  //
  // CPU utils
  //
+@@ -73,2 +73,3 @@
+    uint32_t seed                 = LLAMA_DEFAULT_SEED
+
++   bool vocab_only = false

@@ -72,6 +72,7 @@ enum dimre_method {
 struct gpt_params {
     uint32_t seed                 = LLAMA_DEFAULT_SEED; // RNG seed
 
+    bool vocab_only               = false;
     int32_t n_threads             = cpu_get_num_math();
     int32_t n_threads_draft       =    -1;
     int32_t n_threads_batch       =    -1; // number of threads to use for batch processing (-1 = use n_threads)
