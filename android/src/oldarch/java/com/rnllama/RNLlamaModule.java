@@ -7,6 +7,7 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.module.annotations.ReactModule;
 
@@ -69,7 +70,12 @@ public class RNLlamaModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void detokenize(double id, final ReadableArray tokens, final Promise promise) {
+  public WritableMap tokenizeSync(double id, final String text) {
+    return rnllama.tokenizeSync(id, text);
+  }
+
+  @ReactMethod
+  public void detokenize(double id, final ReadableArray tokens, final Promise promise) {  
     rnllama.detokenize(id, tokens, promise);
   }
 

@@ -6,6 +6,7 @@ import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.module.annotations.ReactModule;
 
@@ -65,6 +66,11 @@ public class RNLlamaModule extends NativeRNLlamaSpec {
   @ReactMethod
   public void tokenize(double id, final String text, final Promise promise) {
     rnllama.tokenize(id, text, promise);
+  }
+
+  @ReactMethod
+  public WritableMap tokenizeSync(double id, final String text) {
+    return rnllama.tokenizeSync(id, text);
   }
 
   @ReactMethod

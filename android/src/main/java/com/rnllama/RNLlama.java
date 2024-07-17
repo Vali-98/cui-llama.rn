@@ -253,6 +253,16 @@ public class RNLlama implements LifecycleEventListener {
     tasks.put(task, "tokenize-" + contextId);
   }
 
+  public WritableMap tokenizeSync(double id, final String text) {
+    int contextId = (int) id;
+    LlamaContext context = contexts.get(contextId);
+    if (context == null) {
+      return Arguments.createMap();
+    }
+    return context.tokenize(text);
+  }
+
+
   public void detokenize(double id, final ReadableArray tokens, final Promise promise) {
     final int contextId = (int) id;
     AsyncTask task = new AsyncTask<Void, Void, String>() {

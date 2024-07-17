@@ -120,6 +120,7 @@ export interface Spec extends TurboModule {
   completion(contextId: number, params: NativeCompletionParams): Promise<NativeCompletionResult>;
   stopCompletion(contextId: number): Promise<void>;
   tokenize(contextId: number, text: string): Promise<NativeTokenizeResult>;
+  tokenizeSync(contextId: number, text: string) : NativeTokenizeResult;
   detokenize(contextId: number, tokens: number[]): Promise<string>;
   embedding(contextId: number, text: string): Promise<NativeEmbeddingResult>;
   bench(contextId: number, pp: number, tg: number, pl: number, nr: number): Promise<string>;

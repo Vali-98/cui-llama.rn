@@ -124,6 +124,10 @@ export class LlamaContext {
     return RNLlama.tokenize(this.id, text)
   }
 
+  tokenizeSync(text: string) : NativeTokenizeResult {
+    return RNLlama.tokenizeSync(this.id, text)
+  }
+
   detokenize(tokens: number[]): Promise<string> {
     return RNLlama.detokenize(this.id, tokens)
   }
