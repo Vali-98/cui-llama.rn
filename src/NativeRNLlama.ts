@@ -1,5 +1,5 @@
-import type { TurboModule } from 'react-native';
-import { TurboModuleRegistry } from 'react-native';
+import type { TurboModule } from 'react-native'
+import { TurboModuleRegistry } from 'react-native'
 
 export type NativeContextParams = {
   model: string
@@ -15,6 +15,7 @@ export type NativeContextParams = {
 
   use_mlock?: boolean
   use_mmap?: boolean
+  vocab_only?: boolean
 
   lora?: string // lora_adaptor
   lora_scaled?: number
@@ -112,22 +113,38 @@ export type NativeSessionLoadResult = {
 }
 
 export interface Spec extends TurboModule {
-  setContextLimit(limit: number): Promise<void>;
-  initContext(params: NativeContextParams): Promise<NativeLlamaContext>;
+  setContextLimit(limit: number): Promise<void>
+  initContext(params: NativeContextParams): Promise<NativeLlamaContext>
 
-  loadSession(contextId: number, filepath: string): Promise<NativeSessionLoadResult>;
-  saveSession(contextId: number, filepath: string, size: number): Promise<number>;
-  completion(contextId: number, params: NativeCompletionParams): Promise<NativeCompletionResult>;
-  stopCompletion(contextId: number): Promise<void>;
-  tokenize(contextId: number, text: string): Promise<NativeTokenizeResult>;
-  tokenizeSync(contextId: number, text: string) : NativeTokenizeResult;
-  detokenize(contextId: number, tokens: number[]): Promise<string>;
-  embedding(contextId: number, text: string): Promise<NativeEmbeddingResult>;
-  bench(contextId: number, pp: number, tg: number, pl: number, nr: number): Promise<string>;
+  loadSession(
+    contextId: number,
+    filepath: string,
+  ): Promise<NativeSessionLoadResult>
+  saveSession(
+    contextId: number,
+    filepath: string,
+    size: number,
+  ): Promise<number>
+  completion(
+    contextId: number,
+    params: NativeCompletionParams,
+  ): Promise<NativeCompletionResult>
+  stopCompletion(contextId: number): Promise<void>
+  tokenizeAsync(contextId: number, text: string): Promise<NativeTokenizeResult>
+  tokenizeSync(contextId: number, text: string): NativeTokenizeResult
+  detokenize(contextId: number, tokens: number[]): Promise<string>
+  embedding(contextId: number, text: string): Promise<NativeEmbeddingResult>
+  bench(
+    contextId: number,
+    pp: number,
+    tg: number,
+    pl: number,
+    nr: number,
+  ): Promise<string>
 
-  releaseContext(contextId: number): Promise<void>;
+  releaseContext(contextId: number): Promise<void>
 
-  releaseAllContexts(): Promise<void>;
+  releaseAllContexts(): Promise<void>
 }
 
-export default TurboModuleRegistry.get<Spec>('RNLlama') as Spec;
+export default TurboModuleRegistry.get<Spec>('RNLlama') as Spec

@@ -65,8 +65,8 @@ public class RNLlamaModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void tokenize(double id, final String text, final Promise promise) {
-    rnllama.tokenize(id, text, promise);
+  public void tokenizeAsync(double id, final String text, final Promise promise) {
+    rnllama.tokenizeAsync(id, text, promise);
   }
 
   @ReactMethod

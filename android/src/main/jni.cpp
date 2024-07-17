@@ -129,6 +129,7 @@ Java_com_rnllama_LlamaContext_initContext(
     jint n_gpu_layers, // TODO: Support this
     jboolean use_mlock,
     jboolean use_mmap,
+    jboolean vocab_only,
     jstring lora_str,
     jfloat lora_scaled,
     jstring lora_base_str,
@@ -138,6 +139,11 @@ Java_com_rnllama_LlamaContext_initContext(
     UNUSED(thiz);
 
     gpt_params defaultParams;
+
+    defaultParams.vocab_only = vocab_only;
+    if(vocab_only) {
+        defaultParams.warmup = false;
+    }
 
     const char *model_path_chars = env->GetStringUTFChars(model_path_str, nullptr);
     defaultParams.model = model_path_chars;

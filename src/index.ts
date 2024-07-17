@@ -120,11 +120,11 @@ export class LlamaContext {
     return RNLlama.stopCompletion(this.id)
   }
 
-  tokenize(text: string): Promise<NativeTokenizeResult> {
-    return RNLlama.tokenize(this.id, text)
+  tokenizeAsync(text: string): Promise<NativeTokenizeResult> {
+    return RNLlama.tokenizeAsync(this.id, text)
   }
 
-  tokenizeSync(text: string) : NativeTokenizeResult {
+  tokenizeSync(text: string): NativeTokenizeResult {
     return RNLlama.tokenizeSync(this.id, text)
   }
 
