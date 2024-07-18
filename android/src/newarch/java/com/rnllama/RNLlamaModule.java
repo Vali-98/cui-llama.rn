@@ -68,7 +68,7 @@ public class RNLlamaModule extends NativeRNLlamaSpec {
     rnllama.tokenizeAsync(id, text, promise);
   }
 
-  @ReactMethod
+  @ReactMethod(isBlockingSynchronousMethod=true)
   public WritableMap tokenizeSync(double id, final String text) {
     return rnllama.tokenizeSync(id, text);
   }
