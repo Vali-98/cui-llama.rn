@@ -17,6 +17,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.FileInputStream;
 
 public class LlamaContext {
   public static final String NAME = "RNLlamaContext";
@@ -28,6 +29,35 @@ public class LlamaContext {
   private int jobId = -1;
   private DeviceEventManagerModule.RCTDeviceEventEmitter eventEmitter;
 
+  private byte[] ggufHeader = {0x47, 0x47, 0x55, 0x46};
+
+  private boolean isGGUF(final String filepath) {
+    byte[] fileHeader = new byte[4];
+    FileInputStream fis = null;
+    try {
+      fis = new FileInputStream(filepath);
+      int bytesRead = fis.read(fileHeader);
+      if(bytesRead < 4) {
+        return false;
+      }
+      for(int i = 0; i < 4; i++){
+        if(fileHeader[i] != ggufHeader[i])
+          return false;
+      }
+      return true;
+    } catch (Exception e) {
+      return false;
+    }finally {
+      if (fis != null) {
+          try {
+              fis.close();
+          } catch (Exception e) {
+              Log.d(NAME, "Closing FileInputStream failed.");
+          }
+      }
+    }
+  }
+
   public LlamaContext(int id, ReactApplicationContext reactContext, ReadableMap params) {
     if (LlamaContext.isArm64V8a() == false && LlamaContext.isX86_64() == false) {
       throw new IllegalStateException("Only 64-bit architectures are supported");
@@ -35,6 +65,11 @@ public class LlamaContext {
     if (!params.hasKey("model")) {
       throw new IllegalArgumentException("Missing required parameter: model");
     }
+    // Check if file has GGUF magic numbers
+    if(!isGGUF(params.getString("model"))) {
+      throw new IllegalArgumentException("File is not in GGUF format");
+    }
+
     this.id = id;
     this.context = initContext(
       // String model,
