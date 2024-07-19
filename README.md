@@ -1,6 +1,15 @@
 # cui-llama.rn
 
-This is a fork of llama.rn meant for ChatterUI
+This is a fork of [llama.rn](https://github.com/mybigday/llama.rn) meant for [ChatterUI](https://github.com/Vali-98/ChatterUI)
+
+This fork exists to update llama.cpp on a more frequent basis, plus adding useful features to ChatterUI.
+
+The following features have been added for Android:
+
+- Updated sync for llama.cpp
+- Added stopping prompt processing between batches, vital for mobile devices with very slow prompt processing
+- `vocab_only` mode: utilize the llama.cpp tokenizer
+- tokenizeSync: non-blocking, synchronous tokenizer function
 
 Original repo README.md below.
 
