@@ -43,6 +43,8 @@ cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
 cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp
 cp ./llama.cpp/common/sampling.h ./cpp/sampling.h
 cp ./llama.cpp/common/sampling.cpp ./cpp/sampling.cpp
+cp ./llama.cpp/ggml/src/ggml-aarch64.h ./cpp/ggml-aarch64.h
+cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
 
 # List of files to process
 files=(
@@ -69,6 +71,8 @@ files=(
   "./cpp/sgemm.h"
   "./cpp/sgemm.cpp"
   "./cpp/json-schema-to-grammar.h"
+  "./cpp/ggml-aarch64.h"
+  "./cpp/ggml-aarch64.c"
 )
 
 # Loop through each file and run the sed commands
@@ -104,11 +108,11 @@ patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
 
 if [ "$OS" = "Darwin" ]; then
   # Build metallib (~1.4MB)
-  cd llama.cpp
+  cd llama.cpp/ggml/src/
   xcrun --sdk iphoneos metal -c ggml-metal.metal -o ggml-metal.air
   xcrun --sdk iphoneos metallib ggml-metal.air   -o ggml-llama.metallib
   rm ggml-metal.air
-  cp ./ggml-llama.metallib ../cpp/ggml-llama.metallib
+  cp ./ggml-llama.metallib ../../../cpp/ggml-llama.metallib
 
   cd -
 
