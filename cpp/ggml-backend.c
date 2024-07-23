@@ -134,6 +134,10 @@ void lm_ggml_backend_buffer_set_usage(lm_ggml_backend_buffer_t buffer, enum lm_g
     }
 }
 
+enum lm_ggml_backend_buffer_usage lm_ggml_backend_buffer_get_usage(lm_ggml_backend_buffer_t buffer) {
+    return buffer->usage;
+}
+
 lm_ggml_backend_buffer_type_t lm_ggml_backend_buffer_get_type(lm_ggml_backend_buffer_t buffer) {
     return buffer->buft;
 }
@@ -444,6 +448,11 @@ LM_GGML_CALL static void lm_ggml_backend_registry_init(void) {
 #ifdef LM_GGML_USE_KOMPUTE
     extern LM_GGML_CALL void lm_ggml_backend_kompute_reg_devices(void);
     lm_ggml_backend_kompute_reg_devices();
+#endif
+
+#ifdef LM_GGML_USE_CANN
+    extern LM_GGML_CALL int lm_ggml_backend_cann_reg_devices(void);
+    lm_ggml_backend_cann_reg_devices();
 #endif
 }
 

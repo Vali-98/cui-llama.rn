@@ -776,6 +776,7 @@ bool lm_ggml_gallocr_reserve_n(lm_ggml_gallocr_t galloc, struct lm_ggml_cgraph *
                 fprintf(stderr, "%s: failed to allocate %s buffer of size %zu\n", __func__, lm_ggml_backend_buft_name(galloc->bufts[i]), new_size);
                 return false;
             }
+            lm_ggml_backend_buffer_set_usage(galloc->buffers[i], LM_GGML_BACKEND_BUFFER_USAGE_COMPUTE);
         }
     }
 

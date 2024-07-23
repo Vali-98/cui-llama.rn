@@ -753,6 +753,8 @@ extern "C" {
     LM_GGML_API bool lm_ggml_are_same_shape (const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1);
     LM_GGML_API bool lm_ggml_are_same_stride(const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1);
 
+    LM_GGML_API bool lm_ggml_can_repeat(const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1);
+
     // use this to compute the memory overhead of a tensor
     LM_GGML_API size_t lm_ggml_tensor_overhead(void);
 
@@ -2397,6 +2399,7 @@ extern "C" {
     LM_GGML_API int lm_ggml_cpu_has_rpc        (void);
     LM_GGML_API int lm_ggml_cpu_has_vsx        (void);
     LM_GGML_API int lm_ggml_cpu_has_matmul_int8(void);
+    LM_GGML_API int lm_ggml_cpu_has_cann       (void);
 
     //
     // Internal types and functions exposed for tests and benchmarks

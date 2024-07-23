@@ -3341,7 +3341,7 @@ bool lm_ggml_are_same_stride(const struct lm_ggml_tensor * t0, const struct lm_g
 }
 
 // check if t1 can be represented as a repeatition of t0
-static inline bool lm_ggml_can_repeat(const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1) {
+bool lm_ggml_can_repeat(const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1) {
     static_assert(LM_GGML_MAX_DIMS == 4, "LM_GGML_MAX_DIMS is not 4 - update this function");
 
     return lm_ggml_is_empty(t0) ? lm_ggml_is_empty(t1) :
@@ -13699,6 +13699,7 @@ static void lm_ggml_compute_forward_soft_max(
     }
 }
 
+
 // lm_ggml_compute_forward_soft_max_back
 
 static void lm_ggml_compute_forward_soft_max_back_f32(
@@ -19018,7 +19019,7 @@ void lm_ggml_graph_export(const struct lm_ggml_cgraph * cgraph, const char * fna
         FILE * fout = lm_ggml_fopen(fname, "wb");
 
         if (!fout) {
-            fprintf(stderr, "%s: failed to open %s\n", __func__, fname);
+            fprintf(stderr, "%s: failed to open %s: %s\n", __func__, fname, strerror(errno));
             return;
         }
 
@@ -19155,7 +19156,7 @@ struct lm_ggml_cgraph * lm_ggml_graph_import(const char * fname, struct lm_ggml_
     {
         FILE * fin = lm_ggml_fopen(fname, "rb");
         if (!fin) {
-            fprintf(stderr, "%s: failed to open %s\n", __func__, fname);
+            fprintf(stderr, "%s: failed to open %s: %s\n", __func__, fname, strerror(errno));
             return result;
         }
 
@@ -19478,7 +19479,7 @@ void lm_ggml_graph_dump_dot(const struct lm_ggml_cgraph * gb, const struct lm_gg
 
     fprintf(fp, "digraph G {\n");
     fprintf(fp, "  newrank = true;\n");
-    fprintf(fp, "  rankdir = LR;\n");
+    fprintf(fp, "  rankdir = TB;\n");
 
     for (int i = 0; i < gb->n_nodes; i++) {
         struct lm_ggml_tensor * node = gb->nodes[i];
@@ -19540,7 +19541,7 @@ void lm_ggml_graph_dump_dot(const struct lm_ggml_cgraph * gb, const struct lm_gg
         }
 
         fprintf(fp, "CONST %d [%" PRId64 ", %" PRId64 "]", i, node->ne[0], node->ne[1]);
-        if (lm_ggml_nelements(node) < 5) {
+        if (lm_ggml_nelements(node) < 5 && node->data != NULL) {
             fprintf(fp, " | (");
             for (int j = 0; j < lm_ggml_nelements(node); j++) {
                 if (node->type == LM_GGML_TYPE_I8 || node->type == LM_GGML_TYPE_I16 || node->type == LM_GGML_TYPE_I32) {
@@ -20829,6 +20830,7 @@ struct lm_gguf_context * lm_gguf_init_empty(void) {
 struct lm_gguf_context * lm_gguf_init_from_file(const char * fname, struct lm_gguf_init_params params) {
     FILE * file = lm_ggml_fopen(fname, "rb");
     if (!file) {
+        fprintf(stderr, "%s: failed to open '%s': '%s'\n", __func__, fname, strerror(errno));
         return NULL;
     }
 
@@ -21989,6 +21991,14 @@ int lm_ggml_cpu_has_sycl(void) {
 
 int lm_ggml_cpu_has_rpc(void) {
 #if defined(LM_GGML_USE_RPC)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_cann(void) {
+#if defined(LM_GGML_USE_CANN)
     return 1;
 #else
     return 0;
