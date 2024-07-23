@@ -18,7 +18,8 @@
  //
  // CPU utils
  //
-@@ -73,2 +73,3 @@
-    uint32_t seed                 = LLAMA_DEFAULT_SEED
+@@ -62,3 +62,4 @@
+    uint32_t seed                 = LLAMA_DEFAULT_SEED; // RNG seed
 
-+   bool vocab_only = false
++   bool vocab_only = false;
+    int32_t n_threads             = cpu_get_num_math();

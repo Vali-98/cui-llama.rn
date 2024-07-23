@@ -48,8 +48,6 @@ cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
 
 # List of files to process
 files=(
-  "./cpp/ggml-aarch64.h"
-  "./cpp/ggml-aarch64.c"
   "./cpp/ggml.h"
   "./cpp/ggml.c"
   "./cpp/common.h"
@@ -120,3 +118,5 @@ if [ "$OS" = "Darwin" ]; then
   cd example/ios
   echo export NODE_BINARY=$(command -v node) > .xcode.env.local
 fi
+
+read -p "Press enter to continue"
