@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { Platform } from 'react-native'
+import { Platform, Text, TouchableOpacity, View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import DocumentPicker from 'react-native-document-picker'
 import type { DocumentPickerResponse } from 'react-native-document-picker'
@@ -8,7 +8,7 @@ import { Chat, darkTheme } from '@flyerhq/react-native-chat-ui'
 import type { MessageType } from '@flyerhq/react-native-chat-ui'
 import ReactNativeBlobUtil from 'react-native-blob-util'
 // eslint-disable-next-line import/no-unresolved
-import { initLlama, LlamaContext, convertJsonSchemaToGrammar } from 'llama.rn'
+import { initLlama, LlamaContext, convertJsonSchemaToGrammar } from 'cui-llama.rn'
 import { Bubble } from './Bubble'
 
 const { dirs } = ReactNativeBlobUtil.fs
@@ -104,6 +104,9 @@ export default function App() {
     addSystemMessage('Initializing context...')
     initLlama({
       model: file.uri,
+      n_threads: 4,
+      n_ctx: 2048,
+      n_batch: 512,
       use_mlock: true,
       n_gpu_layers: Platform.OS === 'ios' ? 0 : 0, // > 0: enable GPU
       // embedding: true,
@@ -163,45 +166,52 @@ export default function App() {
       .catch((e) => console.log('No file picked, error: ', e.message))
   }
 
+  const handleBench = async () => {
+    if(!context) return
+    addSystemMessage('Heating up the model...')
+    const t0 = Date.now()
+    await context.bench(8, 4, 1, 1)
+    const tHeat = Date.now() - t0
+    if (tHeat > 1e4) {
+      addSystemMessage('Heat up time is too long, please try again.')
+      return
+    }
+    addSystemMessage(`Heat up time: ${tHeat}ms`)
+
+    addSystemMessage('Benchmarking the model...')
+    const {
+      modelDesc,
+      modelSize,
+      modelNParams,
+      ppAvg,
+      ppStd,
+      tgAvg,
+      tgStd,
+    } = await context.bench(512, 128, 1, 3)
+
+    const size = `${(modelSize / 1024.0 / 1024.0 / 1024.0).toFixed(
+      2,
+    )} GiB`
+    const nParams = `${(modelNParams / 1e9).toFixed(2)}B`
+    const md =
+      '| model | size | params | test | t/s |\n' +
+      '| --- | --- | --- | --- | --- |\n' +
+      `| ${modelDesc} | ${size} | ${nParams} | pp 512 | ${ppAvg.toFixed(
+        2,
+      )} ± ${ppStd.toFixed(2)} |\n` +
+      `| ${modelDesc} | ${size} | ${nParams} | tg 128 | ${tgAvg.toFixed(
+        2,
+      )} ± ${tgStd.toFixed(2)}`
+    addSystemMessage(md, { copyable: true })
+    return
+  }
+
+
   const handleSendPress = async (message: MessageType.PartialText) => {
     if (context) {
       switch (message.text) {
         case '/bench':
-          addSystemMessage('Heating up the model...')
-          const t0 = Date.now()
-          await context.bench(8, 4, 1, 1)
-          const tHeat = Date.now() - t0
-          if (tHeat > 1e4) {
-            addSystemMessage('Heat up time is too long, please try again.')
-            return
-          }
-          addSystemMessage(`Heat up time: ${tHeat}ms`)
-
-          addSystemMessage('Benchmarking the model...')
-          const {
-            modelDesc,
-            modelSize,
-            modelNParams,
-            ppAvg,
-            ppStd,
-            tgAvg,
-            tgStd,
-          } = await context.bench(512, 128, 1, 3)
-
-          const size = `${(modelSize / 1024.0 / 1024.0 / 1024.0).toFixed(
-            2,
-          )} GiB`
-          const nParams = `${(modelNParams / 1e9).toFixed(2)}B`
-          const md =
-            '| model | size | params | test | t/s |\n' +
-            '| --- | --- | --- | --- | --- |\n' +
-            `| ${modelDesc} | ${size} | ${nParams} | pp 512 | ${ppAvg.toFixed(
-              2,
-            )} ± ${ppStd.toFixed(2)} |\n` +
-            `| ${modelDesc} | ${size} | ${nParams} | tg 128 | ${tgAvg.toFixed(
-              2,
-            )} ± ${tgStd.toFixed(2)}`
-          addSystemMessage(md, { copyable: true })
+          await handleBench()
           return
         case '/release':
           await handleReleaseContext()
@@ -420,6 +430,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
+      
       <Chat
         renderBubble={renderBubble}
         theme={darkTheme}
@@ -434,6 +445,20 @@ export default function App() {
             : 'Type your message here',
         }}
       />
+      <View style={{flexDirection:'row'}}>
+        <TouchableOpacity 
+          style={{flex: 1, margin:4, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16}}
+          onPress={handleReleaseContext}
+        >
+          <Text>RELEASE</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={{flex: 1, margin:4, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16}}
+          onPress={handleBench}
+        >
+          <Text>BENCH</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaProvider>
   )
 }

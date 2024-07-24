@@ -61,6 +61,7 @@ build_library("rnllama" "")
 
 if (${ANDROID_ABI} STREQUAL "arm64-v8a")
     # ARM64 targets
+    build_library("rnllama_v8_4_fp16_dotprod_i8mm" "-march=armv8.4-a+fp16+dotprod+i8mm")
     build_library("rnllama_v8_4_fp16_dotprod" "-march=armv8.4-a+fp16+dotprod")
     build_library("rnllama_v8_2_fp16_dotprod" "-march=armv8.2-a+fp16+dotprod")
     build_library("rnllama_v8_2_fp16" "-march=armv8.2-a+fp16")

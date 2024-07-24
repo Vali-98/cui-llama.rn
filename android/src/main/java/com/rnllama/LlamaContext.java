@@ -281,8 +281,12 @@ public class LlamaContext {
       boolean hasDotProd = cpuFeatures.contains("dotprod") || cpuFeatures.contains("asimddp");
       boolean isAtLeastArmV82 = cpuFeatures.contains("asimd") && cpuFeatures.contains("crc32") && cpuFeatures.contains("aes");
       boolean isAtLeastArmV84 = cpuFeatures.contains("dcpop") && cpuFeatures.contains("uscat");
+      boolean hasInt8Matmul = cpuFeatures.contains("i8mm");
 
-      if (isAtLeastArmV84 && hasFp16 && hasDotProd) {
+      if (isAtLeastArmV84 && hasFp16 && hasDotProd && hasInt8Matmul) {
+        Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod_i8mm.so");
+        System.loadLibrary("rnllama_v8_4_fp16_dotprod_i8mm");
+      } else if (isAtLeastArmV84 && hasFp16 && hasDotProd) {
         Log.d(NAME, "Loading librnllama_v8_4_fp16_dotprod.so");
         System.loadLibrary("rnllama_v8_4_fp16_dotprod");
       } else if (isAtLeastArmV82 && hasFp16 && hasDotProd) {
