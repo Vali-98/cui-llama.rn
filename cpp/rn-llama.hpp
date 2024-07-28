@@ -139,6 +139,7 @@ static std::string tokens_to_str(llama_context *ctx, Iter begin, Iter end)
     return ret;
 }
 
+
 struct llama_rn_context
 {
     bool is_predicting = false;
@@ -283,7 +284,7 @@ struct llama_rn_context
         {
            llama_sampling_accept(ctx_sampling, ctx, token, false);
         }
-
+        // TODO: Implement context shift here
         // compare the evaluated prompt with the new prompt
         n_past = common_part(embd, prompt_tokens);
 
@@ -631,6 +632,169 @@ struct llama_rn_context
             std::to_string(tg_std) +
             std::string("]");
     }
+
+    
+// Context Shifting from KoboldCpp <https://github.com/LostRuins/koboldcpp>
+// Implementation obtained with special permission from @concedo
+
+std::vector<int> longest_common_subseq(const std::vector<int> x, const std::vector<int> y){
+     int m = x.size(), n = y.size();
+
+     //int LCSuff[m+1][n+1];
+     std::vector<std::vector<int>> LCSuff(m+1, std::vector<int>(n+1));
+
+     for (int j = 0; j <= n; j++)
+         LCSuff[0][j] = 0;
+     for (int i = 0; i <= m; i++)
+         LCSuff[i][0] = 0;
+
+     for (int i = 1; i <= m; i++)
+     {
+         for (int j = 1; j <= n; j++)
+         {
+             if (x[i - 1] == y[j - 1])
+                 LCSuff[i][j] = LCSuff[i - 1][j - 1] + 1;
+             else
+                 LCSuff[i][j] = 0;
+         }
+     }
+
+     std::vector<int> longest;
+     for (int i = 1; i <= m; i++)
+     {
+         for (int j = 1; j <= n; j++)
+         {
+             if (LCSuff[i][j] > longest.size())
+             {
+                 auto off1 = ((i - LCSuff[i][j] + 1) - 1);
+                 auto off2 = off1 + LCSuff[i][j];
+                 longest.clear();
+                //  std::vector<int>().swap(longest);
+                 longest = std::vector<int>(x.begin() + off1, x.begin() + off2);
+                // x.substr((i - LCSuff[i][j] + 1) - 1, LCSuff[i][j]);
+             }
+         }
+     }
+     return longest;
+ }
+
+bool arr_start_with(const std::vector<int> targetArray, const std::vector<int> searchSeq)
+ {
+     int ss = searchSeq.size();
+     if(targetArray.size()<ss)
+     {
+         return false;
+     }
+     for(int i=0;i<ss;++i)
+     {
+         if(targetArray[i]!=searchSeq[i])
+         {
+             return false;
+         }
+     }
+     return true;
+ }
+
+int arr_find_index_of(const std::vector<int> targetArray, const std::vector<int> searchSeq)
+ {
+     int ss = searchSeq.size();
+     int tas = targetArray.size();
+     if(tas<ss)
+     {
+         return -1;
+     }
+     for(int i=0;i<tas;++i)
+     {
+         int srch = 0;
+         bool fail = false;
+         for(int srch=0;srch<ss;++srch)
+         {
+             if ((i + srch) >= tas || targetArray[i + srch] != searchSeq[srch])
+             {
+                 fail = true;
+                 break;
+             }
+         }
+         if(!fail)
+         {
+             return i;
+         }
+     }
+     return -1;
+ }
+
+void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context_tokens, std::vector<int> &new_context_tokens, const int genamt, const int nctx)
+{
+    //scan from start old and new ctx, until first mismatch found, save as p0
+    //check remaining old and new ctx for longest common subseq, which needs to be at 256 tokens
+    //test: longest common subseq (LCQ) MUST start within 0 tokens from end of memory, otherwise purge fails
+    //if passed, save beginning of LCQ from old ctx as p1
+    //remove all tokens from old ctx between p0 and p1, updating both arrays and kv, then continue as normal
+
+    const int short_fall_threshold = 200 + (nctx/30); //dont trigger shifting if the distance between trimstart and currhead < this
+    const int stack_allowance = 60 + (nctx/50); //in case the end text is slightly modified, be forgiving
+
+    int trimstart = 0;
+    int new_tokens_len = new_context_tokens.size();
+    bool purge_needed = true;
+
+    for (int i = 0; i < current_context_tokens.size(); ++i)
+    {
+        if (current_context_tokens[i] == new_context_tokens[i])
+        {
+            trimstart += 1;
+        }
+        else
+        {
+            break;
+        }
+        if ((i + 2) >= new_tokens_len)
+        {
+            purge_needed = false;
+            break; //no surgery required
+        }
+    }
+
+    
+
+    if(!purge_needed || new_tokens_len < 6 || current_context_tokens.size() < 6 || new_tokens_len - trimstart < short_fall_threshold)
+    {
+        return; //no purge is needed
+    }
+
+    //at least this many tokens need to match, otherwise don't bother trimming
+    const int lc_tok_threshold = std::max(std::min((new_tokens_len - trimstart) - (genamt+stack_allowance), (int)(nctx*0.45)), short_fall_threshold - stack_allowance);
+
+    auto curr_ctx_without_memory = std::vector<int>(current_context_tokens.begin() + trimstart, current_context_tokens.end());
+    auto new_ctx_without_memory = std::vector<int>(new_context_tokens.begin() + trimstart, new_context_tokens.end());
+
+    auto shared = longest_common_subseq(curr_ctx_without_memory, new_ctx_without_memory);
+
+    if (shared.size() > lc_tok_threshold && arr_start_with(new_ctx_without_memory, shared)) // enough tokens in common
+    {
+        int found = arr_find_index_of(current_context_tokens,shared);
+        if(found>=0 && found > trimstart)
+        {
+
+            //extract the unwanted tokens out from context and KV
+            int diff = found - trimstart;
+            llama_kv_cache_seq_rm(ctx, 0, trimstart, trimstart + diff);
+            llama_kv_cache_seq_add(ctx, 0, trimstart + diff, -1, -diff);
+
+            for (size_t i = trimstart + diff; i < current_context_tokens.size() - 1; i++)
+            {
+                current_context_tokens[i - diff] = current_context_tokens[i];
+            }
+
+            printf("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
+
+            current_context_tokens.resize(current_context_tokens.size() - diff);
+        }
+    }
+
+}
+
+// End Context Shifting
 };
 
 }
