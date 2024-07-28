@@ -74,7 +74,7 @@ export class LlamaContext {
    */
   async loadSession(filepath: string): Promise<NativeSessionLoadResult> {
     let path = filepath
-    if (filepath.startsWith(`file://`)) path = path.slice(7)
+    if (path.startsWith('file://')) path = path.slice(7)
     return RNLlama.loadSession(this.id, path)
   }
 
