@@ -111,6 +111,11 @@ export type NativeSessionLoadResult = {
   prompt: string
 }
 
+export type NativeLlamaChatMessage = {
+  role: string
+  content: string
+}
+
 export interface Spec extends TurboModule {
   setContextLimit(limit: number): Promise<void>
   initContext(params: NativeContextParams): Promise<NativeLlamaContext>
@@ -131,6 +136,11 @@ export interface Spec extends TurboModule {
   stopCompletion(contextId: number): Promise<void>
   tokenizeAsync(contextId: number, text: string): Promise<NativeTokenizeResult>
   tokenizeSync(contextId: number, text: string): NativeTokenizeResult
+  getFormattedChat(
+    contextId: number,
+    messages: NativeLlamaChatMessage[],
+    chatTemplate?: string,
+  ): Promise<string>
   detokenize(contextId: number, tokens: number[]): Promise<string>
   embedding(contextId: number, text: string): Promise<NativeEmbeddingResult>
   bench(

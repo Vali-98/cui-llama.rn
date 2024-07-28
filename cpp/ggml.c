@@ -14746,7 +14746,7 @@ static void lm_ggml_compute_forward_pool_1d_sk_p0(
 
     const struct lm_ggml_tensor * src = dst->src[0];
 
-    assert(src->type == LM_GGML_TYPE_F32);
+    assert(src->type == LM_GGML_TYPE_F32 || src->type == LM_GGML_TYPE_F16);
 
     if (params->ith != 0) {
         return;
@@ -14759,10 +14759,8 @@ static void lm_ggml_compute_forward_pool_1d_sk_p0(
     const int64_t rs = dst->ne[0];
 
     while (cdata < data_end) {
-        const float * const srow = (const float *)cdata;
-
+        const void * srow = (const void *)cdata;
         int j = 0;
-
         for (int64_t i = 0; i < rs; ++i) {
             switch (op) {
                 case LM_GGML_OP_POOL_AVG:   drow[i] = 0;        break;
@@ -14770,10 +14768,11 @@ static void lm_ggml_compute_forward_pool_1d_sk_p0(
                 case LM_GGML_OP_POOL_COUNT: LM_GGML_ABORT("fatal error");
             }
             for (int ki = 0; ki < k; ++ki) {
+                const float srow_j = (src->type == LM_GGML_TYPE_F32) ? ((const float*)srow)[j] : LM_GGML_FP16_TO_FP32(((const lm_ggml_fp16_t*)srow)[j]);
                 switch (op) {
-                    case LM_GGML_OP_POOL_AVG:                          drow[i] += srow[j]; break;
-                    case LM_GGML_OP_POOL_MAX:   if (srow[j] > drow[i]) drow[i]  = srow[j]; break;
-                    case LM_GGML_OP_POOL_COUNT:                        LM_GGML_ABORT("fatal error");
+                    case LM_GGML_OP_POOL_AVG:                         drow[i] += srow_j; break;
+                    case LM_GGML_OP_POOL_MAX:   if (srow_j > drow[i]) drow[i]  = srow_j; break;
+                    case LM_GGML_OP_POOL_COUNT:                       LM_GGML_ABORT("fatal error");
                 }
                 ++j;
             }
@@ -14814,7 +14813,7 @@ static void lm_ggml_compute_forward_pool_2d(
 
     const struct lm_ggml_tensor * src = dst->src[0];
 
-    LM_GGML_ASSERT(src->type == LM_GGML_TYPE_F32);
+    assert(src->type == LM_GGML_TYPE_F32 || src->type == LM_GGML_TYPE_F16);
 
     if (params->ith != 0) {
         return;
@@ -14857,14 +14856,15 @@ static void lm_ggml_compute_forward_pool_2d(
 
                 for (int ky = 0; ky < k1; ++ky) {
                     if (iy + ky < 0 || iy + ky >= src->ne[1]) continue;
-                    const float * const srow = (const float *)(cdata + src->nb[1] * (iy + ky));
+                    const void * srow = (const void *)(cdata + src->nb[1] * (iy + ky));
                     for (int kx = 0; kx < k0; ++kx) {
                         int j = ix + kx;
                         if (j < 0 || j >= src->ne[0]) continue;
+                        const float srow_j = (src->type == LM_GGML_TYPE_F32) ? ((const float*)srow)[j] : LM_GGML_FP16_TO_FP32(((const lm_ggml_fp16_t*)srow)[j]);
                         switch (op) {
-                            case LM_GGML_OP_POOL_AVG:                     *out += srow[j]; break;
-                            case LM_GGML_OP_POOL_MAX: if (srow[j] > *out) *out  = srow[j]; break;
-                            case LM_GGML_OP_POOL_COUNT:                LM_GGML_ABORT("fatal error");
+                            case LM_GGML_OP_POOL_AVG:                     *out += srow_j; break;
+                            case LM_GGML_OP_POOL_MAX: if (srow_j > *out)  *out  = srow_j; break;
+                            case LM_GGML_OP_POOL_COUNT:               LM_GGML_ABORT("fatal error");
                         }
                     }
                 }
@@ -18078,7 +18078,6 @@ static void lm_ggml_build_forward_impl(struct lm_ggml_cgraph * cgraph, struct lm
     }
 
     const int n0 = cgraph->n_nodes;
-    UNUSED(n0);
 
     lm_ggml_visit_parents(cgraph, tensor);
 

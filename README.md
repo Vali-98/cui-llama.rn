@@ -46,38 +46,7 @@ Add proguard rule if it's enabled in project (android/app/proguard-rules.pro):
 
 You can search HuggingFace for available models (Keyword: [`GGUF`](https://huggingface.co/search/full-text?q=GGUF&type=model)).
 
-For create a GGUF model manually, for example in Llama 2:
-
-Download the Llama 2 model
-
-1. Request access from [here](https://ai.meta.com/llama)
-2. Download the model from HuggingFace [here](https://huggingface.co/meta-llama/Llama-2-7b-chat) (`Llama-2-7b-chat`)
-
-Convert the model to ggml format
-
-```bash
-# Start with submodule in this repo (or you can clone the repo https://github.com/ggerganov/llama.cpp.git)
-yarn && yarn bootstrap
-cd llama.cpp
-
-# install Python dependencies
-python3 -m pip install -r requirements.txt
-
-# Move the Llama model weights to the models folder
-mv <path to Llama-2-7b-chat> ./models/7B
-
-# convert the 7B model to ggml FP16 format
-python3 convert.py models/7B/ --outtype f16
-
-# Build the quantize tool
-make quantize
-
-# quantize the model to 2-bits (using q2_k method)
-./quantize ./models/7B/ggml-model-f16.gguf ./models/7B/ggml-model-q2_k.gguf q2_k
-
-# quantize the model to 4-bits (using q4_0 method)
-./quantize ./models/7B/ggml-model-f16.gguf ./models/7B/ggml-model-q4_0.gguf q4_0
-```
+For get a GGUF model or quantize manually, see [`Prepare and Quantize`](https://github.com/ggerganov/llama.cpp?tab=readme-ov-file#prepare-and-quantize) section in llama.cpp.
 
 ## Usage
 
@@ -93,27 +62,54 @@ const context = await initLlama({
   // embedding: true, // use embedding
 })
 
-// Do completion
-const { text, timings } = await context.completion(
+const stopWords = ['</s>', '<|end|>', '<|eot_id|>', '<|end_of_text|>', '<|im_end|>', '<|EOT|>', '<|END_OF_TURN_TOKEN|>', '<|end_of_turn|>', '<|endoftext|>']
+
+// Do chat completion
+const msgResult = await context.completion(
   {
-    prompt:
-      'This is a conversation between user and llama, a friendly chatbot. respond in simple markdown.\n\nUser: Hello!\nLlama:',
+    messages: [
+      {
+        role: 'system',
+        content: 'This is a conversation between user and assistant, a friendly chatbot.',
+      },
+      {
+        role: 'user',
+        content: 'Hello!',
+      },
+    ],
     n_predict: 100,
-    stop: ['</s>', 'Llama:', 'User:'],
-    // n_threads: 4,
+    stop: stopWords,
+    // ...other params
   },
   (data) => {
     // This is a partial completion callback
     const { token } = data
   },
 )
-console.log('Result:', text)
-console.log('Timings:', timings)
+console.log('Result:', msgResult.text)
+console.log('Timings:', msgResult.timings)
+
+// Or do text completion
+const textResult = await context.completion(
+  {
+    prompt:
+      'This is a conversation between user and llama, a friendly chatbot. respond in simple markdown.\n\nUser: Hello!\nLlama:',
+    n_predict: 100,
+    stop: [...stopWords, 'Llama:', 'User:'],
+    // ...other params
+  },
+  (data) => {
+    // This is a partial completion callback
+    const { token } = data
+  },
+)
+console.log('Result:', textResult.text)
+console.log('Timings:', textResult.timings)
 ```
 
 The binding’s deisgn inspired by [server.cpp](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) example in llama.cpp, so you can map its API to LlamaContext:
 
-- `/completion`: `context.completion(params, partialCompletionCallback)`
+- `/completion` and `/chat/completions`: `context.completion(params, partialCompletionCallback)`
 - `/tokenize`: `context.tokenize(content)`
 - `/detokenize`: `context.detokenize(tokens)`
 - `/embedding`: `context.embedding(content)`
