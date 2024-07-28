@@ -208,10 +208,10 @@ inline std::string log_filename_generator_impl(LogTriState multilog, const std::
 #ifndef LOG_NO_FILE_LINE_FUNCTION
     #ifndef _MSC_VER
         #define LOG_FLF_FMT "[%24s:%5d][%24s] "
-        #define LOG_FLF_VAL , __FILE__, __LINE__, __FUNCTION__
+        #define LOG_FLF_VAL , (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), __LINE__, __FUNCTION__
     #else
         #define LOG_FLF_FMT "[%24s:%5ld][%24s] "
-        #define LOG_FLF_VAL , __FILE__, (long)__LINE__, __FUNCTION__
+        #define LOG_FLF_VAL , (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), (long)__LINE__, __FUNCTION__
     #endif
 #else
     #define LOG_FLF_FMT "%s"
@@ -221,10 +221,10 @@ inline std::string log_filename_generator_impl(LogTriState multilog, const std::
 #ifdef LOG_TEE_FILE_LINE_FUNCTION
     #ifndef _MSC_VER
         #define LOG_TEE_FLF_FMT "[%24s:%5d][%24s] "
-        #define LOG_TEE_FLF_VAL , __FILE__, __LINE__, __FUNCTION__
+        #define LOG_TEE_FLF_VAL , (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), __LINE__, __FUNCTION__
     #else
         #define LOG_TEE_FLF_FMT "[%24s:%5ld][%24s] "
-        #define LOG_TEE_FLF_VAL , __FILE__, (long)__LINE__, __FUNCTION__
+        #define LOG_TEE_FLF_VAL , (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), (long)__LINE__, __FUNCTION__
     #endif
 #else
     #define LOG_TEE_FLF_FMT "%s"

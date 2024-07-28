@@ -9,6 +9,10 @@ include_directories(${RNLLAMA_LIB_DIR})
 
 set(
     SOURCE_FILES
+    ${RNLLAMA_LIB_DIR}/llama-grammar.cpp
+    ${RNLLAMA_LIB_DIR}/llama-sampling.cpp
+    ${RNLLAMA_LIB_DIR}/llama-vocab.cpp
+
     ${RNLLAMA_LIB_DIR}/ggml-aarch64.c
     ${RNLLAMA_LIB_DIR}/ggml-alloc.c
     ${RNLLAMA_LIB_DIR}/ggml-backend.c

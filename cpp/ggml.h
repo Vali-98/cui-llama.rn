@@ -258,7 +258,7 @@
     do { \
         if (!(x)) { \
             fflush(stdout); \
-            fprintf(stderr, "LM_GGML_ASSERT: %s:%d: %s\n", __FILE__, __LINE__, #x); \
+            fprintf(stderr, "LM_GGML_ASSERT: %s:%d: %s\n", (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), __LINE__, #x); \
             lm_ggml_print_backtrace(); \
             abort(); \
         } \
@@ -2400,6 +2400,7 @@ extern "C" {
     LM_GGML_API int lm_ggml_cpu_has_vsx        (void);
     LM_GGML_API int lm_ggml_cpu_has_matmul_int8(void);
     LM_GGML_API int lm_ggml_cpu_has_cann       (void);
+    LM_GGML_API int lm_ggml_cpu_has_llamafile  (void);
 
     //
     // Internal types and functions exposed for tests and benchmarks

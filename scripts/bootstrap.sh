@@ -3,7 +3,7 @@
 git submodule init
 git submodule update --recursive --remote
 
-cp ./llama.cpp/
+# cp ./llama.cpp/
 
 cp ./llama.cpp/include/llama.h ./cpp/llama.h
 
@@ -28,6 +28,15 @@ cp ./llama.cpp/ggml/src/llamafile/sgemm.h ./cpp/sgemm.h
 cp ./llama.cpp/ggml/src/llamafile/sgemm.cpp ./cpp/sgemm.cpp
 
 cp ./llama.cpp/src/llama.cpp ./cpp/llama.cpp
+cp ./llama.cpp/src/llama-impl.h ./cpp/llama-impl.h
+
+cp ./llama.cpp/src/llama-vocab.h ./cpp/llama-vocab.h
+cp ./llama.cpp/src/llama-vocab.cpp ./cpp/llama-vocab.cpp
+cp ./llama.cpp/src/llama-grammar.h ./cpp/llama-grammar.h
+cp ./llama.cpp/src/llama-grammar.cpp ./cpp/llama-grammar.cpp
+cp ./llama.cpp/src/llama-sampling.h ./cpp/llama-sampling.h
+cp ./llama.cpp/src/llama-sampling.cpp ./cpp/llama-sampling.cpp
+
 cp ./llama.cpp/src/unicode.h ./cpp/unicode.h
 cp ./llama.cpp/src/unicode.cpp ./cpp/unicode.cpp
 cp ./llama.cpp/src/unicode-data.h ./cpp/unicode-data.h
@@ -48,6 +57,14 @@ cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
 
 # List of files to process
 files=(
+  "./cpp/llama-impl.h"
+  "./cpp/llama-vocab.h"
+  "./cpp/llama-vocab.cpp"
+  "./cpp/llama-grammar.h"
+  "./cpp/llama-grammar.cpp"
+  "./cpp/llama-sampling.h"
+  "./cpp/llama-sampling.cpp"
+
   "./cpp/ggml.h"
   "./cpp/ggml.c"
   "./cpp/common.h"
@@ -96,13 +113,16 @@ echo "Replacement completed successfully!"
 
 yarn example
 
+# Clean up logs to be readable
+sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/log.h
+sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/ggml.h
+
 # Apply patch
 patch -p0 -d ./cpp < ./scripts/common.h.patch
 patch -p0 -d ./cpp < ./scripts/common.cpp.patch
 patch -p0 -d ./cpp < ./scripts/log.h.patch
 patch -p0 -d ./cpp < ./scripts/llama.cpp.patch
 patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
-
 
 if [ "$OS" = "Darwin" ]; then
   # Build metallib (~1.4MB)
@@ -118,5 +138,7 @@ if [ "$OS" = "Darwin" ]; then
   cd example/ios
   echo export NODE_BINARY=$(command -v node) > .xcode.env.local
 fi
+
+rm cpp/*.orig
 
 read -p "Press enter to continue"

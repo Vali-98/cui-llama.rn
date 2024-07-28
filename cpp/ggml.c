@@ -21096,6 +21096,12 @@ struct lm_gguf_context * lm_gguf_init_from_file(const char * fname, struct lm_gg
         };
 
         *params.ctx = lm_ggml_init(pdata);
+        if (*params.ctx == NULL) {
+            fprintf(stderr, "%s: failed to initialize context\n", __func__);
+            fclose(file);
+            lm_gguf_free(ctx);
+            return NULL;
+        }
 
         struct lm_ggml_context * ctx_data = *params.ctx;
 
@@ -21999,6 +22005,14 @@ int lm_ggml_cpu_has_rpc(void) {
 
 int lm_ggml_cpu_has_cann(void) {
 #if defined(LM_GGML_USE_CANN)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_llamafile(void) {
+#if defined(LM_GGML_USE_LLAMAFILE)
     return 1;
 #else
     return 0;
