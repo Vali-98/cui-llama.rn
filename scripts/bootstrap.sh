@@ -52,8 +52,6 @@ cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
 cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp
 cp ./llama.cpp/common/sampling.h ./cpp/sampling.h
 cp ./llama.cpp/common/sampling.cpp ./cpp/sampling.cpp
-cp ./llama.cpp/ggml/src/ggml-aarch64.h ./cpp/ggml-aarch64.h
-cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
 
 # List of files to process
 files=(
@@ -73,6 +71,10 @@ files=(
   "./cpp/ggml-metal.m"
   "./cpp/llama.h"
   "./cpp/llama.cpp"
+  "./cpp/llama-vocab.cpp"
+  "./cpp/llama-sampling.cpp"
+  "./cpp/llama-grammar.cpp"
+  "./cpp/llama-impl.h"
   "./cpp/sampling.cpp"
   "./cpp/ggml-quants.h"
   "./cpp/ggml-quants.c"
@@ -123,6 +125,8 @@ patch -p0 -d ./cpp < ./scripts/common.cpp.patch
 patch -p0 -d ./cpp < ./scripts/log.h.patch
 patch -p0 -d ./cpp < ./scripts/llama.cpp.patch
 patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
+patch -p0 -d ./cpp < ./scripts/ggml.c.patch
+
 
 if [ "$OS" = "Darwin" ]; then
   # Build metallib (~1.4MB)

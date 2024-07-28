@@ -2270,8 +2270,7 @@ struct llama_hparams {
             return n_head_arr[il];
         }
 
-        LM_GGML_ASSERT(false);
-        return 0;
+        LM_GGML_ABORT("fatal error");
     }
 
     uint32_t n_head_kv(uint32_t il = 0) const {
@@ -2279,8 +2278,7 @@ struct llama_hparams {
             return n_head_kv_arr[il];
         }
 
-        LM_GGML_ASSERT(false);
-        return 0;
+        LM_GGML_ABORT("fatal error");
     }
 
     uint32_t n_ff(uint32_t il = 0) const {
@@ -2288,8 +2286,7 @@ struct llama_hparams {
             return n_ff_arr[il];
         }
 
-        LM_GGML_ASSERT(false);
-        return 0;
+        LM_GGML_ABORT("fatal error");
     }
 
     uint32_t n_gqa(uint32_t il = 0) const {
@@ -8083,7 +8080,7 @@ static struct lm_ggml_tensor * llm_build_moe_ffn(
                 cb(gate, "ffn_moe_gelu", il);
             } break;
         default:
-            LM_GGML_ASSERT(false);
+            LM_GGML_ABORT("fatal error");
     }
 
     lm_ggml_tensor * par = lm_ggml_mul(ctx, up, gate); // [n_ff, n_expert_used, n_tokens]
@@ -8646,8 +8643,8 @@ struct llm_build_context {
                 } break;
             default:
                 {
-                    LM_GGML_ASSERT(false && "unknown pooling type");
-                } break;
+                    LM_GGML_ABORT("unknown pooling type");
+                }
         }
 
         cb(cur, "result_embd_pooled", -1);
@@ -8902,7 +8899,7 @@ struct llm_build_context {
                         Kcur = lm_ggml_reshape_3d(ctx0, Kcur, n_embd/n_head, n_head, n_tokens);
                         break;
                     default:
-                        LM_GGML_ASSERT(false);
+                        LM_GGML_ABORT("fatal error");
                 }
                 cb(Qcur, "Qcur", il);
                 cb(Kcur, "Kcur", il);
@@ -11734,7 +11731,7 @@ struct llm_build_context {
                 switch (model.type) {
                     case e_model::MODEL_9B:  Qcur = lm_ggml_scale(ctx0, Qcur, 1.0f / sqrtf(float(n_embd_head_k)));   break;
                     case e_model::MODEL_27B: Qcur = lm_ggml_scale(ctx0, Qcur, 1.0f / sqrtf(float(n_embd / n_head))); break;
-                    default: LM_GGML_ASSERT(false);
+                    default: LM_GGML_ABORT("fatal error");
                 };
                 cb(Qcur, "Qcur_scaled", il);
 
@@ -13899,7 +13896,7 @@ static struct lm_ggml_cgraph * llama_build_graph(
                 result = llm.build_jais();
             } break;
         default:
-            LM_GGML_ASSERT(false);
+            LM_GGML_ABORT("fatal error");
     }
 
     // add on pooling layer
@@ -14698,8 +14695,8 @@ static int llama_decode_internal(
                     } break;
                 case LLAMA_POOLING_TYPE_UNSPECIFIED:
                     {
-                        LM_GGML_ASSERT(false && "unknown pooling type");
-                    } break;
+                        LM_GGML_ABORT("unknown pooling type");
+                    }
             }
         }
         n_outputs_prev += lctx.n_outputs;
@@ -15090,7 +15087,7 @@ static void llama_kv_cache_update_internal(struct llama_context & lctx) {
     // apply K-shift if needed
     if (lctx.model.hparams.rope_type != LLAMA_ROPE_TYPE_NONE && lctx.kv_self.has_shift) {
         if (lctx.model.arch == LLM_ARCH_DEEPSEEK2) { // not supported due to MLA
-            LM_GGML_ASSERT(false && "Deepseek2 does not support K-shift");
+            LM_GGML_ABORT("Deepseek2 does not support K-shift");
         }
 
         {
@@ -15229,7 +15226,7 @@ static void llama_tensor_dequantize_internal(
         } else if (lm_ggml_is_quantized(tensor->type)) {
             qtype.to_float(tensor->data, f32_output, nelements);
         } else {
-            LM_GGML_ASSERT(false); // unreachable
+            LM_GGML_ABORT("fatal error"); // unreachable
         }
         return;
     }
@@ -16915,8 +16912,7 @@ enum llama_rope_type llama_rope_type(const struct llama_model * model) {
 
         // all model arches should be listed explicitly here
         case LLM_ARCH_UNKNOWN:
-            LM_GGML_ASSERT(false && "unknown architecture");
-            break;
+            LM_GGML_ABORT("unknown architecture");
     }
 
     return LLAMA_ROPE_TYPE_NONE;
@@ -18480,7 +18476,7 @@ float * llama_get_logits_ith(struct llama_context * ctx, int32_t i) {
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: invalid logits id %d, reason: %s\n", __func__, i, err.what());
 #ifndef NDEBUG
-        LM_GGML_ASSERT(false);
+        LM_GGML_ABORT("fatal error");
 #endif
         return nullptr;
     }
@@ -18525,7 +18521,7 @@ float * llama_get_embeddings_ith(struct llama_context * ctx, int32_t i) {
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: invalid embeddings id %d, reason: %s\n", __func__, i, err.what());
 #ifndef NDEBUG
-        LM_GGML_ASSERT(false);
+        LM_GGML_ABORT("fatal error");
 #endif
         return nullptr;
     }
