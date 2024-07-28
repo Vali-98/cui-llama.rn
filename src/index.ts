@@ -12,6 +12,8 @@ import type {
   NativeSessionLoadResult,
 } from './NativeRNLlama'
 import { SchemaGrammarConverter, convertJsonSchemaToGrammar } from './grammar'
+import type { RNLlamaOAICompatibleMessage } from './chat'
+import { formatChat } from './chat'
 
 export { SchemaGrammarConverter, convertJsonSchemaToGrammar }
 
@@ -40,8 +42,11 @@ export type ContextParams = NativeContextParams
 
 export type CompletionParams = Omit<
   NativeCompletionParams,
-  'emit_partial_completion'
->
+  'emit_partial_completion' | 'prompt'
+> & {
+  prompt?: string
+  messages?: RNLlamaOAICompatibleMessage[]
+}
 
 export type BenchResult = {
   modelDesc: string
@@ -60,7 +65,9 @@ export class LlamaContext {
 
   reasonNoGPU: string = ''
 
-  model: Object = {}
+  model: {
+    isChatTemplateSupported?: boolean
+  } = {}
 
   constructor({ contextId, gpu, reasonNoGPU, model }: NativeLlamaContext) {
     this.id = contextId
@@ -88,10 +95,27 @@ export class LlamaContext {
     return RNLlama.saveSession(this.id, filepath, options?.tokenSize || -1)
   }
 
+  async getFormattedChat(
+    messages: RNLlamaOAICompatibleMessage[],
+  ): Promise<string> {
+    const chat = formatChat(messages)
+    return RNLlama.getFormattedChat(
+      this.id,
+      chat,
+      this.model?.isChatTemplateSupported ? undefined : 'chatml',
+    )
+  }
+
   async completion(
     params: CompletionParams,
     callback?: (data: TokenData) => void,
   ): Promise<NativeCompletionResult> {
+
+    let finalPrompt = params.prompt
+    if (params.messages) { // messages always win
+      finalPrompt = await this.getFormattedChat(params.messages)
+    }
+
     let tokenListener: any =
       callback &&
       EventEmitter.addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
@@ -99,8 +123,11 @@ export class LlamaContext {
         if (contextId !== this.id) return
         callback(tokenResult)
       })
+
+    if (!finalPrompt) throw new Error('Prompt is required')
     const promise = RNLlama.completion(this.id, {
       ...params,
+      prompt: finalPrompt,
       emit_partial_completion: !!callback,
     })
     return promise

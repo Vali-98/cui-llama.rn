@@ -6,6 +6,7 @@ import DocumentPicker from 'react-native-document-picker'
 import type { DocumentPickerResponse } from 'react-native-document-picker'
 import { Chat, darkTheme } from '@flyerhq/react-native-chat-ui'
 import type { MessageType } from '@flyerhq/react-native-chat-ui'
+import json5 from 'json5'
 import ReactNativeBlobUtil from 'react-native-blob-util'
 // eslint-disable-next-line import/no-unresolved
 import { initLlama, LlamaContext, convertJsonSchemaToGrammar } from 'cui-llama.rn'
@@ -20,30 +21,10 @@ const user = { id: 'y9d7f8pgn' }
 const systemId = 'h3o3lc5xj'
 const system = { id: systemId }
 
-const initialChatPrompt =
-  'This is a conversation between user and llama, a friendly chatbot. respond in simple markdown.\n\n'
-
-const generateChatPrompt = (
-  context: LlamaContext | undefined,
-  conversationId: string,
-  messages: MessageType.Any[],
-) => {
-  const prompt = [...messages]
-    .reverse()
-    .map((msg) => {
-      if (
-        !msg.metadata?.system &&
-        msg.metadata?.conversationId === conversationId &&
-        msg.metadata?.contextId === context?.id &&
-        msg.type === 'text'
-      ) {
-        return `${msg.author.id === systemId ? 'llama' : 'User'}: ${msg.text}`
-      }
-      return ''
-    })
-    .filter(Boolean)
-    .join('\n')
-  return initialChatPrompt + prompt
+const systemMessage = {
+  role: 'system',
+  content:
+    'This is a conversation between user and assistant, a friendly chatbot.\n\n',
 }
 
 const defaultConversationId = 'default'
@@ -234,6 +215,16 @@ export default function App() {
               console.log('Session save failed:', e)
               addSystemMessage(`Session save failed: ${e.message}`)
             })
+          context
+            .saveSession(`${dirs.DocumentDir}/llama-session.bin`)
+            .then((tokensSaved) => {
+              console.log('Session tokens saved:', tokensSaved)
+              addSystemMessage(`Session saved! ${tokensSaved} tokens saved.`)
+            })
+            .catch((e) => {
+              console.log('Session save failed:', e)
+              addSystemMessage(`Session save failed: ${e.message}`)
+            })
           return
         case '/load-session':
           context
@@ -262,32 +253,50 @@ export default function App() {
         conversationId: conversationIdRef.current,
       },
     }
-    addMessage(textMessage)
-    setInferencing(true)
 
     const id = randId()
     const createdAt = Date.now()
-    let prompt = generateChatPrompt(context, conversationIdRef.current, [
-      textMessage,
-      ...messages,
-    ])
-    prompt += `\nllama:`
+    const msgs = [
+      systemMessage,
+      ...[...messages]
+        .reverse()
+        .map((msg) => {
+          if (
+            !msg.metadata?.system &&
+            msg.metadata?.conversationId === conversationIdRef.current &&
+            msg.metadata?.contextId === context?.id &&
+            msg.type === 'text'
+          ) {
+            return {
+              role: msg.author.id === systemId ? 'assistant' : 'user',
+              content: msg.text,
+            }
+          }
+          return { role: '', content: '' }
+        })
+        .filter((msg) => msg.role),
+      { role: 'user', content: message.text },
+    ]
+    addMessage(textMessage)
+    setInferencing(true)
 
+    // Test area
     {
       // Test tokenize
+      const formattedChat = (await context?.getFormattedChat(msgs)) || ''
       const t0 = Date.now()
-      const { tokens } = (await context?.tokenizeAsync(prompt)) || {}
+      const { tokens } = (await context?.tokenizeAsync("test")) || {}
       const t1 = Date.now()
       console.log(
-        'Prompt:',
-        prompt,
+        'Formatted:',
+        `"${formattedChat}"`,
         '\nTokenize:',
         tokens,
         `(${tokens?.length} tokens, ${t1 - t0}ms})`,
       )
 
       // Test embedding
-      // await context?.embedding(prompt).then((result) => {
+      // await context?.embedding(formattedChat).then((result) => {
       //   console.log('Embedding:', result)
       // })
 
@@ -313,8 +322,10 @@ export default function App() {
                   date: { type: 'string' },
                   time: { type: 'string' },
                 },
+                required: ['title', 'date'],
               },
             },
+            required: ['function', 'arguments'],
           },
           {
             type: 'object',
@@ -325,6 +336,7 @@ export default function App() {
                 properties: {
                   query: { type: 'string' },
                 },
+                required: ['query'],
               },
             },
           },
@@ -345,7 +357,7 @@ export default function App() {
     context
       ?.completion(
         {
-          prompt,
+          messages: msgs,
           n_predict: 400,
           temperature: 0.7,
           top_k: 40, // <= 0 to use vocab size
@@ -360,9 +372,19 @@ export default function App() {
           mirostat_tau: 5, // target entropy
           mirostat_eta: 0.1, // learning rate
           penalize_nl: false, // penalize newlines
-          seed: 1234, // random seed
+          seed: -1, // random seed
           n_probs: 0, // Show probabilities
-          stop: ['</s>', 'llama:', 'User:'],
+          stop: [
+            '</s>',
+            '<|end|>',
+            '<|eot_id|>',
+            '<|end_of_text|>',
+            '<|im_end|>',
+            '<|EOT|>',
+            '<|END_OF_TURN_TOKEN|>',
+            '<|end_of_turn|>',
+            '<|endoftext|>',
+          ],
           grammar,
           // n_threads: 4,
           // logit_bias: [[15043,1.0]],
@@ -389,7 +411,10 @@ export default function App() {
                 id,
                 text: token,
                 type: 'text',
-                metadata: { contextId: context?.id },
+                metadata: {
+                  contextId: context?.id,
+                  conversationId: conversationIdRef.current,
+                },
               },
               ...msgs,
             ]

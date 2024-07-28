@@ -254,16 +254,6 @@
 
 #define LM_GGML_PAD(x, n) (((x) + (n) - 1) & ~((n) - 1))
 
-#define LM_GGML_ASSERT(x) \
-    do { \
-        if (!(x)) { \
-            fflush(stdout); \
-            fprintf(stderr, "LM_GGML_ASSERT: %s:%d: %s\n", (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), __LINE__, #x); \
-            lm_ggml_print_backtrace(); \
-            abort(); \
-        } \
-    } while (0)
-
 #ifndef NDEBUG
 #define LM_GGML_UNREACHABLE() do { fprintf(stderr, "statement should be unreachable\n"); abort(); } while(0)
 #elif defined(__GNUC__)
@@ -282,7 +272,7 @@
 #define LM_GGML_NORETURN _Noreturn
 #endif
 
-#define LM_GGML_ABORT(...) lm_ggml_abort(__FILE__, __LINE__, __VA_ARGS__)
+#define LM_GGML_ABORT(...) lm_ggml_abort((strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), __LINE__, __VA_ARGS__)
 #define LM_GGML_ASSERT(x) if (!(x)) LM_GGML_ABORT("LM_GGML_ASSERT(%s) failed", #x)
 
 // used to copy the number of elements and stride in bytes of tensors into local variables.

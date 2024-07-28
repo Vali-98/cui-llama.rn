@@ -1330,6 +1330,10 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         else { invalid_param = true; }
         return true;
     }
+    if (arg == "--no-warmup") {
+        params.warmup = false;
+        return true;
+    }
 #ifndef LOG_DISABLE_LOGS
     // Parse args for logging parameters
     if (log_param_single_parse(argv[i])) {
@@ -1452,6 +1456,7 @@ void gpt_params_print_usage(int /*argc*/, char ** argv, const gpt_params & param
     options.push_back({ "main infill", "       --in-prefix-bos",        "prefix BOS to user inputs, preceding the `--in-prefix` string" });
     options.push_back({ "main infill", "       --in-prefix STRING",     "string to prefix user inputs with (default: empty)" });
     options.push_back({ "main infill", "       --in-suffix STRING",     "string to suffix after user inputs with (default: empty)" });
+    options.push_back({ "main",        "       --no-warmup",            "skip warming up the model with an empty run" });
     options.push_back({ "server infill",
                                        "       --spm-infill",           "use Suffix/Prefix/Middle pattern for infill (instead of Prefix/Suffix/Middle) as some models prefer this. (default: %s)", params.spm_infill ? "enabled" : "disabled" });
 
@@ -2137,12 +2142,12 @@ std::tuple<struct llama_model *, struct llama_context *> llama_init_from_gpt_par
     }
 
     return std::make_tuple(model, lctx);
+   mparams.vocab_only      = params.vocab_only;
 }
 
 struct llama_model_params llama_model_params_from_gpt_params(const gpt_params & params) {
     auto mparams = llama_model_default_params();
 
-   mparams.vocab_only      = params.vocab_only;
     if (params.n_gpu_layers != -1) {
         mparams.n_gpu_layers = params.n_gpu_layers;
     }
