@@ -6,6 +6,13 @@
 #include "common.h"
 #include "llama.h"
 
+
+#include <android/log.h>
+#define LLAMA_ANDROID_TAG "RNLLAMA_LOG_ANDROID"
+#define LLAMA_LOG_INFO(...)  __android_log_print(ANDROID_LOG_INFO , LLAMA_ANDROID_TAG, __VA_ARGS__)
+
+
+
 namespace rnllama {
 
 static void llama_batch_clear(llama_batch *batch) {
@@ -287,15 +294,20 @@ struct llama_rn_context
 
             LM_GGML_ASSERT(num_prompt_tokens < (size_t) n_ctx);
         }
+
+        // do Context Shift , may be buggy! TODO: Verify functionality
+        purge_missing_tokens(ctx, embd, prompt_tokens, params.n_predict, params.n_ctx);
+
         // push the prompt into the sampling context (do not apply grammar)
         for (auto & token : prompt_tokens)
         {
            llama_sampling_accept(ctx_sampling, ctx, token, false);
         }
-        // TODO: Implement context shift here
         // compare the evaluated prompt with the new prompt
         n_past = common_part(embd, prompt_tokens);
-
+        LLAMA_LOG_INFO("%s:        n_past: %zu", __func__,  n_past);
+        LLAMA_LOG_INFO("%s:        embd size: %zu", __func__,  embd.size());
+        LLAMA_LOG_INFO("%s:        prompt_tokens size: %zu", __func__,  prompt_tokens.size());
         embd = prompt_tokens;
         if (n_past == num_prompt_tokens)
         {
@@ -767,6 +779,7 @@ void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context
 
     if(!purge_needed || new_tokens_len < 6 || current_context_tokens.size() < 6 || new_tokens_len - trimstart < short_fall_threshold)
     {
+        LLAMA_LOG_INFO("Fall Threshold: %d out of %d\n", new_tokens_len - trimstart, short_fall_threshold);
         return; //no purge is needed
     }
 
@@ -794,7 +807,7 @@ void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context
                 current_context_tokens[i - diff] = current_context_tokens[i];
             }
 
-            printf("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
+            LLAMA_LOG_INFO("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
 
             current_context_tokens.resize(current_context_tokens.size() - diff);
         }

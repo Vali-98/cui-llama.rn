@@ -6,7 +6,6 @@ import DocumentPicker from 'react-native-document-picker'
 import type { DocumentPickerResponse } from 'react-native-document-picker'
 import { Chat, darkTheme } from '@flyerhq/react-native-chat-ui'
 import type { MessageType } from '@flyerhq/react-native-chat-ui'
-import json5 from 'json5'
 import ReactNativeBlobUtil from 'react-native-blob-util'
 // eslint-disable-next-line import/no-unresolved
 import { initLlama, LlamaContext, convertJsonSchemaToGrammar } from 'cui-llama.rn'
@@ -36,6 +35,9 @@ const renderBubble = ({
   child: ReactNode
   message: MessageType.Any
 }) => <Bubble child={child} message={message} />
+
+const maxContext = 1024
+const maxGen = 256
 
 export default function App() {
   const [context, setContext] = useState<LlamaContext | undefined>(undefined)
@@ -86,8 +88,8 @@ export default function App() {
     initLlama({
       model: file.uri,
       n_threads: 4,
-      n_ctx: 2048,
-      n_batch: 512,
+      n_ctx: maxContext,
+      n_batch: maxGen,
       use_mlock: true,
       n_gpu_layers: Platform.OS === 'ios' ? 0 : 0, // > 0: enable GPU
       // embedding: true,
@@ -256,42 +258,59 @@ export default function App() {
 
     const id = randId()
     const createdAt = Date.now()
-    const msgs = [
-      systemMessage,
-      ...[...messages]
-        .reverse()
-        .map((msg) => {
-          if (
-            !msg.metadata?.system &&
-            msg.metadata?.conversationId === conversationIdRef.current &&
-            msg.metadata?.contextId === context?.id &&
-            msg.type === 'text'
-          ) {
-            return {
-              role: msg.author.id === systemId ? 'assistant' : 'user',
-              content: msg.text,
-            }
-          }
-          return { role: '', content: '' }
-        })
-        .filter((msg) => msg.role),
-      { role: 'user', content: message.text },
-    ]
+
+    type MesInput = {
+      role: string
+      content: string
+    }
+
+    const getFormattedChat  = (data : MesInput[]) : string => `${data.map(item => {
+          if(item.role === 'assistant')
+            return `<|assistant|>\n${  item.content  }<|endoftext|>\n`
+          else 
+            return `<|user|>\n${  item.content  }<|endoftext|>\n`
+      }).join('')  }<|assistant|>\n`
+
+    const inputMessages : MesInput[] = []
+    const newinput = [textMessage, ...messages]
+    // eslint-disable-next-line no-restricted-syntax
+    for(const msg of newinput) {
+    {
+        if (
+          !msg.metadata?.system &&
+          msg.metadata?.conversationId === conversationIdRef.current &&
+          msg.metadata?.contextId === context?.id &&
+          msg.type === 'text'
+        ) {   
+          // eslint-disable-next-line no-await-in-loop
+           const tokenLength = context?.tokenizeSync(getFormattedChat([systemMessage, {content: msg.text, role: ""}, ...inputMessages]) ?? "").tokens.length ?? 0
+          console.log(tokenLength)
+          if(tokenLength + maxGen< maxContext)
+          inputMessages.push({
+            role: msg.author.id === systemId ? 'assistant' : 'user',
+            content: msg.text,
+          })
+          else break
+        }
+      } 
+    }
+
+    inputMessages.push(systemMessage)
+
     addMessage(textMessage)
     setInferencing(true)
 
+    const formattedChat = (getFormattedChat(inputMessages.reverse())) || ''
     // Test area
     {
       // Test tokenize
-      const formattedChat = (await context?.getFormattedChat(msgs)) || ''
       const t0 = Date.now()
-      const { tokens } = (await context?.tokenizeAsync("test")) || {}
+      const { tokens } = (await context?.tokenizeAsync(formattedChat)) || {}
       const t1 = Date.now()
       console.log(
         'Formatted:',
         `"${formattedChat}"`,
         '\nTokenize:',
-        tokens,
         `(${tokens?.length} tokens, ${t1 - t0}ms})`,
       )
 
@@ -357,15 +376,15 @@ export default function App() {
     context
       ?.completion(
         {
-          messages: msgs,
-          n_predict: 400,
+          prompt: formattedChat,
+          n_predict: 100,
           temperature: 0.7,
           top_k: 40, // <= 0 to use vocab size
           top_p: 0.5, // 1.0 = disabled
           tfs_z: 1.0, // 1.0 = disabled
           typical_p: 1.0, // 1.0 = disabled
           penalty_last_n: 256, // 0 = disable penalty, -1 = context size
-          penalty_repeat: 1.18, // 1.0 = disabled
+          penalty_repeat: 1, // 1.0 = disabled
           penalty_freq: 0.0, // 0.0 = disabled
           penalty_present: 0.0, // 0.0 = disabled
           mirostat: 0, // 0/1/2
@@ -386,7 +405,7 @@ export default function App() {
             '<|endoftext|>',
           ],
           grammar,
-          // n_threads: 4,
+          n_threads: 4,
           // logit_bias: [[15043,1.0]],
         },
         (data) => {
