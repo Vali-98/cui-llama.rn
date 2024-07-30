@@ -99,8 +99,11 @@ export default function App() {
         addSystemMessage(
           `Context initialized! \n\nGPU: ${ctx.gpu ? 'YES' : 'NO'} (${
             ctx.reasonNoGPU
-          })\n\n` +
+          })\nChat Template: ${
+            ctx.model.isChatTemplateSupported ? 'YES' : 'NO'
+          }\n\n` +
             'You can use the following commands:\n\n' +
+            '- /info: to get the model info\n' +
             '- /bench: to benchmark the model\n' +
             '- /release: release the context\n' +
             '- /stop: stop the current completion\n' +
@@ -304,6 +307,7 @@ export default function App() {
     // Test area
     {
       // Test tokenize
+      const formattedChat = (await context?.getFormattedChat(inputMessages)) || ''
       const t0 = Date.now()
       const { tokens } = (await context?.tokenizeAsync(formattedChat)) || {}
       const t1 = Date.now()
