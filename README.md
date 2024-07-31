@@ -10,6 +10,7 @@ The following features have been added for Android:
 - Added stopping prompt processing between batches, vital for mobile devices with very slow prompt processing
 - `vocab_only` mode: utilize the llama.cpp tokenizer
 - tokenizeSync: non-blocking, synchronous tokenizer function
+- Context Shift taken from [kobold.cpp](https://github.com/LostRuins/koboldcpp)
 
 Original repo README.md below.
 
