@@ -133,17 +133,14 @@ static std::string trim(const std::string & str) {
 }
 
 static void replace_all(std::string & s, const std::string & search, const std::string & replace) {
-    std::string result;
-    for (size_t pos = 0; ; pos += search.length()) {
-        auto new_pos = s.find(search, pos);
-        if (new_pos == std::string::npos) {
-            result += s.substr(pos, s.size() - pos);
-            break;
-        }
-        result += s.substr(pos, new_pos - pos) + replace;
-        pos = new_pos;
+    if (search.empty()) {
+        return; // Avoid infinite loop if 'search' is an empty string
     }
-    s = std::move(result);
+    size_t pos = 0;
+    while ((pos = s.find(search, pos)) != std::string::npos) {
+        s.replace(pos, search.length(), replace);
+        pos += replace.length();
+    }
 }
 
 static bool is_float_close(float a, float b, float abs_tol) {
@@ -373,6 +370,7 @@ enum llm_kv {
     LLM_KV_TOKENIZER_SUFFIX_ID,
     LLM_KV_TOKENIZER_MIDDLE_ID,
     LLM_KV_TOKENIZER_EOT_ID,
+    LLM_KV_TOKENIZER_EOM_ID,
 
     LLM_KV_ADAPTER_TYPE,
     LLM_KV_ADAPTER_LORA_ALPHA,
@@ -470,6 +468,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_TOKENIZER_SUFFIX_ID,            "tokenizer.ggml.suffix_token_id"          },
     { LLM_KV_TOKENIZER_MIDDLE_ID,            "tokenizer.ggml.middle_token_id"          },
     { LLM_KV_TOKENIZER_EOT_ID,               "tokenizer.ggml.eot_token_id"             },
+    { LLM_KV_TOKENIZER_EOM_ID,               "tokenizer.ggml.eom_token_id"             },
 
     { LLM_KV_ADAPTER_TYPE,                  "adapter.type"       },
     { LLM_KV_ADAPTER_LORA_ALPHA,            "adapter.lora.alpha" },
@@ -5597,6 +5596,7 @@ static void llm_load_vocab(
             { LLM_KV_TOKENIZER_SUFFIX_ID, vocab.special_suffix_id },
             { LLM_KV_TOKENIZER_MIDDLE_ID, vocab.special_middle_id },
             { LLM_KV_TOKENIZER_EOT_ID,    vocab.special_eot_id    },
+            { LLM_KV_TOKENIZER_EOM_ID,    vocab.special_eom_id    },
         };
 
         for (const auto & it : special_token_types) {
@@ -5647,6 +5647,17 @@ static void llm_load_vocab(
                     vocab.special_eot_id = t.second;
                     break;
                 }
+            }
+        }
+
+        // find EOM token: "<|eom_id|>"
+        //
+        // TODO: convert scripts should provide this token through the KV metadata LLAMA_KV_TOKENIZER_EOM_ID
+        //       for now, we apply this workaround to find the EOM token based on its text
+        if (vocab.special_eom_id == -1) {
+            const auto & t = vocab.token_to_id.find("<|eom_id|>");
+            if (t != vocab.token_to_id.end()) {
+                vocab.special_eom_id = t->second;
             }
         }
     }
@@ -15304,7 +15315,7 @@ static lm_ggml_type llama_tensor_get_type(quantize_state_internal & qs, lm_ggml_
     const int n_expert = std::max(1, (int)qs.model.hparams.n_expert);
     auto layer_info = [n_expert] (int i_layer, int n_layer, const char * name) {
         if (n_expert > 1) {
-            // Believe it or not, "experts" in the FFN of Mixtral-8x7B are not consecutive, but iccasionally randomly
+            // Believe it or not, "experts" in the FFN of Mixtral-8x7B are not consecutive, but occasionally randomly
             // sprinkled in the model. Hence, simply dividing i_ffn_down by n_expert does not work
             // for getting the current layer as I initially thought, and we need to resort to parsing the
             // tensor name.
@@ -17343,6 +17354,7 @@ bool llama_save_session_file(struct llama_context * ctx, const char * path_sessi
 // TODO: replace all non-fatal assertions with returned errors or exceptions
 struct llama_data_write {
     virtual void write(const void * src, size_t size) = 0;
+    virtual void write_tensor_data(const struct lm_ggml_tensor * tensor, size_t offset, size_t size) = 0;
     virtual size_t get_size_written() = 0;
     virtual ~llama_data_write() = default;
 
@@ -17465,9 +17477,8 @@ struct llama_data_write {
             // Read each range of cells of k_size length each into tmp_buf and write out
             for (const auto & range : cell_ranges) {
                 const size_t range_size = range.second - range.first;
-                tmp_buf.resize(range_size * k_size_row);
-                lm_ggml_backend_tensor_get(kv_self.k_l[il], tmp_buf.data(), range.first * k_size_row, range_size * k_size_row);
-                write(tmp_buf.data(), tmp_buf.size());
+                const size_t buf_size = range_size * k_size_row;
+                write_tensor_data(kv_self.k_l[il], range.first * k_size_row, buf_size);
             }
         }
 
@@ -17486,9 +17497,8 @@ struct llama_data_write {
                 // Read each range of cells of v_size length each into tmp_buf and write out
                 for (const auto & range : cell_ranges) {
                     const size_t range_size = range.second - range.first;
-                    tmp_buf.resize(range_size * v_size_row);
-                    lm_ggml_backend_tensor_get(kv_self.v_l[il], tmp_buf.data(), range.first * v_size_row, range_size * v_size_row);
-                    write(tmp_buf.data(), tmp_buf.size());
+                    const size_t buf_size = range_size * v_size_row;
+                    write_tensor_data(kv_self.v_l[il], range.first * v_size_row, buf_size);
                 }
             }
         } else {
@@ -17514,9 +17524,8 @@ struct llama_data_write {
                     for (const auto & range : cell_ranges) {
                         const size_t range_size = range.second - range.first;
                         const size_t src_offset = (range.first + j * kv_size) * v_size_el;
-                        tmp_buf.resize(range_size * v_size_el);
-                        lm_ggml_backend_tensor_get(kv_self.v_l[il], tmp_buf.data(), src_offset, tmp_buf.size());
-                        write(tmp_buf.data(), tmp_buf.size());
+                        const size_t buf_size = range_size * v_size_el;
+                        write_tensor_data(kv_self.v_l[il], src_offset, buf_size);
                     }
                 }
             }
@@ -17875,9 +17884,11 @@ struct llama_data_write_dummy : llama_data_write {
 
     llama_data_write_dummy() {}
 
-    // TODO: avoid unnecessary calls to lm_ggml_backend_tensor_get in a dummy context
-
     void write(const void * /* src */, size_t size) override {
+        size_written += size;
+    }
+
+    void write_tensor_data(const struct lm_ggml_tensor * /* tensor */, size_t /* offset */, size_t size) override {
         size_written += size;
     }
 
@@ -17898,6 +17909,16 @@ struct llama_data_write_buffer : llama_data_write {
             throw std::runtime_error("unexpectedly reached end of buffer");
         }
         memcpy(ptr, src, size);
+        ptr += size;
+        size_written += size;
+        buf_size -= size;
+    }
+
+    void write_tensor_data(const struct lm_ggml_tensor * tensor, size_t offset, size_t size) override {
+        if (size > buf_size) {
+            throw std::runtime_error("unexpectedly reached end of buffer");
+        }
+        lm_ggml_backend_tensor_get(tensor, ptr, offset, size);
         ptr += size;
         size_written += size;
         buf_size -= size;
@@ -17938,12 +17959,19 @@ struct llama_data_read_buffer : llama_data_read {
 struct llama_data_write_file : llama_data_write {
     llama_file * file;
     size_t size_written = 0;
+    std::vector<uint8_t> temp_buffer;
 
     llama_data_write_file(llama_file * f) : file(f) {}
 
     void write(const void * src, size_t size) override {
         file->write_raw(src, size);
         size_written += size;
+    }
+
+    void write_tensor_data(const struct lm_ggml_tensor * tensor, size_t offset, size_t size) override {
+        temp_buffer.resize(size);
+        lm_ggml_backend_tensor_get(tensor, temp_buffer.data(), offset, size);
+        write(temp_buffer.data(), temp_buffer.size());
     }
 
     size_t get_size_written() override {

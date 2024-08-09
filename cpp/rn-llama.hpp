@@ -6,12 +6,9 @@
 #include "common.h"
 #include "llama.h"
 
-
 #include <android/log.h>
 #define LLAMA_ANDROID_TAG "RNLLAMA_LOG_ANDROID"
 #define LLAMA_LOG_INFO(...)  __android_log_print(ANDROID_LOG_INFO , LLAMA_ANDROID_TAG, __VA_ARGS__)
-
-
 
 namespace rnllama {
 
@@ -227,7 +224,9 @@ struct llama_rn_context
     bool loadModel(gpt_params &params_)
     {
         params = params_;
-        std::tie(model, ctx) = llama_init_from_gpt_params(params);
+        llama_init_result result = llama_init_from_gpt_params(params);
+        model = result.model;
+        ctx = result.context;
         if (model == nullptr)
         {
            LOG_ERROR("unable to load model: %s", params_.model.c_str());

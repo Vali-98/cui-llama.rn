@@ -37,6 +37,9 @@
 #include <unistd.h>
 #endif
 
+#if defined(__ARM_FEATURE_SVE)
+int lm_ggml_sve_cnt_b = 0;
+#endif
 #if defined(__ARM_FEATURE_SVE) || defined(__ARM_FEATURE_MATMUL_INT8)
 #undef LM_GGML_USE_LLAMAFILE
 #endif
@@ -53,6 +56,9 @@
 // disable POSIX deprecation warnings
 // these functions are never going away, anyway
 #pragma warning(disable: 4996)
+
+// unreachable code because of multiple instances of code after LM_GGML_ABORT
+#pragma warning(disable: 4702)
 #endif
 
 #if defined(_WIN32)
@@ -185,7 +191,7 @@ static void lm_ggml_print_backtrace_symbols(void) {
         fprintf(stderr, "%d: %p %s\n", idx, addr, symbol);
     }
 }
-#elif defined(__linux__)
+#elif defined(__linux__) && defined(__GLIBC__)
 #include <execinfo.h>
 static void lm_ggml_print_backtrace_symbols(void) {
     // void * trace[100];
@@ -480,9 +486,16 @@ void lm_ggml_bf16_to_fp32_row(const lm_ggml_bf16_t * x, float * y, int64_t n) {
     }
 }
 
+void lm_ggml_fp32_to_bf16_row_ref(const float * x, lm_ggml_bf16_t * y, int64_t n) {
+    for (int i = 0; i < n; i++) {
+        y[i] = lm_ggml_compute_fp32_to_bf16(x[i]);
+    }
+}
+
 void lm_ggml_fp32_to_bf16_row(const float * x, lm_ggml_bf16_t * y, int64_t n) {
   int i = 0;
 #if defined(__AVX512BF16__)
+  // subnormals are flushed to zero on this platform
   for (; i + 32 <= n; i += 32) {
         _mm512_storeu_si512(
             (__m512i *)(y + i),
@@ -962,7 +975,7 @@ static const lm_ggml_type_traits_t type_traits[LM_GGML_TYPE_COUNT] = {
         .is_quantized             = false,
         .to_float                 = (lm_ggml_to_float_t) lm_ggml_bf16_to_fp32_row,
         .from_float               = (lm_ggml_from_float_t) lm_ggml_fp32_to_bf16_row,
-        .from_float_ref           = (lm_ggml_from_float_t) lm_ggml_fp32_to_bf16_row,
+        .from_float_ref           = (lm_ggml_from_float_t) lm_ggml_fp32_to_bf16_row_ref,
         .vec_dot                  = (lm_ggml_vec_dot_t) lm_ggml_vec_dot_bf16,
         .vec_dot_type             = LM_GGML_TYPE_BF16,
         .nrows                    = 1,
@@ -2302,7 +2315,7 @@ inline static void lm_ggml_vec_abs_f32  (const int n, float * y, const float * x
 inline static void lm_ggml_vec_sgn_f32  (const int n, float * y, const float * x) { for (int i = 0; i < n; ++i) y[i] = (x[i] > 0.f) ? 1.f : ((x[i] < 0.f) ? -1.f : 0.f); }
 inline static void lm_ggml_vec_step_f32 (const int n, float * y, const float * x) { for (int i = 0; i < n; ++i) y[i] = (x[i] > 0.f) ? 1.f : 0.f; }
 inline static void lm_ggml_vec_tanh_f32 (const int n, float * y, const float * x) { for (int i = 0; i < n; ++i) y[i] = tanhf(x[i]);  }
-inline static void lm_ggml_vec_elu_f32  (const int n, float * y, const float * x) { for (int i = 0; i < n; ++i) y[i] = (x[i] > 0.f) ? x[i] : expf(x[i])-1; }
+inline static void lm_ggml_vec_elu_f32  (const int n, float * y, const float * x) { for (int i = 0; i < n; ++i) y[i] = (x[i] > 0.f) ? x[i] : expm1f(x[i]); }
 inline static void lm_ggml_vec_relu_f32 (const int n, float * y, const float * x) { for (int i = 0; i < n; ++i) y[i] = (x[i] > 0.f) ? x[i] : 0.f; }
 inline static void lm_ggml_vec_leaky_relu_f32 (const int n, float * y, const float * x, const float ns) { for (int i = 0; i < n; ++i) y[i] = ((x[i] > 0.f) ? x[i] : 0.f) + ns * ((x[i] < 0.0f) ? x[i] : 0.f); }
 inline static void lm_ggml_vec_sigmoid_f32 (const int n, float * y, const float * x) { for (int i = 0; i < n; ++i) y[i] = 1.f / (1.f + expf(-x[i])); }
@@ -3550,6 +3563,12 @@ struct lm_ggml_context * lm_ggml_init(struct lm_ggml_init_params params) {
     LM_GGML_ASSERT(ctx->mem_buffer != NULL);
 
     LM_GGML_ASSERT_ALIGNED(ctx->mem_buffer);
+
+#if defined(__ARM_FEATURE_SVE)
+    if (!lm_ggml_sve_cnt_b) {
+        lm_ggml_sve_cnt_b = PR_SVE_VL_LEN_MASK & prctl(PR_SVE_GET_VL);
+    }
+#endif
 
     LM_GGML_PRINT_DEBUG("%s: context initialized\n", __func__);
 
@@ -5358,6 +5377,7 @@ static struct lm_ggml_tensor * lm_ggml_group_norm_impl(
     struct lm_ggml_context * ctx,
     struct lm_ggml_tensor * a,
     int n_groups,
+    float eps,
     bool inplace) {
 
     bool is_node = false;
@@ -5368,7 +5388,8 @@ static struct lm_ggml_tensor * lm_ggml_group_norm_impl(
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op_params[0] = n_groups;
+    lm_ggml_set_op_params_i32(result, 0, n_groups);
+    lm_ggml_set_op_params_f32(result, 1, eps);
 
     result->op = LM_GGML_OP_GROUP_NORM;
     result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
@@ -5380,15 +5401,17 @@ static struct lm_ggml_tensor * lm_ggml_group_norm_impl(
 struct lm_ggml_tensor * lm_ggml_group_norm(
     struct lm_ggml_context * ctx,
     struct lm_ggml_tensor * a,
-    int n_groups) {
-    return lm_ggml_group_norm_impl(ctx, a, n_groups, false);
+    int n_groups,
+    float eps) {
+    return lm_ggml_group_norm_impl(ctx, a, n_groups, eps, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_group_norm_inplace(
     struct lm_ggml_context * ctx,
     struct lm_ggml_tensor * a,
-    int n_groups) {
-    return lm_ggml_group_norm_impl(ctx, a, n_groups, true);
+    int n_groups,
+    float eps) {
+    return lm_ggml_group_norm_impl(ctx, a, n_groups, eps, true);
 }
 
 // lm_ggml_mul_mat
@@ -12079,9 +12102,10 @@ static void lm_ggml_compute_forward_group_norm_f32(
 
     LM_GGML_TENSOR_UNARY_OP_LOCALS
 
-    const float eps = 1e-6f; // TODO: make this a parameter
-
     // TODO: optimize
+
+    float eps;
+    memcpy(&eps, dst->op_params + 1, sizeof(float));
 
     int n_channels = src0->ne[2];
     int n_groups = dst->op_params[0];
@@ -20650,7 +20674,7 @@ size_t lm_ggml_quantize_chunk(
         case LM_GGML_TYPE_BF16:
             {
                 size_t elemsize = sizeof(lm_ggml_bf16_t);
-                lm_ggml_fp32_to_bf16_row(src + start, (lm_ggml_bf16_t *)dst + start, n);
+                lm_ggml_fp32_to_bf16_row_ref(src + start, (lm_ggml_bf16_t *)dst + start, n);
                 result = n * elemsize;
             } break;
         case LM_GGML_TYPE_F32:

@@ -351,15 +351,10 @@ void lm_ggml_backend_tensor_copy_async(lm_ggml_backend_t backend_src, lm_ggml_ba
     }
 
     // an async copy would normally happen after all the queued operations on both backends are completed
-    // sync src, set_async dst
-    if (lm_ggml_backend_buffer_is_host(src->buffer)) {
-        lm_ggml_backend_synchronize(backend_src);
-        lm_ggml_backend_tensor_set_async(backend_dst, dst, src->data, 0, lm_ggml_nbytes(src));
-    } else {
-        lm_ggml_backend_synchronize(backend_src);
-        lm_ggml_backend_tensor_copy(src, dst);
-        lm_ggml_backend_synchronize(backend_dst);
-    }
+    // to simulate the same behavior, we need to synchronize both backends first, and do a blocking copy
+    lm_ggml_backend_synchronize(backend_src);
+    lm_ggml_backend_synchronize(backend_dst);
+    lm_ggml_backend_tensor_copy(src, dst);
 }
 
 // events
@@ -1782,7 +1777,17 @@ static enum lm_ggml_status lm_ggml_backend_sched_compute_splits(lm_ggml_backend_
                 } else {
                     lm_ggml_backend_synchronize(split_backend);
                 }
-                lm_ggml_backend_tensor_copy_async(input_backend, split_backend, input, input_cpy);
+                // try async copy, but if not possible, we can still use a sync copy without synchronizing the dst backend, since we handle the synchronization here with multiple copies and events
+                // TODO: add public function to facilitate this, since applications do not have direct access to the backend interface
+                if (!split_backend->iface.cpy_tensor_async || !split_backend->iface.cpy_tensor_async(input_backend, split_backend, input, input_cpy)) {
+                    lm_ggml_backend_synchronize(input_backend);
+                    if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
+                        lm_ggml_backend_event_synchronize(sched->events[split_backend_id][sched->cur_copy]);
+                    } else {
+                        lm_ggml_backend_synchronize(split_backend);
+                    }
+                    lm_ggml_backend_tensor_copy(input, input_cpy);
+                }
             }
         }
 

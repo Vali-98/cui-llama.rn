@@ -107,13 +107,14 @@ for file in "${files[@]}"; do
   fi
 done
 
-echo "Replacement completed successfully!"
-
-yarn example
 
 # Clean up logs to be readable
 sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/log.h
 sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/ggml.h
+
+echo "Replacement completed successfully!"
+
+yarn example
 
 # Apply patch
 patch -p0 -d ./cpp < ./scripts/common.h.patch
