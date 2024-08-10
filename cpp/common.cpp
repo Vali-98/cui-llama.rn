@@ -1783,6 +1783,17 @@ std::string string_get_sortable_timestamp() {
     return std::string(timestamp_no_ns) + "." + std::string(timestamp_ns);
 }
 
+void string_replace_all(std::string & s, const std::string & search, const std::string & replace) {
+    if (search.empty()) {
+        return; // Avoid infinite loop if 'search' is an empty string
+    }
+    size_t pos = 0;
+    while ((pos = s.find(search, pos)) != std::string::npos) {
+        s.replace(pos, search.length(), replace);
+        pos += replace.length();
+    }
+}
+
 void string_process_escapes(std::string & input) {
     std::size_t input_len = input.length();
     std::size_t output_idx = 0;
@@ -2147,12 +2158,13 @@ struct llama_init_result llama_init_from_gpt_params(gpt_params & params) {
             llama_token decoder_start_token_id = llama_model_decoder_start_token(model);
             if (decoder_start_token_id == -1) {
                 decoder_start_token_id = bos;
-   mparams.vocab_only      = params.vocab_only;
             }
             tmp.clear();
             tmp.push_back(decoder_start_token_id);
         }
-        llama_decode(lctx, llama_batch_get_one(tmp.data(), std::min(tmp.size(), (size_t) params.n_batch), 0, 0));
+        if (llama_model_has_decoder(model)) {
+            llama_decode(lctx, llama_batch_get_one(tmp.data(), std::min(tmp.size(), (size_t) params.n_batch), 0, 0));
+        }
         llama_kv_cache_clear(lctx);
         llama_synchronize(lctx);
         llama_reset_timings(lctx);
@@ -2178,6 +2190,7 @@ struct llama_model_params llama_model_params_from_gpt_params(const gpt_params & 
     if (params.n_gpu_layers != -1) {
         mparams.n_gpu_layers = params.n_gpu_layers;
     }
+    mparams.vocab_only      = params.vocab_only;
     mparams.rpc_servers     = params.rpc_servers.c_str();
     mparams.main_gpu        = params.main_gpu;
     mparams.split_mode      = params.split_mode;

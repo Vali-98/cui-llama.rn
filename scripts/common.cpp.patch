@@ -13,9 +13,9 @@
 
  #if defined(_MSC_VER)
  #pragma warning(disable: 4244 4267) // possible loss of data
-@@ -2144,4 +2144,5 @@
+@@ -2187,3 +2187,4 @@
     auto mparams = llama_model_default_params();
 
 +   mparams.vocab_only      = params.vocab_only;
     if (params.n_gpu_layers != -1) {
-        mparams.n_gpu_layers = params.n_gpu_layers;
+    mparams.n_gpu_layers = params.n_gpu_layers;
