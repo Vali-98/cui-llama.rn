@@ -244,6 +244,8 @@
 #define LM_GGML_EXIT_SUCCESS 0
 #define LM_GGML_EXIT_ABORTED 1
 
+#define LM_GGML_ROPE_TYPE_NEOX 2
+
 #define LM_GGUF_MAGIC "GGUF"
 
 #define LM_GGUF_VERSION 3
@@ -1453,8 +1455,8 @@ extern "C" {
             struct lm_ggml_tensor  * b);
 
     // rotary position embedding
-    // if mode & 1 == 1, skip n_past elements (NOT SUPPORTED)
-    // if mode & 2 == 1, GPT-NeoX style
+    // if (mode & 1) - skip n_past elements (NOT SUPPORTED)
+    // if (mode & LM_GGML_ROPE_TYPE_NEOX) - GPT-NeoX style
     //
     // b is an int32 vector with size a->ne[2], it contains the positions
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_rope(

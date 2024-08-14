@@ -3586,13 +3586,8 @@ namespace GGUFMeta {
 
 using llama_buf_map = std::unordered_map<uint32_t, lm_ggml_backend_buffer_t>;
 
-// TODO: update when needed or think of some clever automatic way to do this
-static size_t llama_model_max_nodes(const llama_model & /*model*/) {
-    //if (model.arch == LLM_ARCH_LLAMA && model.hparams.n_layer > ??) { // llama-3 405B
-    //    return 32768;
-    //}
-
-    return 8192;
+static size_t llama_model_max_nodes(const llama_model & model) {
+    return std::max<size_t>(8192, model.tensors_by_name.size()*5);
 }
 
 struct llama_model_loader {
@@ -4912,7 +4907,6 @@ static void llm_load_hparams(
             } break;
         case LLM_ARCH_PHI3:
             {
-                ml.get_key(LLM_KV_ATTENTION_SLIDING_WINDOW, hparams.n_swa);
                 ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
 
                 switch (hparams.n_layer) {
@@ -4920,6 +4914,22 @@ static void llm_load_hparams(
                     case 32: model.type = e_model::MODEL_3B; break;
                     case 40: model.type = e_model::MODEL_14B; break;
                     default: model.type = e_model::MODEL_UNKNOWN;
+                }
+
+                // for backward compatibility ; see: https://github.com/ggerganov/llama.cpp/pull/8931
+                if ((hparams.n_layer == 32 || hparams.n_layer == 40) && hparams.n_ctx_train == 4096) {
+                    // default value for Phi-3-mini-4k-instruct and Phi-3-medium-4k-instruct
+                    hparams.n_swa = 2047;
+                } else if (hparams.n_layer == 32 && hparams.n_head_kv(0) == 32 && hparams.n_ctx_train == 131072) {
+                    // default value for Phi-3-mini-128k-instruct
+                    hparams.n_swa = 262144;
+                } else if (hparams.n_layer == 40 && hparams.n_ctx_train == 131072) {
+                    // default value for Phi-3-medium-128k-instruct
+                    hparams.n_swa = 131072;
+                }
+                bool found_swa = ml.get_key(LLM_KV_ATTENTION_SLIDING_WINDOW, hparams.n_swa, false);
+                if (!found_swa && hparams.n_swa == 0) {
+                    throw std::runtime_error("invalid value for sliding_window");
                 }
             } break;
         case LLM_ARCH_PLAMO:
@@ -14718,12 +14728,15 @@ static int llama_decode_internal(
             res  = nullptr;
             embd = nullptr;
         } else if (cparams.embeddings) {
-            res = nullptr; // do not extract logits for embedding case
-            embd = gf->nodes[gf->n_nodes - 1];
-            if (strcmp(embd->name, "result_embd_pooled") != 0) {
-                embd = gf->nodes[gf->n_nodes - 2];
+            res  = nullptr; // do not extract logits for embedding case
+            embd = nullptr;
+            for (int i = gf->n_nodes - 1; i >= 0; --i) {
+                if (strcmp(gf->nodes[i]->name, "result_embd_pooled") == 0) {
+                    embd = gf->nodes[i];
+                    break;
+                }
             }
-            LM_GGML_ASSERT(strcmp(embd->name, "result_embd_pooled") == 0 && "missing embeddings tensor");
+            LM_GGML_ASSERT(embd != nullptr && "missing embeddings tensor");
         } else {
             embd = nullptr; // do not extract embeddings when not needed
             LM_GGML_ASSERT(strcmp(res->name, "result_output") == 0 && "missing result_output tensor");
