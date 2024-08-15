@@ -297,7 +297,9 @@ struct llama_rn_context
         }
 
         // do Context Shift , may be buggy! TODO: Verify functionality
-        purge_missing_tokens(ctx, embd, prompt_tokens, params.n_predict, params.n_ctx);
+        if(!params.embedding){
+            purge_missing_tokens(ctx, embd, prompt_tokens, params.n_predict, params.n_ctx);
+        }
 
         // push the prompt into the sampling context (do not apply grammar)
         for (auto & token : prompt_tokens)
@@ -305,7 +307,7 @@ struct llama_rn_context
            llama_sampling_accept(ctx_sampling, ctx, token, false);
         }
         // compare the evaluated prompt with the new prompt
-        n_past = common_part(embd, prompt_tokens);
+        n_past = params.embedding? 0 :  common_part(embd, prompt_tokens);
         LLAMA_LOG_INFO("%s:        n_past: %zu", __func__,  n_past);
         LLAMA_LOG_INFO("%s:        embd size: %zu", __func__,  embd.size());
         LLAMA_LOG_INFO("%s:        prompt_tokens size: %zu", __func__,  prompt_tokens.size());
@@ -342,9 +344,9 @@ struct llama_rn_context
         completion_token_output result;
         result.tok = -1;
 
+        // this truncation should never trigger with good context shifting
         if (embd.size() >= (size_t)params.n_ctx)
         {
-            // Shift context
 
             const int n_left    = n_past - params.n_keep - 1;
             const int n_discard = n_left/2;
@@ -546,9 +548,21 @@ struct llama_rn_context
             LOG_WARNING("embedding disabled, embedding: %s", params.embedding);
             return std::vector<float>(n_embd, 0.0f);
         }
-        const float *data = llama_get_embeddings(ctx);
-        std::vector<float> embedding(data, data + n_embd);
-        return embedding;
+        float *data;
+        
+        if(params.pooling_type == 0){
+            data = llama_get_embeddings(ctx);
+        }
+        else {
+            data = llama_get_embeddings_seq(ctx, 0);
+        }
+        
+        if(!data) {
+            return std::vector<float>(n_embd, 0.0f);
+        }
+        std::vector<float> embedding(data, data + n_embd), out(data, data + n_embd);
+        llama_embd_normalize(embedding.data(), out.data(), n_embd, params.embd_normalize);
+        return out;
     }
 
     std::string bench(int pp, int tg, int pl, int nr)

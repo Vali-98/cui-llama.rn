@@ -286,8 +286,7 @@ export default function App() {
           msg.type === 'text'
         ) {   
           // eslint-disable-next-line no-await-in-loop
-           const tokenLength = context?.tokenizeSync(getFormattedChat([systemMessage, {content: msg.text, role: ""}, ...inputMessages]) ?? "").tokens.length ?? 0
-          console.log(tokenLength)
+          const tokenLength = context?.tokenizeSync(getFormattedChat([systemMessage, {content: msg.text, role: ""}, ...inputMessages]) ?? "").tokens.length ?? 0
           if(tokenLength + maxGen< maxContext)
           inputMessages.push({
             role: msg.author.id === systemId ? 'assistant' : 'user',
@@ -317,11 +316,28 @@ export default function App() {
         '\nTokenize:',
         `(${tokens?.length} tokens, ${t1 - t0}ms})`,
       )
-
+      
       // Test embedding
-      // await context?.embedding(formattedChat).then((result) => {
-      //   console.log('Embedding:', result)
-      // })
+      /*
+      const s1 = 'test string'
+      const s2 = 'test string 2'
+      const vec1 = (await context?.embedding(s1))?.embedding ?? []
+      const vec2 = (await context?.embedding(s2))?.embedding ?? []
+      console.log(vec1)
+      console.log(vec2)
+      if(vec1!==undefined && vec2!=undefined) {
+        let dotprod = 0
+        let v2s = 0
+        let v1s = 0
+        for(let i = 0; i < vec1.length; i += 1) {
+          v2s += vec2[i] * vec2[i]
+          v1s += vec1[i] * vec1[i]
+          dotprod += vec1[i] * vec2[i]
+        }
+
+        console.log((dotprod/(v2s * v1s)).toFixed(5))
+        
+      } */
 
       // Test detokenize
       // await context?.detokenize(tokens).then((result) => {
