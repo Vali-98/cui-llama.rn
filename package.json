@@ -1,6 +1,6 @@
 {
   "name": "cui-llama.rn",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Fork of llama.rn for ChatterUI",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
