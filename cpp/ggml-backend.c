@@ -1018,10 +1018,6 @@ static bool lm_ggml_is_view_op(enum lm_ggml_op op) {
 #define LM_GGML_SCHED_MAX_BACKENDS 16
 #endif
 
-#ifndef LM_GGML_SCHED_MAX_SPLITS
-#define LM_GGML_SCHED_MAX_SPLITS 2048
-#endif
-
 #ifndef LM_GGML_SCHED_MAX_SPLIT_INPUTS
 #define LM_GGML_SCHED_MAX_SPLIT_INPUTS LM_GGML_MAX_SRC
 #endif
@@ -1125,7 +1121,8 @@ static int lm_ggml_backend_sched_backend_from_buffer(lm_ggml_backend_sched_t sch
 }
 
 #if 0
-static char causes[LM_GGML_DEFAULT_GRAPH_SIZE*16 + LM_GGML_SCHED_MAX_SPLITS*LM_GGML_SCHED_MAX_SPLIT_INPUTS][128]; // debug only
+#define LM_GGML_SCHED_MAX_SPLITS_DEBUG 4096
+static char causes[LM_GGML_DEFAULT_GRAPH_SIZE*16 + LM_GGML_SCHED_MAX_SPLITS_DEBUG*LM_GGML_SCHED_MAX_SPLIT_INPUTS][128]; // debug only
 #define SET_CAUSE(node, ...) sprintf(causes[hash_id(node)], __VA_ARGS__)
 #define GET_CAUSE(node) causes[hash_id(node)]
 #else
@@ -1549,7 +1546,6 @@ static void lm_ggml_backend_sched_split_graph(lm_ggml_backend_sched_t sched, str
                     sched->splits = realloc(sched->splits, sched->splits_capacity * sizeof(struct lm_ggml_backend_sched_split));
                     LM_GGML_ASSERT(sched->splits != NULL);
                 }
-                LM_GGML_ASSERT(i_split < LM_GGML_SCHED_MAX_SPLITS);
                 split = &sched->splits[i_split];
                 split->backend_id = node_backend_id;
                 split->i_start = i;
@@ -1865,13 +1861,14 @@ lm_ggml_backend_sched_t lm_ggml_backend_sched_new(
     sched->hv_tensor_backend_ids = malloc(sched->hash_set.size * sizeof(sched->hv_tensor_backend_ids[0]));
     sched->hv_tensor_copies      = malloc(sched->hash_set.size * sched->n_backends * sched->n_copies * sizeof(struct lm_ggml_tensor *));
 
-    const size_t nodes_size = graph_size + LM_GGML_SCHED_MAX_SPLITS*LM_GGML_SCHED_MAX_SPLIT_INPUTS*2;
+    const size_t lm_ggml_sched_max_splits = graph_size; // at most there is one split for each node in the graph
+    const size_t nodes_size = graph_size + lm_ggml_sched_max_splits*LM_GGML_SCHED_MAX_SPLIT_INPUTS*2;
     sched->node_backend_ids = calloc(nodes_size, sizeof(sched->node_backend_ids[0]));
     sched->leaf_backend_ids = calloc(nodes_size, sizeof(sched->leaf_backend_ids[0]));
     sched->prev_node_backend_ids = calloc(nodes_size, sizeof(sched->prev_node_backend_ids[0]));
     sched->prev_leaf_backend_ids = calloc(nodes_size, sizeof(sched->prev_leaf_backend_ids[0]));
 
-    sched->context_buffer_size = LM_GGML_SCHED_MAX_SPLITS*LM_GGML_SCHED_MAX_SPLIT_INPUTS*2*sizeof(struct lm_ggml_tensor) + lm_ggml_graph_overhead_custom(graph_size, false);
+    sched->context_buffer_size = lm_ggml_sched_max_splits*LM_GGML_SCHED_MAX_SPLIT_INPUTS*2*sizeof(struct lm_ggml_tensor) + lm_ggml_graph_overhead_custom(graph_size, false);
     sched->context_buffer = malloc(sched->context_buffer_size);
 
     const int initial_splits_capacity = 16;

@@ -13,7 +13,7 @@
 
  #if defined(_MSC_VER)
  #pragma warning(disable: 4244 4267) // possible loss of data
-@@ -2187,3 +2187,4 @@
+@@ -2219,3 +2219,4 @@
     auto mparams = llama_model_default_params();
 
 +   mparams.vocab_only      = params.vocab_only;
