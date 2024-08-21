@@ -370,6 +370,8 @@ Java_com_rnllama_LlamaContext_doCompletion(
     jint top_k,
     jfloat top_p,
     jfloat min_p,
+    jfloat xtc_t,
+    jfloat xtc_p,
     jfloat tfs_z,
     jfloat typical_p,
     jint seed,
@@ -413,6 +415,8 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.typical_p = typical_p;
     sparams.n_probs = n_probs;
     sparams.grammar = env->GetStringUTFChars(grammar, nullptr);
+    sparams.xtc_t = xtc_t;
+    sparams.xtc_p = xtc_p;
 
     sparams.logit_bias.clear();
     if (ignore_eos) {

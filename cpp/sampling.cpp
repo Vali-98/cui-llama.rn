@@ -229,6 +229,7 @@ std::vector<llama_sampler_type> llama_sampling_types_from_chars(const std::strin
 // no reasons to expose this function in header
 static void sampler_queue(
                    struct llama_context * ctx_main,
+                   struct llama_sampling_context * ctx_sampling,
             const llama_sampling_params & params,
                  llama_token_data_array & cur_p,
                                  size_t   min_keep) {
@@ -238,6 +239,8 @@ static void sampler_queue(
     const int32_t       top_k             = params.top_k;
     const float         top_p             = params.top_p;
     const float         min_p             = params.min_p;
+    const float         xtc_t             = params.xtc_t;
+    const float         xtc_p             = params.xtc_p;
     const float         tfs_z             = params.tfs_z;
     const float         typical_p         = params.typical_p;
     const std::vector<llama_sampler_type> & samplers_sequence = params.samplers_sequence;
@@ -249,6 +252,7 @@ static void sampler_queue(
             case llama_sampler_type::TYPICAL_P: llama_sample_typical  (ctx_main, &cur_p, typical_p, min_keep); break;
             case llama_sampler_type::TOP_P    : llama_sample_top_p    (ctx_main, &cur_p, top_p,     min_keep); break;
             case llama_sampler_type::MIN_P    : llama_sample_min_p    (ctx_main, &cur_p, min_p,     min_keep); break;
+            case llama_sampler_type::XTC      : llama_sample_xtc      (ctx_main, &cur_p, xtc_t, xtc_p, min_keep, ctx_sampling->rng); break;
             case llama_sampler_type::TEMPERATURE:
                 if (dynatemp_range > 0) {
                     float dynatemp_min = std::max(0.0f, temp - dynatemp_range);
@@ -302,7 +306,7 @@ static llama_token llama_sampling_sample_impl(
             // temperature sampling
             size_t min_keep = std::max(1, params.min_keep);
 
-            sampler_queue(ctx_main, params, cur_p, min_keep);
+            sampler_queue(ctx_main, ctx_sampling, params, cur_p, min_keep);
 
             id = llama_sample_token_with_rng(ctx_main, &cur_p, ctx_sampling->rng);
 

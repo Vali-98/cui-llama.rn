@@ -171,6 +171,98 @@ void llama_sample_top_p_impl(struct llama_sampling * smpl, llama_token_data_arra
     }
 }
 
+void llama_sample_xtc_impl(struct llama_sampling * smpl, llama_token_data_array * candidates, float xtc_threshold, float xtc_probability, size_t min_keep,  std::mt19937 & rng) {
+    if(xtc_threshold <= 0.0f || !candidates-> size) {
+        return;
+    }
+    // TODO: xtc impl
+    bool xtc_applied = false;
+    const int64_t t_start_sample_us = lm_ggml_time_us();
+    
+    // unsorted iteration
+    if (!candidates->sorted) {
+        std::vector<llama_token_data> top_tokens, low_tokens;
+
+        // split candidates into two arrays for low and high tokens
+        for (size_t i = 0; i < candidates->size; ++i) {
+            if (candidates->data[i].logit >= xtc_threshold) {
+                top_tokens.push_back(candidates->data[i]);
+            } else {
+                low_tokens.push_back(candidates-> data[i]);
+            }
+        }
+        // if there is only one or no top_tokens, do not truncate
+
+        if (top_tokens.size() <= 1) {
+            return;
+        }
+
+        // sort top_tokens
+        std::sort(top_tokens.begin(), top_tokens.end(), [](const llama_token_data & a, const llama_token_data & b) {
+            return a.logit > b.logit;
+        });
+            
+        // insert top_tokens with probability. Always insert lowest top_token
+        low_tokens.push_back(top_tokens[0]);
+        std::uniform_real_distribution<float> random_float(0.0 , 1.0);
+        for (size_t i = 1; i < top_tokens.size(); ++i) {
+            if(random_float(rng) <= xtc_probability) {
+                low_tokens.push_back(top_tokens[i]);
+            }
+        }
+        if(low_tokens.size() >= min_keep) {
+           memcpy(candidates->data, low_tokens.data(), low_tokens.size()*sizeof(llama_token_data));
+            candidates->size = low_tokens.size();
+            xtc_applied = true;
+        }
+    }
+    // sorted iteration
+    
+    if (!xtc_applied) {
+        // Sort the logits in descending order
+        if (!candidates->sorted) {
+            std::sort(candidates->data, candidates->data + candidates->size, [](const llama_token_data & a, const llama_token_data & b) {
+                return a.logit > b.logit;
+            });
+            candidates->sorted = true;
+        }
+
+        // find last token over threshold
+
+        size_t last_index = 0;
+
+        for (; last_index < candidates -> size; ++last_index) {
+            if(candidates -> data[last_index].logit < xtc_threshold) {
+                break;
+            }
+        }
+        last_index--;
+        // check if only 1 last index token or total less than min_keep
+        if(last_index <= 1 || candidates-> size - last_index < min_keep) {
+            return;
+        }
+        // indexes to be skipped
+        size_t safe_index = 0;
+        // remove tokens until last threshold item
+        candidates -> data;
+        std::uniform_real_distribution<float> random_float(0.0 , 1.0);
+        for (size_t i = 0; i < last_index; i++) {
+            if(random_float(rng) < xtc_probability) {
+                if(i != safe_index) {
+                    std::swap(candidates-> data[i], candidates->data[safe_index]);
+                }
+                safe_index++;
+            }
+        }
+        candidates -> data = candidates -> data + safe_index;
+        candidates -> size = candidates -> size - safe_index;
+    }
+
+    if (smpl) {
+        smpl->t_sample_us += lm_ggml_time_us() - t_start_sample_us;
+    }
+}
+
 void llama_sample_min_p_impl(struct llama_sampling * smpl, llama_token_data_array * candidates, float p, size_t min_keep) {
     if (p <= 0.0f || !candidates->size) {
         return;

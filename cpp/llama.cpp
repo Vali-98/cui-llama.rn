@@ -339,6 +339,7 @@ enum llm_kv {
     LLM_KV_SSM_CONV_KERNEL,
     LLM_KV_SSM_STATE_SIZE,
     LLM_KV_SSM_TIME_STEP_RANK,
+    LLM_KV_SSM_DT_B_C_RMS,
 
     LLM_KV_TOKENIZER_MODEL,
     LLM_KV_TOKENIZER_PRE,
@@ -437,6 +438,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_SSM_INNER_SIZE,                "%s.ssm.inner_size"     },
     { LLM_KV_SSM_STATE_SIZE,                "%s.ssm.state_size"     },
     { LLM_KV_SSM_TIME_STEP_RANK,            "%s.ssm.time_step_rank" },
+    { LLM_KV_SSM_DT_B_C_RMS,                "%s.ssm.dt_b_c_rms" },
 
     { LLM_KV_TOKENIZER_MODEL,                "tokenizer.ggml.model"                    },
     { LLM_KV_TOKENIZER_PRE,                  "tokenizer.ggml.pre"                      },
@@ -2248,6 +2250,7 @@ struct llama_hparams {
     uint32_t ssm_d_inner = 0;
     uint32_t ssm_d_state = 0;
     uint32_t ssm_dt_rank = 0;
+    bool ssm_dt_b_c_rms = false;
 
     float f_clamp_kqv      = 0.0f;
     float f_max_alibi_bias = 0.0f;
@@ -2297,6 +2300,7 @@ struct llama_hparams {
         if (this->ssm_d_inner != other.ssm_d_inner) return true;
         if (this->ssm_d_state != other.ssm_d_state) return true;
         if (this->ssm_dt_rank != other.ssm_dt_rank) return true;
+        if (this->ssm_dt_b_c_rms != other.ssm_dt_b_c_rms) return true;
 
         if (this->dec_start_token_id != other.dec_start_token_id) return true;
 
@@ -5063,6 +5067,7 @@ static void llm_load_hparams(
                 ml.get_key(LLM_KV_SSM_INNER_SIZE,     hparams.ssm_d_inner);
                 ml.get_key(LLM_KV_SSM_STATE_SIZE,     hparams.ssm_d_state);
                 ml.get_key(LLM_KV_SSM_TIME_STEP_RANK, hparams.ssm_dt_rank);
+                ml.get_key(LLM_KV_SSM_DT_B_C_RMS, hparams.ssm_dt_b_c_rms, false);
 
                 ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
 
@@ -5918,6 +5923,7 @@ static void llm_load_print_meta(llama_model_loader & ml, llama_model & model) {
         LLAMA_LOG_INFO("%s: ssm_d_inner      = %u\n",     __func__, hparams.ssm_d_inner);
         LLAMA_LOG_INFO("%s: ssm_d_state      = %u\n",     __func__, hparams.ssm_d_state);
         LLAMA_LOG_INFO("%s: ssm_dt_rank      = %u\n",     __func__, hparams.ssm_dt_rank);
+        LLAMA_LOG_INFO("%s: ssm_dt_b_c_rms   = %d\n",     __func__, hparams.ssm_dt_b_c_rms);
     }
 
     LLAMA_LOG_INFO("%s: model type       = %s\n",     __func__, llama_model_type_name(model.type));
@@ -6183,9 +6189,9 @@ static bool llm_load_tensors(
                             layer.ffn_up   = ml.create_tensor(ctx_split, tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd,   n_ff});
 
                             // optional MLP bias
-                            layer.ffn_gate_b = ml.create_tensor(ctx_split, tn(LLM_TENSOR_FFN_GATE, "bias", i), {n_ff}, llama_model_loader::TENSOR_NOT_REQUIRED);
-                            layer.ffn_down_b = ml.create_tensor(ctx_split, tn(LLM_TENSOR_FFN_DOWN, "bias", i), {n_embd}, llama_model_loader::TENSOR_NOT_REQUIRED);
-                            layer.ffn_up_b   = ml.create_tensor(ctx_split, tn(LLM_TENSOR_FFN_UP,   "bias", i), {n_ff}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                            layer.ffn_gate_b = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_GATE, "bias", i), {n_ff}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                            layer.ffn_down_b = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_DOWN, "bias", i), {n_embd}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                            layer.ffn_up_b   = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_UP,   "bias", i), {n_ff}, llama_model_loader::TENSOR_NOT_REQUIRED);
                         } else {
                             layer.ffn_gate_inp = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_GATE_INP, "weight", i), {n_embd, n_expert});
 
@@ -6509,7 +6515,7 @@ static bool llm_load_tensors(
                         layer.bv = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_V, "bias",   i), {n_embd_gqa});
 
                         layer.wo = ml.create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd, n_embd}); //output_dens
-                        layer.bo = ml.create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_OUT, "bias",   i), {n_embd}); //output_dens
+                        layer.bo = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_OUT, "bias",   i), {n_embd}); //output_dens
 
                         layer.attn_out_norm   = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_OUT_NORM, "weight", i), {n_embd}); //output_norm
                         layer.attn_out_norm_b = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_OUT_NORM, "bias",   i), {n_embd});
@@ -12172,6 +12178,10 @@ struct llm_build_context {
         LM_GGML_ASSERT(2 * d_model == d_inner);
         const int64_t d_state = hparams.ssm_d_state;
         const int64_t dt_rank = hparams.ssm_dt_rank;
+        // Some variants of Mamba arch (e.g. FalconMamba do apply layer norm on B and Dt layers)
+        const bool ssm_dt_b_c_rms = hparams.ssm_dt_b_c_rms;
+        // Use the same RMS norm as the final layer norm
+        const float norm_rms_eps = hparams.f_norm_rms_eps;
 
         struct lm_ggml_tensor * cur;
         struct lm_ggml_tensor * inpL;
@@ -12251,6 +12261,13 @@ struct llm_build_context {
                 struct lm_ggml_tensor * dt = lm_ggml_view_2d(ctx0, x_db, dt_rank, n_tokens, x_db->nb[1], 0);
                 struct lm_ggml_tensor * B  = lm_ggml_view_2d(ctx0, x_db, d_state, n_tokens, x_db->nb[1], lm_ggml_element_size(x_db)*dt_rank);
                 struct lm_ggml_tensor * C  = lm_ggml_view_2d(ctx0, x_db, d_state, n_tokens, x_db->nb[1], lm_ggml_element_size(x_db)*(dt_rank+d_state));
+
+                // Some Mamba variants (e.g. FalconMamba) apply RMS norm in B, C & Dt layers
+                if (ssm_dt_b_c_rms) {
+                    dt = lm_ggml_rms_norm(ctx0, dt, norm_rms_eps);
+                    B = lm_ggml_rms_norm(ctx0, B, norm_rms_eps);
+                    C = lm_ggml_rms_norm(ctx0, C, norm_rms_eps);
+                }
 
                 // {dt_rank, d_inner} * {dt_rank, n_tokens} => {d_inner, n_tokens}
                 dt = llm_build_lora_mm(lctx, ctx0, model.layers[il].ssm_dt, dt);
@@ -16116,6 +16133,9 @@ static lm_ggml_type llama_tensor_get_type(quantize_state_internal & qs, lm_ggml_
             case LM_GGML_TYPE_Q6_K:   new_type = LM_GGML_TYPE_Q8_0;   break;
             default: throw std::runtime_error("\nUnsupported tensor size encountered\n");
         }
+        if (tensor->ne[0] % lm_ggml_blck_size(new_type) != 0) {
+            new_type = LM_GGML_TYPE_F16;
+        }
         LLAMA_LOG_WARN(" - using fallback quantization %s\n", lm_ggml_type_name(new_type));
         ++qs.n_fallback;
     }
@@ -16444,8 +16464,6 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         // do not quantize Mamba's small yet 2D weights
         // NOTE: can't use LLM_TN here because the layer number is not known
         quantize &= name.find("ssm_conv1d.weight") == std::string::npos;
-        quantize &= name.find("ssm_x.weight")      == std::string::npos;
-        quantize &= name.find("ssm_dt.weight")     == std::string::npos;
 
         // do not quantize relative position bias (T5)
         quantize &= name.find("attn_rel_b.weight") == std::string::npos;
@@ -19539,6 +19557,10 @@ void llama_sample_top_p(struct llama_context * ctx, llama_token_data_array * can
 
 void llama_sample_min_p(struct llama_context * ctx, llama_token_data_array * candidates, float p, size_t min_keep) {
     llama_sample_min_p_impl(ctx ? &ctx->sampling : nullptr, candidates, p, min_keep);
+}
+
+void llama_sample_xtc(struct llama_context * ctx, llama_token_data_array * candidates, float xtc_threshold, float xtc_probability, size_t min_keep, std::mt19937 rng){
+    llama_sample_xtc_impl(ctx ? &ctx-> sampling: nullptr, candidates, xtc_threshold, xtc_probability, min_keep, rng);
 }
 
 void llama_sample_tail_free(struct llama_context * ctx, llama_token_data_array * candidates, float z, size_t min_keep) {

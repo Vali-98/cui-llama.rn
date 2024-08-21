@@ -35,6 +35,8 @@ export type NativeCompletionParams = {
   top_k?: number
   top_p?: number
   min_p?: number
+  xtc_t?: number
+  xtc_p?: number
   tfs_z?: number
   typical_p?: number
   temperature?: number // -> temp

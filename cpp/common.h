@@ -81,7 +81,7 @@ enum dimre_method {
 struct gpt_params {
     uint32_t seed                 = LLAMA_DEFAULT_SEED; // RNG seed
 
-   bool vocab_only = false;
+    bool vocab_only               = false;
     int32_t n_threads             = cpu_get_num_math();
     int32_t n_threads_draft       =    -1;
     int32_t n_threads_batch       =    -1; // number of threads to use for batch processing (-1 = use n_threads)
@@ -279,7 +279,7 @@ struct gpt_params {
     std::string lora_outfile = "ggml-lora-merged-f16.gguf";
 };
 
-void gpt_params_handle_hf_token(gpt_params & params);
+void gpt_params_parse_from_env(gpt_params & params);
 void gpt_params_handle_model_default(gpt_params & params);
 
 bool gpt_params_parse_ex   (int argc, char ** argv, gpt_params & params);

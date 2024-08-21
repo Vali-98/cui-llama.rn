@@ -117,12 +117,12 @@ echo "Replacement completed successfully!"
 yarn example
 
 # Apply patch
-patch -p0 -d ./cpp < ./scripts/common.h.patch
-patch -p0 -d ./cpp < ./scripts/common.cpp.patch
-patch -p0 -d ./cpp < ./scripts/log.h.patch
-patch -p0 -d ./cpp < ./scripts/llama.cpp.patch
-patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
-patch -p0 -d ./cpp < ./scripts/ggml.c.patch
+# patch -p0 -d ./cpp < ./scripts/common.h.patch
+# patch -p0 -d ./cpp < ./scripts/common.cpp.patch
+# patch -p0 -d ./cpp < ./scripts/log.h.patch
+# patch -p0 -d ./cpp < ./scripts/llama.cpp.patch
+# patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
+# patch -p0 -d ./cpp < ./scripts/ggml.c.patch
 
 
 if [ "$OS" = "Darwin" ]; then
@@ -139,7 +139,5 @@ if [ "$OS" = "Darwin" ]; then
   cd example/ios
   echo export NODE_BINARY=$(command -v node) > .xcode.env.local
 fi
-
-rm cpp/*.orig
 
 read -p "Press enter to continue"
