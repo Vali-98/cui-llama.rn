@@ -175,9 +175,10 @@ void llama_sample_xtc_impl(struct llama_sampling * smpl, llama_token_data_array 
     if(xtc_threshold <= 0.0f || !candidates-> size) {
         return;
     }
-    // TODO: xtc impl
+    
     bool xtc_applied = false;
     const int64_t t_start_sample_us = lm_ggml_time_us();
+    llama_sample_softmax(nullptr, candidates);
     
     // unsorted iteration
     if (!candidates->sorted) {
@@ -199,7 +200,7 @@ void llama_sample_xtc_impl(struct llama_sampling * smpl, llama_token_data_array 
 
         // sort top_tokens
         std::sort(top_tokens.begin(), top_tokens.end(), [](const llama_token_data & a, const llama_token_data & b) {
-            return a.logit > b.logit;
+            return a.logit < b.logit;
         });
             
         // insert top_tokens with probability. Always insert lowest top_token
@@ -232,30 +233,31 @@ void llama_sample_xtc_impl(struct llama_sampling * smpl, llama_token_data_array 
         size_t last_index = 0;
 
         for (; last_index < candidates -> size; ++last_index) {
-            if(candidates -> data[last_index].logit < xtc_threshold) {
+            if(candidates -> data[last_index].p < xtc_threshold) {
                 break;
             }
         }
-        last_index--;
-        // check if only 1 last index token or total less than min_keep
-        if(last_index <= 1 || candidates-> size - last_index < min_keep) {
+        
+        // check if only 1 token above threshold
+        if(last_index <= 1) {
             return;
         }
-        // indexes to be skipped
-        size_t safe_index = 0;
+        last_index--;
+        // items beyond safe index will be ignored
+        size_t safe_index = candidates -> size;
+
         // remove tokens until last threshold item
-        candidates -> data;
         std::uniform_real_distribution<float> random_float(0.0 , 1.0);
         for (size_t i = 0; i < last_index; i++) {
             if(random_float(rng) < xtc_probability) {
-                if(i != safe_index) {
-                    std::swap(candidates-> data[i], candidates->data[safe_index]);
+                std::swap(candidates-> data[i], candidates->data[safe_index - 1]);
+                safe_index--;
+                if (candidates-> sorted) {
+                    candidates -> sorted = false;
                 }
-                safe_index++;
             }
         }
-        candidates -> data = candidates -> data + safe_index;
-        candidates -> size = candidates -> size - safe_index;
+        candidates -> size = safe_index;
     }
 
     if (smpl) {
