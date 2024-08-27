@@ -1760,7 +1760,8 @@ extern "C" {
             struct lm_ggml_tensor  * v,
             struct lm_ggml_tensor  * mask,
             float                 scale,
-            float                 max_bias);
+            float                 max_bias,
+            float                 logit_softcap);
 
     LM_GGML_API void lm_ggml_flash_attn_ext_set_prec(
             struct lm_ggml_tensor * a,
@@ -1777,10 +1778,8 @@ extern "C" {
 
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_ssm_conv(
             struct lm_ggml_context * ctx,
-            struct lm_ggml_tensor  * s,
-            struct lm_ggml_tensor  * x,
-            struct lm_ggml_tensor  * c,
-            struct lm_ggml_tensor  * sq);
+            struct lm_ggml_tensor  * sx,
+            struct lm_ggml_tensor  * c);
 
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_ssm_scan(
             struct lm_ggml_context * ctx,
@@ -1789,8 +1788,7 @@ extern "C" {
             struct lm_ggml_tensor  * dt,
             struct lm_ggml_tensor  * A,
             struct lm_ggml_tensor  * B,
-            struct lm_ggml_tensor  * C,
-            struct lm_ggml_tensor  * sq);
+            struct lm_ggml_tensor  * C);
 
     // partition into non-overlapping windows with padding if needed
     // example:
