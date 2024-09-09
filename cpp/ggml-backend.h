@@ -63,6 +63,7 @@ extern "C" {
     LM_GGML_API void lm_ggml_backend_tensor_set_async(lm_ggml_backend_t backend,       struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size);
     LM_GGML_API void lm_ggml_backend_tensor_get_async(lm_ggml_backend_t backend, const struct lm_ggml_tensor * tensor,       void * data, size_t offset, size_t size);
 
+    // "offset" refers to the offset of the tensor data for setting/getting data
     LM_GGML_API LM_GGML_CALL void lm_ggml_backend_tensor_set(      struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size);
     LM_GGML_API LM_GGML_CALL void lm_ggml_backend_tensor_get(const struct lm_ggml_tensor * tensor,       void * data, size_t offset, size_t size);
 
@@ -102,6 +103,7 @@ extern "C" {
 
     LM_GGML_API LM_GGML_CALL bool lm_ggml_backend_is_cpu                (lm_ggml_backend_t backend);
     LM_GGML_API           void lm_ggml_backend_cpu_set_n_threads     (lm_ggml_backend_t backend_cpu, int n_threads);
+    LM_GGML_API           void lm_ggml_backend_cpu_set_threadpool    (lm_ggml_backend_t backend_cpu, lm_ggml_threadpool_t threadpool);
     LM_GGML_API           void lm_ggml_backend_cpu_set_abort_callback(lm_ggml_backend_t backend_cpu, lm_ggml_abort_callback abort_callback, void * abort_callback_data);
 
     // Create a backend buffer from an existing pointer

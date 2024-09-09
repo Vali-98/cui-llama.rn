@@ -45,8 +45,6 @@ cp ./llama.cpp/src/unicode-data.cpp ./cpp/unicode-data.cpp
 cp ./llama.cpp/common/log.h ./cpp/log.h
 cp ./llama.cpp/common/common.h ./cpp/common.h
 cp ./llama.cpp/common/common.cpp ./cpp/common.cpp
-cp ./llama.cpp/common/grammar-parser.h ./cpp/grammar-parser.h
-cp ./llama.cpp/common/grammar-parser.cpp ./cpp/grammar-parser.cpp
 cp ./llama.cpp/common/json.hpp ./cpp/json.hpp
 cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
 cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp

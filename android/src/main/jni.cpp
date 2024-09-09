@@ -165,7 +165,7 @@ Java_com_rnllama_LlamaContext_initContext(
     int max_threads = std::thread::hardware_concurrency();
     // Use 2 threads by default on 4-core devices, 4 threads on more cores
     int default_n_threads = max_threads == 4 ? 2 : min(4, max_threads);
-    defaultParams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
+    defaultParams.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
     defaultParams.n_gpu_layers = n_gpu_layers;
 
@@ -385,18 +385,18 @@ Java_com_rnllama_LlamaContext_doCompletion(
 
     llama->rewind();
 
-    llama_reset_timings(llama->ctx);
+    //llama_reset_timings(llama->ctx);
 
     llama->params.prompt = env->GetStringUTFChars(prompt, nullptr);
-    llama->params.seed = seed;
+    llama->params.sparams.seed = seed;
 
     int max_threads = std::thread::hardware_concurrency();
     // Use 2 threads by default on 4-core devices, 4 threads on more cores
     int default_n_threads = max_threads == 4 ? 2 : min(4, max_threads);
-    llama->params.n_threads = n_threads > 0 ? n_threads : default_n_threads;
+    llama->params.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
     llama->params.n_predict = n_predict;
-    llama->params.ignore_eos = ignore_eos;
+    llama->params.sparams.ignore_eos = ignore_eos;
 
     auto & sparams = llama->params.sparams;
     sparams.temp = temperature;
@@ -412,7 +412,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.top_p = top_p;
     sparams.min_p = min_p;
     sparams.tfs_z = tfs_z;
-    sparams.typical_p = typical_p;
+    sparams.typ_p = typical_p;
     sparams.n_probs = n_probs;
     sparams.grammar = env->GetStringUTFChars(grammar, nullptr);
     sparams.xtc_t = xtc_t;
@@ -420,7 +420,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
 
     sparams.logit_bias.clear();
     if (ignore_eos) {
-        sparams.logit_bias[llama_token_eos(llama->model)] = -INFINITY;
+        sparams.logit_bias[llama_token_eos(llama->model)].bias = -INFINITY;
     }
 
     const int n_vocab = llama_n_vocab(llama_get_model(llama->ctx));
@@ -434,9 +434,9 @@ Java_com_rnllama_LlamaContext_doCompletion(
             llama_token tok = static_cast<llama_token>(doubleArray[0]);
             if (tok >= 0 && tok < n_vocab) {
                 if (doubleArray[1] != 0) {  // If the second element is not false (0)
-                    sparams.logit_bias[tok] = doubleArray[1];
+                    sparams.logit_bias[tok].bias = doubleArray[1];
                 } else {
-                    sparams.logit_bias[tok] = -INFINITY;
+                    sparams.logit_bias[tok].bias = -INFINITY;
                 }
             }
 
@@ -522,7 +522,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
         }
     }
 
-    llama_print_timings(llama->ctx);
+    llama_perf_print(llama->ctx, LLAMA_PERF_TYPE_CONTEXT);
     llama->is_predicting = false;
 
     auto result = createWriteableMap(env);
@@ -537,16 +537,17 @@ Java_com_rnllama_LlamaContext_doCompletion(
     putString(env, result, "stopping_word", llama->stopping_word.c_str());
     putInt(env, result, "tokens_cached", llama->n_past);
 
-    const auto timings = llama_get_timings(llama->ctx);
+    const auto timings_token = llama_get_token_timings(llama->ctx);
+    
     auto timingsResult = createWriteableMap(env);
-    putInt(env, timingsResult, "prompt_n", timings.n_p_eval);
-    putInt(env, timingsResult, "prompt_ms", timings.t_p_eval_ms);
-    putInt(env, timingsResult, "prompt_per_token_ms", timings.t_p_eval_ms / timings.n_p_eval);
-    putDouble(env, timingsResult, "prompt_per_second", 1e3 / timings.t_p_eval_ms * timings.n_p_eval);
-    putInt(env, timingsResult, "predicted_n", timings.n_eval);
-    putInt(env, timingsResult, "predicted_ms", timings.t_eval_ms);
-    putInt(env, timingsResult, "predicted_per_token_ms", timings.t_eval_ms / timings.n_eval);
-    putDouble(env, timingsResult, "predicted_per_second", 1e3 / timings.t_eval_ms * timings.n_eval);
+    putInt(env, timingsResult, "prompt_n", timings_token.n_p_eval);
+    putInt(env, timingsResult, "prompt_ms", timings_token.t_p_eval_ms);
+    putInt(env, timingsResult, "prompt_per_token_ms", timings_token.t_p_eval_ms / timings_token.n_p_eval);
+    putDouble(env, timingsResult, "prompt_per_second", 1e3 / timings_token.t_p_eval_ms * timings_token.n_p_eval);
+    putInt(env, timingsResult, "predicted_n", timings_token.n_eval);
+    putInt(env, timingsResult, "predicted_ms", timings_token.t_eval_ms);
+    putInt(env, timingsResult, "predicted_per_token_ms", timings_token.t_eval_ms / timings_token.n_eval);
+    putDouble(env, timingsResult, "predicted_per_second", 1e3 / timings_token.t_eval_ms * timings_token.n_eval);
 
     putMap(env, result, "timings", timingsResult);
 
@@ -633,7 +634,10 @@ Java_com_rnllama_LlamaContext_embedding(
 
     llama->rewind();
 
-    llama_reset_timings(llama->ctx);
+    // llama_reset_timings(llama->ctx);
+    llama_perf_reset(llama->ctx, LLAMA_PERF_TYPE_CONTEXT);
+    gpt_sampler_reset(llama->ctx_sampling);
+    
 
     llama->params.prompt = text_chars;
 
@@ -691,7 +695,7 @@ Java_com_rnllama_LlamaContext_freeContext(
     }
     if (llama->ctx_sampling != nullptr)
     {
-        llama_sampling_free(llama->ctx_sampling);
+        gpt_sampler_free(llama->ctx_sampling);
     }
     context_map.erase((long) llama->ctx);
 }

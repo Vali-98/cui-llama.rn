@@ -163,8 +163,8 @@ struct llama_rn_context
 
     llama_model *model = nullptr;
     llama_context *ctx = nullptr;
-    llama_sampling_context *ctx_sampling = nullptr;
-
+    gpt_sampler *ctx_sampling = nullptr;
+  
     int n_ctx;
 
     bool truncated = false;
@@ -188,7 +188,7 @@ struct llama_rn_context
         }
         if (ctx_sampling != nullptr)
         {
-            llama_sampling_free(ctx_sampling);
+            gpt_sampler_free(ctx_sampling);
         }
     }
 
@@ -215,9 +215,9 @@ struct llama_rn_context
 
     bool initSampling() {
         if (ctx_sampling != nullptr) {
-            llama_sampling_free(ctx_sampling);
+            gpt_sampler_free(ctx_sampling);
         }
-        ctx_sampling = llama_sampling_init(params.sparams);
+        ctx_sampling = gpt_sampler_init(model, params.sparams);
         return ctx_sampling != nullptr;
     }
 
@@ -304,7 +304,7 @@ struct llama_rn_context
         // push the prompt into the sampling context (do not apply grammar)
         for (auto & token : prompt_tokens)
         {
-           llama_sampling_accept(ctx_sampling, ctx, token, false);
+           gpt_sampler_accept(ctx_sampling, token, false);
         }
         // compare the evaluated prompt with the new prompt
         n_past = params.embedding? 0 :  common_part(embd, prompt_tokens);
@@ -334,8 +334,7 @@ struct llama_rn_context
     {
         // number of tokens to keep when resetting context
         n_remain = params.n_predict;
-        llama_set_rng_seed(ctx, params.seed);
-
+        llama_perf_reset(ctx, LLAMA_PERF_TYPE_CONTEXT);
         is_predicting = true;
     }
 
@@ -383,7 +382,7 @@ struct llama_rn_context
                 LOG_ERROR("failed to eval, n_eval: %d, n_past: %d, n_threads: %d, embd: %s",
                     n_eval,
                     n_past,
-                    params.n_threads,
+                    params.cpuparams.n_threads,
                     tokens_to_str(ctx, embd.cbegin() + n_past, embd.cend()).c_str()
                 );
                 has_next_token = false;
@@ -411,22 +410,26 @@ struct llama_rn_context
             std::vector<llama_token_data> candidates;
             candidates.reserve(llama_n_vocab(model));
 
-            result.tok = llama_sampling_sample(ctx_sampling, ctx, NULL);
-
-            llama_token_data_array cur_p = { ctx_sampling->cur.data(), ctx_sampling->cur.size(), false };
+            result.tok = gpt_sampler_sample(ctx_sampling, ctx, -1);
+            
+            llama_token_data_array cur_p = *gpt_sampler_get_candidates(ctx_sampling);
 
             const int32_t n_probs = params.sparams.n_probs;
+            
+            
             if (params.sparams.temp <= 0 && n_probs > 0)
             {
                 // For llama_sample_token_greedy we need to sort candidates
-                llama_sample_softmax(ctx, &cur_p);
+                llama_sampler_init_softmax();
             }
+            
 
             for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
             {
                 result.probs.push_back({cur_p.data[i].id, cur_p.data[i].p});
             }
-            llama_sampling_accept(ctx_sampling, ctx, result.tok, true);
+
+            gpt_sampler_accept(ctx_sampling, result.tok, true);
             if (tg) {
                 num_tokens_predicted++;
             }

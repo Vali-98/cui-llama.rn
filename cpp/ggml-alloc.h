@@ -7,8 +7,8 @@ extern "C" {
 #endif
 
 typedef struct lm_ggml_backend_buffer_type * lm_ggml_backend_buffer_type_t;
-typedef struct lm_ggml_backend_buffer * lm_ggml_backend_buffer_t;
-typedef struct lm_ggml_backend * lm_ggml_backend_t;
+typedef struct      lm_ggml_backend_buffer * lm_ggml_backend_buffer_t;
+typedef struct             lm_ggml_backend * lm_ggml_backend_t;
 
 // Tensor allocator
 struct lm_ggml_tallocr {

@@ -31,6 +31,8 @@ struct lm_ggml_metal_kernel {
 enum lm_ggml_metal_kernel_type {
     LM_GGML_METAL_KERNEL_TYPE_ADD,
     LM_GGML_METAL_KERNEL_TYPE_ADD_ROW,
+    LM_GGML_METAL_KERNEL_TYPE_SUB,
+    LM_GGML_METAL_KERNEL_TYPE_SUB_ROW,
     LM_GGML_METAL_KERNEL_TYPE_MUL,
     LM_GGML_METAL_KERNEL_TYPE_MUL_ROW,
     LM_GGML_METAL_KERNEL_TYPE_DIV,
@@ -207,6 +209,9 @@ enum lm_ggml_metal_kernel_type {
     LM_GGML_METAL_KERNEL_TYPE_CPY_F32_IQ4_NL,
     LM_GGML_METAL_KERNEL_TYPE_CONCAT,
     LM_GGML_METAL_KERNEL_TYPE_SQR,
+    LM_GGML_METAL_KERNEL_TYPE_SQRT,
+    LM_GGML_METAL_KERNEL_TYPE_SIN,
+    LM_GGML_METAL_KERNEL_TYPE_COS,
     LM_GGML_METAL_KERNEL_TYPE_SUM_ROWS,
 
     LM_GGML_METAL_KERNEL_TYPE_COUNT
@@ -493,6 +498,8 @@ static struct lm_ggml_backend_metal_context * lm_ggml_metal_init(int n_cb) {
 
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD,                           add,                            true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW,                       add_row,                        true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SUB,                           sub,                            true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SUB_ROW,                       sub_row,                        true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_MUL,                           mul,                            true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_MUL_ROW,                       mul_row,                        true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_DIV,                           div,                            true);
@@ -669,6 +676,9 @@ static struct lm_ggml_backend_metal_context * lm_ggml_metal_init(int n_cb) {
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_CPY_F32_IQ4_NL,                cpy_f32_iq4_nl,                 true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_CONCAT,                        concat,                         true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SQR,                           sqr,                            true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SQRT,                          sqrt,                           true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SIN,                           sin,                            true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_COS,                           cos,                            true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SUM_ROWS,                      sum_rows,                       true);
     }
 
@@ -769,23 +779,29 @@ static bool lm_ggml_metal_supports_op(const struct lm_ggml_backend_metal_context
         case LM_GGML_OP_PERMUTE:
         case LM_GGML_OP_CONCAT:
         case LM_GGML_OP_ADD:
+        case LM_GGML_OP_SUB:
         case LM_GGML_OP_ACC:
         case LM_GGML_OP_MUL:
         case LM_GGML_OP_DIV:
         case LM_GGML_OP_REPEAT:
         case LM_GGML_OP_SCALE:
         case LM_GGML_OP_CLAMP:
-        case LM_GGML_OP_SQR:
-        case LM_GGML_OP_SUM_ROWS:
             return true;
+        case LM_GGML_OP_SQR:
+        case LM_GGML_OP_SQRT:
+        case LM_GGML_OP_SIN:
+        case LM_GGML_OP_COS:
+            return lm_ggml_is_contiguous(op->src[0]);
+        case LM_GGML_OP_SUM_ROWS:
         case LM_GGML_OP_SOFT_MAX:
         case LM_GGML_OP_RMS_NORM:
         case LM_GGML_OP_GROUP_NORM:
             return ctx->support_simdgroup_reduction;
         case LM_GGML_OP_NORM:
         case LM_GGML_OP_ROPE:
-        case LM_GGML_OP_IM2COL:
             return true;
+        case LM_GGML_OP_IM2COL:
+            return op->src[0]->type == LM_GGML_TYPE_F16;
         case LM_GGML_OP_POOL_1D:
         case LM_GGML_OP_POOL_2D:
             return false;
@@ -1057,6 +1073,7 @@ static enum lm_ggml_status lm_ggml_metal_graph_compute(
                         [encoder dispatchThreadgroups:MTLSizeMake(ne1, ne2, ne3) threadsPerThreadgroup:MTLSizeMake(nth, 1, 1)];
                     } break;
                 case LM_GGML_OP_ADD:
+                case LM_GGML_OP_SUB:
                 case LM_GGML_OP_MUL:
                 case LM_GGML_OP_DIV:
                     {
@@ -1080,6 +1097,7 @@ static enum lm_ggml_status lm_ggml_metal_graph_compute(
                             nb = ne00 / 4;
                             switch (dst->op) {
                                 case LM_GGML_OP_ADD: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW].pipeline; break;
+                                case LM_GGML_OP_SUB: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SUB_ROW].pipeline; break;
                                 case LM_GGML_OP_MUL: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_MUL_ROW].pipeline; break;
                                 case LM_GGML_OP_DIV: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_DIV_ROW].pipeline; break;
                                 default: LM_GGML_ABORT("fatal error");
@@ -1089,6 +1107,7 @@ static enum lm_ggml_status lm_ggml_metal_graph_compute(
                         } else {
                             switch (dst->op) {
                                 case LM_GGML_OP_ADD: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD].pipeline; break;
+                                case LM_GGML_OP_SUB: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SUB].pipeline; break;
                                 case LM_GGML_OP_MUL: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_MUL].pipeline; break;
                                 case LM_GGML_OP_DIV: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_DIV].pipeline; break;
                                 default: LM_GGML_ABORT("fatal error");
@@ -1409,6 +1428,48 @@ static enum lm_ggml_status lm_ggml_metal_graph_compute(
                         LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
 
                         id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SQR].pipeline;
+
+                        [encoder setComputePipelineState:pipeline];
+                        [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                        [encoder setBuffer:id_dst  offset:offs_dst atIndex:1];
+
+                        const int64_t n = lm_ggml_nelements(dst);
+
+                        [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                    } break;
+                case LM_GGML_OP_SQRT:
+                    {
+                        LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
+
+                        id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SQRT].pipeline;
+
+                        [encoder setComputePipelineState:pipeline];
+                        [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                        [encoder setBuffer:id_dst  offset:offs_dst atIndex:1];
+
+                        const int64_t n = lm_ggml_nelements(dst);
+
+                        [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                    } break;
+                case LM_GGML_OP_SIN:
+                    {
+                        LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
+
+                        id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SIN].pipeline;
+
+                        [encoder setComputePipelineState:pipeline];
+                        [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                        [encoder setBuffer:id_dst  offset:offs_dst atIndex:1];
+
+                        const int64_t n = lm_ggml_nelements(dst);
+
+                        [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                    } break;
+                case LM_GGML_OP_COS:
+                    {
+                        LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
+
+                        id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_COS].pipeline;
 
                         [encoder setComputePipelineState:pipeline];
                         [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];

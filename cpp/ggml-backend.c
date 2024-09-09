@@ -722,9 +722,11 @@ lm_ggml_backend_buffer_type_t lm_ggml_backend_cpu_hbm_buffer_type(void) {
 #endif
 
 struct lm_ggml_backend_cpu_context {
-    int n_threads;
-    void * work_data;
-    size_t work_size;
+    int                 n_threads;
+    lm_ggml_threadpool_t   threadpool;
+
+    void *              work_data;
+    size_t              work_size;
 
     lm_ggml_abort_callback abort_callback;
     void *              abort_callback_data;
@@ -759,7 +761,7 @@ LM_GGML_CALL static lm_ggml_backend_graph_plan_t lm_ggml_backend_cpu_graph_plan_
 
     struct lm_ggml_backend_plan_cpu * cpu_plan = malloc(sizeof(struct lm_ggml_backend_plan_cpu));
 
-    cpu_plan->cplan = lm_ggml_graph_plan(cgraph, cpu_ctx->n_threads);
+    cpu_plan->cplan = lm_ggml_graph_plan(cgraph, cpu_ctx->n_threads, cpu_ctx->threadpool);
     cpu_plan->cgraph = *cgraph; // FIXME: deep copy
 
     if (cpu_plan->cplan.work_size > 0) {
@@ -796,7 +798,7 @@ LM_GGML_CALL static enum lm_ggml_status lm_ggml_backend_cpu_graph_plan_compute(l
 LM_GGML_CALL static enum lm_ggml_status lm_ggml_backend_cpu_graph_compute(lm_ggml_backend_t backend, struct lm_ggml_cgraph * cgraph) {
     struct lm_ggml_backend_cpu_context * cpu_ctx = (struct lm_ggml_backend_cpu_context *)backend->context;
 
-    struct lm_ggml_cplan cplan = lm_ggml_graph_plan(cgraph, cpu_ctx->n_threads);
+    struct lm_ggml_cplan cplan = lm_ggml_graph_plan(cgraph, cpu_ctx->n_threads, cpu_ctx->threadpool);
 
     if (cpu_ctx->work_size < cplan.work_size) {
         free(cpu_ctx->work_data);
@@ -825,6 +827,10 @@ LM_GGML_CALL static bool lm_ggml_backend_cpu_supports_op(lm_ggml_backend_t backe
                 op->type != LM_GGML_TYPE_IQ1_M; // missing type_traits.from_float
         case LM_GGML_OP_MUL_MAT:
             return op->src[1]->type == LM_GGML_TYPE_F32 || op->src[1]->type == lm_ggml_internal_get_type_traits(op->src[0]->type).vec_dot_type;
+        case LM_GGML_OP_ROPE_BACK:
+            return op->src[2] == NULL && (op->op_params[2] & 4) == 0;
+        case LM_GGML_OP_IM2COL_BACK:
+            return op->src[0]->type == LM_GGML_TYPE_F32 && op->src[1]->type == LM_GGML_TYPE_F32;
         default:
             return true;
     }
@@ -873,6 +879,7 @@ lm_ggml_backend_t lm_ggml_backend_cpu_init(void) {
     }
 
     ctx->n_threads           = LM_GGML_DEFAULT_N_THREADS;
+    ctx->threadpool          = NULL;
     ctx->work_data           = NULL;
     ctx->work_size           = 0;
     ctx->abort_callback      = NULL;
@@ -901,6 +908,18 @@ void lm_ggml_backend_cpu_set_n_threads(lm_ggml_backend_t backend_cpu, int n_thre
 
     struct lm_ggml_backend_cpu_context * ctx = (struct lm_ggml_backend_cpu_context *)backend_cpu->context;
     ctx->n_threads = n_threads;
+}
+
+void lm_ggml_backend_cpu_set_threadpool(lm_ggml_backend_t backend_cpu, lm_ggml_threadpool_t threadpool) {
+    LM_GGML_ASSERT(lm_ggml_backend_is_cpu(backend_cpu));
+
+    struct lm_ggml_backend_cpu_context * ctx = (struct lm_ggml_backend_cpu_context *)backend_cpu->context;
+
+    if (ctx->threadpool && ctx->threadpool != threadpool) {
+        // already had a different threadpool, pause/suspend it before switching
+        lm_ggml_threadpool_pause(ctx->threadpool);
+    }
+    ctx->threadpool = threadpool;
 }
 
 void lm_ggml_backend_cpu_set_abort_callback(lm_ggml_backend_t backend_cpu, lm_ggml_abort_callback abort_callback, void * abort_callback_data) {
@@ -1148,6 +1167,11 @@ static int lm_ggml_backend_sched_backend_id_from_cur(lm_ggml_backend_sched_t sch
             SET_CAUSE(tensor, "1.vsrc");
             return cur_backend_id;
         }
+    }
+
+    if (tensor->buffer || (tensor->view_src && tensor->view_src->buffer)) {
+        // since the tensor is pre-allocated, it cannot be moved to another backend
+        LM_GGML_ABORT("pre-allocated tensor in a backend that cannot run the operation");
     }
 
     // graph input
@@ -1629,7 +1653,7 @@ static void lm_ggml_backend_sched_split_graph(lm_ggml_backend_sched_t sched, str
         sched->prev_leaf_backend_ids = tmp;
     }
 
-    int graph_size = graph->n_nodes + sched->n_splits*LM_GGML_SCHED_MAX_SPLIT_INPUTS*2;
+    int graph_size = MAX(graph->n_nodes, graph->n_leafs) + sched->n_splits*LM_GGML_SCHED_MAX_SPLIT_INPUTS*2*sched->n_copies;
     if (sched->graph.size < graph_size) {
         sched->graph.size = graph_size;
         sched->graph.nodes = realloc(sched->graph.nodes, graph_size * sizeof(struct lm_ggml_tensor *));
@@ -1681,6 +1705,7 @@ static void lm_ggml_backend_sched_split_graph(lm_ggml_backend_sched_t sched, str
             for (int c = 0; c < sched->n_copies; c++) {
                 struct lm_ggml_tensor * input_cpy = tensor_id_copy(id, backend_id, c);
                 sched->leaf_backend_ids[graph_copy->n_leafs] = backend_id;
+                assert(graph_copy->size > graph_copy->n_leafs);
                 graph_copy->leafs[graph_copy->n_leafs++] = input_cpy;
             }
         }
@@ -1694,6 +1719,7 @@ static void lm_ggml_backend_sched_split_graph(lm_ggml_backend_sched_t sched, str
                 for (int c = 0; c < sched->n_copies; c++) {
                     struct lm_ggml_tensor * input_cpy = tensor_id_copy(id, backend_id, c);
                     sched->leaf_backend_ids[graph_copy->n_leafs] = backend_id;
+                    assert(graph_copy->size > graph_copy->n_leafs);
                     graph_copy->leafs[graph_copy->n_leafs++] = input_cpy;
                 }
             }
@@ -1704,6 +1730,7 @@ static void lm_ggml_backend_sched_split_graph(lm_ggml_backend_sched_t sched, str
     for (int i = 0; i < graph->n_leafs; i++) {
         struct lm_ggml_tensor * leaf = graph->leafs[i];
         sched->leaf_backend_ids[graph_copy->n_leafs] = tensor_backend_id(leaf);
+        assert(graph_copy->size > graph_copy->n_leafs);
         graph_copy->leafs[graph_copy->n_leafs++] = leaf;
     }
 }

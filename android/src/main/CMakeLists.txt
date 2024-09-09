@@ -19,7 +19,6 @@ set(
     ${RNLLAMA_LIB_DIR}/ggml.c
     ${RNLLAMA_LIB_DIR}/ggml-quants.c
     ${RNLLAMA_LIB_DIR}/common.cpp
-    ${RNLLAMA_LIB_DIR}/grammar-parser.cpp
     ${RNLLAMA_LIB_DIR}/json.hpp
     ${RNLLAMA_LIB_DIR}/json-schema-to-grammar.cpp
     ${RNLLAMA_LIB_DIR}/sampling.cpp
@@ -65,6 +64,7 @@ function(build_library target_name cpu_flags)
     # endif ()
 endfunction()
 
+
 # Default target (no specific CPU features)
 build_library("rnllama" "")
 
@@ -78,5 +78,4 @@ if (${ANDROID_ABI} STREQUAL "arm64-v8a")
 elseif (${ANDROID_ABI} STREQUAL "x86_64")
     # x86_64 target
     build_library("rnllama_x86_64" "-march=x86-64" "-mtune=intel" "-msse4.2" "-mpopcnt")
-
 endif ()
