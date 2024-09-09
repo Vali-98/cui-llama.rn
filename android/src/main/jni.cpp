@@ -3,6 +3,7 @@
 // #include <android/asset_manager_jni.h>
 #include <android/log.h>
 #include <cstdlib>
+#include <ctime>
 #include <sys/sysinfo.h>
 #include <string>
 #include <thread>
@@ -388,7 +389,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     //llama_reset_timings(llama->ctx);
 
     llama->params.prompt = env->GetStringUTFChars(prompt, nullptr);
-    llama->params.sparams.seed = seed;
+    llama->params.sparams.seed = (seed == -1) ? time(NULL) : seed;
 
     int max_threads = std::thread::hardware_concurrency();
     // Use 2 threads by default on 4-core devices, 4 threads on more cores
