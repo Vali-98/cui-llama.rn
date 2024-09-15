@@ -358,6 +358,7 @@ extern "C" {
 
     struct lm_ggml_object;
     struct lm_ggml_context;
+    struct lm_ggml_cgraph;
 
     // NOTE: always add types at the end of the enum to keep backward compatibility
     enum lm_ggml_type {
@@ -575,23 +576,9 @@ extern "C" {
         LM_GGML_TENSOR_FLAG_PARAM  = 4,
     };
 
-    // ggml object
-    struct lm_ggml_object {
-        size_t offs;
-        size_t size;
-
-        struct lm_ggml_object * next;
-
-        enum lm_ggml_object_type type;
-
-        char padding[4];
-    };
-
-    static const size_t LM_GGML_OBJECT_SIZE = sizeof(struct lm_ggml_object);
-
     // n-dimensional tensor
     struct lm_ggml_tensor {
-        enum lm_ggml_type         type;
+        enum lm_ggml_type type;
 
         LM_GGML_DEPRECATED(enum lm_ggml_backend_type backend, "use the buffer type to find the storage location of the tensor");
 
@@ -655,7 +642,7 @@ extern "C" {
 
     struct lm_ggml_threadpool;     // forward declaration, see ggml.c
 
-    typedef struct  lm_ggml_threadpool * lm_ggml_threadpool_t;
+    typedef struct lm_ggml_threadpool * lm_ggml_threadpool_t;
 
     // the compute plan that needs to be prepared for lm_ggml_graph_compute()
     // since https://github.com/ggerganov/ggml/issues/287
@@ -669,35 +656,6 @@ extern "C" {
         // abort lm_ggml_graph_compute when true
         lm_ggml_abort_callback abort_callback;
         void *              abort_callback_data;
-    };
-
-    enum lm_ggml_cgraph_eval_order {
-        LM_GGML_CGRAPH_EVAL_ORDER_LEFT_TO_RIGHT = 0,
-        LM_GGML_CGRAPH_EVAL_ORDER_RIGHT_TO_LEFT,
-        LM_GGML_CGRAPH_EVAL_ORDER_COUNT
-    };
-
-    typedef uint32_t lm_ggml_bitset_t;
-
-    struct lm_ggml_hash_set {
-        size_t size;
-        lm_ggml_bitset_t * used;       // whether or not the keys are in use i.e. set
-        struct lm_ggml_tensor ** keys; // actual tensors in the set, keys[i] is only defined if lm_ggml_bitset_get(used, i)
-    };
-
-    // computation graph
-    struct lm_ggml_cgraph {
-        int size;
-        int n_nodes;
-        int n_leafs;
-
-        struct lm_ggml_tensor ** nodes;
-        struct lm_ggml_tensor ** grads;
-        struct lm_ggml_tensor ** leafs;
-
-        struct lm_ggml_hash_set visited_hash_set;
-
-        enum lm_ggml_cgraph_eval_order order;
     };
 
     // scratch buffer
@@ -2017,8 +1975,6 @@ extern "C" {
     typedef void (*lm_ggml_custom2_op_t)(struct lm_ggml_tensor * dst , const struct lm_ggml_tensor * a, const struct lm_ggml_tensor * b, int ith, int nth, void * userdata);
     typedef void (*lm_ggml_custom3_op_t)(struct lm_ggml_tensor * dst , const struct lm_ggml_tensor * a, const struct lm_ggml_tensor * b, const struct lm_ggml_tensor * c, int ith, int nth, void * userdata);
 
-    #define LM_GGML_N_TASKS_MAX -1
-
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_map_custom1(
             struct lm_ggml_context   * ctx,
             struct lm_ggml_tensor    * a,
@@ -2088,30 +2044,35 @@ extern "C" {
             struct lm_ggml_context * ctx,
             struct lm_ggml_tensor  * tensor);
 
-
     LM_GGML_API void lm_ggml_build_forward_expand (struct lm_ggml_cgraph * cgraph, struct lm_ggml_tensor * tensor);
     LM_GGML_API void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool keep);
 
     // graph allocation in a context
-    LM_GGML_API struct lm_ggml_cgraph * lm_ggml_new_graph         (struct lm_ggml_context * ctx); // size = LM_GGML_DEFAULT_GRAPH_SIZE, grads = false
-    LM_GGML_API struct lm_ggml_cgraph * lm_ggml_new_graph_custom  (struct lm_ggml_context * ctx, size_t size, bool grads);
-    LM_GGML_API struct lm_ggml_cgraph * lm_ggml_graph_dup         (struct lm_ggml_context * ctx, struct lm_ggml_cgraph * cgraph);
-    LM_GGML_API struct lm_ggml_cgraph   lm_ggml_graph_view        (struct lm_ggml_cgraph * cgraph, int i0, int i1);
-    LM_GGML_API void                 lm_ggml_graph_cpy         (struct lm_ggml_cgraph * src, struct lm_ggml_cgraph * dst);
-    LM_GGML_API void                 lm_ggml_graph_reset       (struct lm_ggml_cgraph * cgraph);  // zero grads
-    LM_GGML_API void                 lm_ggml_graph_clear       (struct lm_ggml_cgraph * cgraph);
+    LM_GGML_API struct lm_ggml_cgraph * lm_ggml_new_graph       (struct lm_ggml_context * ctx); // size = LM_GGML_DEFAULT_GRAPH_SIZE, grads = false
+    LM_GGML_API struct lm_ggml_cgraph * lm_ggml_new_graph_custom(struct lm_ggml_context * ctx, size_t size, bool grads);
+    LM_GGML_API struct lm_ggml_cgraph * lm_ggml_graph_dup       (struct lm_ggml_context * ctx, struct lm_ggml_cgraph * cgraph);
+    LM_GGML_API void                 lm_ggml_graph_cpy       (struct lm_ggml_cgraph * src, struct lm_ggml_cgraph * dst);
+    LM_GGML_API void                 lm_ggml_graph_reset     (struct lm_ggml_cgraph * cgraph);  // zero grads
+    LM_GGML_API void                 lm_ggml_graph_clear     (struct lm_ggml_cgraph * cgraph);
+
+    LM_GGML_API int                   lm_ggml_graph_size   (struct lm_ggml_cgraph * cgraph);
+    LM_GGML_API struct lm_ggml_tensor *  lm_ggml_graph_node   (struct lm_ggml_cgraph * cgraph, int i); // if i < 0, returns nodes[n_nodes + i]
+    LM_GGML_API struct lm_ggml_tensor ** lm_ggml_graph_nodes  (struct lm_ggml_cgraph * cgraph);
+    LM_GGML_API int                   lm_ggml_graph_n_nodes(struct lm_ggml_cgraph * cgraph);
+
+    LM_GGML_API void   lm_ggml_graph_add_node(struct lm_ggml_cgraph * cgraph, struct lm_ggml_tensor * tensor);
 
     LM_GGML_API size_t lm_ggml_graph_overhead(void);
     LM_GGML_API size_t lm_ggml_graph_overhead_custom(size_t size, bool grads);
 
-    LM_GGML_API struct lm_ggml_threadpool_params   lm_ggml_threadpool_params_default(int n_threads);
-    LM_GGML_API void                            lm_ggml_threadpool_params_init  (struct lm_ggml_threadpool_params *p, int n_threads);
-    LM_GGML_API bool                            lm_ggml_threadpool_params_match (const struct lm_ggml_threadpool_params *p0, const struct lm_ggml_threadpool_params *p1);
-    LM_GGML_API struct lm_ggml_threadpool*         lm_ggml_threadpool_new          (struct lm_ggml_threadpool_params  * params);
-    LM_GGML_API void                            lm_ggml_threadpool_free         (struct lm_ggml_threadpool * threadpool);
-    LM_GGML_API int                             lm_ggml_threadpool_get_n_threads(struct lm_ggml_threadpool * threadpool);
-    LM_GGML_API void                            lm_ggml_threadpool_pause        (struct lm_ggml_threadpool * threadpool);
-    LM_GGML_API void                            lm_ggml_threadpool_resume       (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_API struct lm_ggml_threadpool_params lm_ggml_threadpool_params_default(int n_threads);
+    LM_GGML_API void                          lm_ggml_threadpool_params_init   (struct lm_ggml_threadpool_params * p, int n_threads);
+    LM_GGML_API bool                          lm_ggml_threadpool_params_match  (const struct lm_ggml_threadpool_params * p0, const struct lm_ggml_threadpool_params * p1);
+    LM_GGML_API struct lm_ggml_threadpool *      lm_ggml_threadpool_new          (struct lm_ggml_threadpool_params  * params);
+    LM_GGML_API void                          lm_ggml_threadpool_free         (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_API int                           lm_ggml_threadpool_get_n_threads(struct lm_ggml_threadpool * threadpool);
+    LM_GGML_API void                          lm_ggml_threadpool_pause        (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_API void                          lm_ggml_threadpool_resume       (struct lm_ggml_threadpool * threadpool);
 
     // lm_ggml_graph_plan() has to be called before lm_ggml_graph_compute()
     // when plan.work_size > 0, caller must allocate memory for plan.work_data
@@ -2509,6 +2470,7 @@ extern "C" {
     LM_GGML_API int lm_ggml_cpu_has_gpublas    (void);
     LM_GGML_API int lm_ggml_cpu_has_sse3       (void);
     LM_GGML_API int lm_ggml_cpu_has_ssse3      (void);
+    LM_GGML_API int lm_ggml_cpu_has_riscv_v    (void);
     LM_GGML_API int lm_ggml_cpu_has_sycl       (void);
     LM_GGML_API int lm_ggml_cpu_has_rpc        (void);
     LM_GGML_API int lm_ggml_cpu_has_vsx        (void);

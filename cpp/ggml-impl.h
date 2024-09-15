@@ -629,7 +629,15 @@ inline static float lm_ggml_lookup_fp16_to_fp32(lm_ggml_fp16_t f) {
 #define LM_GGML_FP32_TO_FP16(x) LM_GGML_COMPUTE_FP32_TO_FP16(x)
 #endif
 
+enum lm_ggml_cgraph_eval_order {
+    LM_GGML_CGRAPH_EVAL_ORDER_LEFT_TO_RIGHT = 0,
+    LM_GGML_CGRAPH_EVAL_ORDER_RIGHT_TO_LEFT,
+    LM_GGML_CGRAPH_EVAL_ORDER_COUNT
+};
+
 // bitset
+
+typedef uint32_t lm_ggml_bitset_t;
 
 static_assert(sizeof(lm_ggml_bitset_t) == 4, "bitset_t constants must be updated");
 #define BITSET_SHR 5 // log2(sizeof(lm_ggml_bitset_t)*8)
@@ -655,6 +663,12 @@ static inline void lm_ggml_bitset_clear(lm_ggml_bitset_t * bitset, size_t i) {
 
 #define LM_GGML_HASHSET_FULL ((size_t)-1)
 #define LM_GGML_HASHSET_ALREADY_EXISTS ((size_t)-2)
+
+struct lm_ggml_hash_set {
+    size_t size;
+    lm_ggml_bitset_t * used;       // whether or not the keys are in use i.e. set
+    struct lm_ggml_tensor ** keys; // actual tensors in the set, keys[i] is only defined if lm_ggml_bitset_get(used, i)
+};
 
 struct lm_ggml_hash_set lm_ggml_hash_set_new(size_t size);
 void                 lm_ggml_hash_set_free(struct lm_ggml_hash_set * hash_set);
@@ -744,6 +758,24 @@ static size_t lm_ggml_hash_find_or_insert(struct lm_ggml_hash_set * hash_set, st
     // visited all hash table entries -> not found
     LM_GGML_ABORT("fatal error");
 }
+
+// computation graph
+
+struct lm_ggml_cgraph {
+    int size;
+    int n_nodes;
+    int n_leafs;
+
+    struct lm_ggml_tensor ** nodes;
+    struct lm_ggml_tensor ** grads;
+    struct lm_ggml_tensor ** leafs;
+
+    struct lm_ggml_hash_set visited_hash_set;
+
+    enum lm_ggml_cgraph_eval_order order;
+};
+
+struct lm_ggml_cgraph lm_ggml_graph_view(struct lm_ggml_cgraph * cgraph, int i0, int i1);
 
 #ifdef __cplusplus
 }

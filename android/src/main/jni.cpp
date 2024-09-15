@@ -523,7 +523,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
         }
     }
 
-    llama_perf_print(llama->ctx, LLAMA_PERF_TYPE_CONTEXT);
+    llama_perf_context_print(llama->ctx);
     llama->is_predicting = false;
 
     auto result = createWriteableMap(env);
@@ -636,7 +636,7 @@ Java_com_rnllama_LlamaContext_embedding(
     llama->rewind();
 
     // llama_reset_timings(llama->ctx);
-    llama_perf_reset(llama->ctx, LLAMA_PERF_TYPE_CONTEXT);
+    llama_perf_context_reset(llama->ctx);
     gpt_sampler_reset(llama->ctx_sampling);
     
 

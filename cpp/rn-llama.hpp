@@ -7,6 +7,7 @@
 #include "llama.h"
 
 #include <android/log.h>
+#include "sampling.h"
 #define LLAMA_ANDROID_TAG "RNLLAMA_LOG_ANDROID"
 #define LLAMA_LOG_INFO(...)  __android_log_print(ANDROID_LOG_INFO , LLAMA_ANDROID_TAG, __VA_ARGS__)
 
@@ -334,7 +335,7 @@ struct llama_rn_context
     {
         // number of tokens to keep when resetting context
         n_remain = params.n_predict;
-        llama_perf_reset(ctx, LLAMA_PERF_TYPE_CONTEXT);
+        llama_perf_context_reset(ctx);
         is_predicting = true;
     }
 
