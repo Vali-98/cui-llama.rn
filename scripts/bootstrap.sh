@@ -43,6 +43,7 @@ cp ./llama.cpp/src/unicode-data.h ./cpp/unicode-data.h
 cp ./llama.cpp/src/unicode-data.cpp ./cpp/unicode-data.cpp
 
 cp ./llama.cpp/common/log.h ./cpp/log.h
+cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/common.h ./cpp/common.h
 cp ./llama.cpp/common/common.cpp ./cpp/common.cpp
 cp ./llama.cpp/common/json.hpp ./cpp/json.hpp
@@ -60,7 +61,8 @@ files=(
   "./cpp/llama-grammar.cpp"
   "./cpp/llama-sampling.h"
   "./cpp/llama-sampling.cpp"
-
+  "./cpp/log.h"
+  "./cpp/log.cpp"
   "./cpp/ggml.h"
   "./cpp/ggml.c"
   "./cpp/common.h"
@@ -107,7 +109,6 @@ done
 
 
 # Clean up logs to be readable
-sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/log.h
 sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/ggml.h
 
 echo "Replacement completed successfully!"

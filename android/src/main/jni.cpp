@@ -538,7 +538,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     putString(env, result, "stopping_word", llama->stopping_word.c_str());
     putInt(env, result, "tokens_cached", llama->n_past);
 
-    const auto timings_token = llama_get_token_timings(llama->ctx);
+    const auto timings_token = llama_perf_context(llama -> ctx);
     
     auto timingsResult = createWriteableMap(env);
     putInt(env, timingsResult, "prompt_n", timings_token.n_p_eval);
@@ -635,7 +635,6 @@ Java_com_rnllama_LlamaContext_embedding(
 
     llama->rewind();
 
-    // llama_reset_timings(llama->ctx);
     llama_perf_context_reset(llama->ctx);
     gpt_sampler_reset(llama->ctx_sampling);
     

@@ -5,11 +5,7 @@
 #include <iostream>
 #include "common.h"
 #include "llama.h"
-
-#include <android/log.h>
 #include "sampling.h"
-#define LLAMA_ANDROID_TAG "RNLLAMA_LOG_ANDROID"
-#define LLAMA_LOG_INFO(...)  __android_log_print(ANDROID_LOG_INFO , LLAMA_ANDROID_TAG, __VA_ARGS__)
 
 namespace rnllama {
 
@@ -27,6 +23,7 @@ static void llama_batch_add(llama_batch *batch, llama_token id, llama_pos pos, s
     batch->logits  [batch->n_tokens] = logits ? 1 : 0;
     batch->n_tokens += 1;
 }
+
 
 // NOTE: Edit from https://github.com/ggerganov/llama.cpp/blob/master/examples/server/server.cpp
 
@@ -309,9 +306,9 @@ struct llama_rn_context
         }
         // compare the evaluated prompt with the new prompt
         n_past = params.embedding? 0 :  common_part(embd, prompt_tokens);
-        LLAMA_LOG_INFO("%s:        n_past: %zu", __func__,  n_past);
-        LLAMA_LOG_INFO("%s:        embd size: %zu", __func__,  embd.size());
-        LLAMA_LOG_INFO("%s:        prompt_tokens size: %zu", __func__,  prompt_tokens.size());
+        LOG_INFO("%s:        n_past: %zu", __func__,  n_past);
+        LOG_INFO("%s:        embd size: %zu", __func__,  embd.size());
+        LOG_INFO("%s:        prompt_tokens size: %zu", __func__,  prompt_tokens.size());
         embd = prompt_tokens;
         if (n_past == num_prompt_tokens)
         {
@@ -392,7 +389,7 @@ struct llama_rn_context
             n_past += n_eval;
             
             if(is_interrupted) {
-                LOG("Decoding Interrupted");
+                LOG_INFO("Decoding Interrupted");
                 embd.resize(n_past);
                 has_next_token = false;
                 return result;
@@ -798,7 +795,7 @@ void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context
 
     if(!purge_needed || new_tokens_len < 6 || current_context_tokens.size() < 6 || new_tokens_len - trimstart < short_fall_threshold)
     {
-        LLAMA_LOG_INFO("Fall Threshold: %d out of %d\n", new_tokens_len - trimstart, short_fall_threshold);
+        LOG_INFO("Fall Threshold: %d out of %d\n", new_tokens_len - trimstart, short_fall_threshold);
         return; //no purge is needed
     }
 
@@ -826,7 +823,7 @@ void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context
                 current_context_tokens[i - diff] = current_context_tokens[i];
             }
 
-            LLAMA_LOG_INFO("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
+            LOG_INFO("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
 
             current_context_tokens.resize(current_context_tokens.size() - diff);
         }

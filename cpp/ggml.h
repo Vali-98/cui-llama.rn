@@ -564,10 +564,11 @@ extern "C" {
     };
 
     enum lm_ggml_log_level {
-        LM_GGML_LOG_LEVEL_ERROR = 2,
-        LM_GGML_LOG_LEVEL_WARN  = 3,
-        LM_GGML_LOG_LEVEL_INFO  = 4,
-        LM_GGML_LOG_LEVEL_DEBUG = 5
+        LM_GGML_LOG_LEVEL_NONE  = 0,
+        LM_GGML_LOG_LEVEL_INFO  = 1,
+        LM_GGML_LOG_LEVEL_WARN  = 2,
+        LM_GGML_LOG_LEVEL_ERROR = 3,
+        LM_GGML_LOG_LEVEL_DEBUG = 4,
     };
 
     enum lm_ggml_tensor_flag {
