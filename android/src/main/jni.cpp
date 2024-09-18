@@ -636,9 +636,7 @@ Java_com_rnllama_LlamaContext_embedding(
     llama->rewind();
 
     llama_perf_context_reset(llama->ctx);
-    gpt_sampler_reset(llama->ctx_sampling);
     
-
     llama->params.prompt = text_chars;
 
     llama->params.n_predict = 0;
