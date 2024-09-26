@@ -294,6 +294,12 @@ static void lm_ggml_dyn_tallocr_reset(struct lm_ggml_dyn_tallocr * alloc) {
     alloc->free_blocks[0].offset = 0;
     alloc->free_blocks[0].size = SIZE_MAX/2; // restrict maximum size of a measure allocator to half size_t max to avoid overflows
     alloc->max_size = 0;
+
+#ifdef LM_GGML_ALLOCATOR_DEBUG
+    for (int i = 0; i < 1024; i++) {
+        alloc->allocated_tensors[i].tensor = NULL;
+    }
+#endif
 }
 
 static struct lm_ggml_dyn_tallocr * lm_ggml_dyn_tallocr_new(size_t alignment) {

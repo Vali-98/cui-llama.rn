@@ -218,6 +218,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #define LM_GGML_FILE_MAGIC   0x67676d6c // "ggml"
 #define LM_GGML_FILE_VERSION 2
@@ -534,6 +535,7 @@ extern "C" {
 
         LM_GGML_OP_CROSS_ENTROPY_LOSS,
         LM_GGML_OP_CROSS_ENTROPY_LOSS_BACK,
+        LM_GGML_OP_OPT_STEP_ADAMW,
 
         LM_GGML_OP_COUNT,
     };
@@ -569,12 +571,15 @@ extern "C" {
         LM_GGML_LOG_LEVEL_WARN  = 2,
         LM_GGML_LOG_LEVEL_ERROR = 3,
         LM_GGML_LOG_LEVEL_DEBUG = 4,
+        LM_GGML_LOG_LEVEL_CONT  = 5, // continue previous log
     };
 
+    // this tensor...
     enum lm_ggml_tensor_flag {
-        LM_GGML_TENSOR_FLAG_INPUT  = 1,
-        LM_GGML_TENSOR_FLAG_OUTPUT = 2,
-        LM_GGML_TENSOR_FLAG_PARAM  = 4,
+        LM_GGML_TENSOR_FLAG_INPUT    = 1, // ...is an input for the GGML compute graph
+        LM_GGML_TENSOR_FLAG_OUTPUT   = 2, // ...is an output for the GGML compute graph
+        LM_GGML_TENSOR_FLAG_PARAM    = 4, // ...contains trainable parameters
+        LM_GGML_TENSOR_FLAG_LOSS     = 8, // ...defines loss for numerical optimization (multiple loss tensors add up)
     };
 
     // n-dimensional tensor
@@ -1976,6 +1981,9 @@ extern "C" {
     typedef void (*lm_ggml_custom2_op_t)(struct lm_ggml_tensor * dst , const struct lm_ggml_tensor * a, const struct lm_ggml_tensor * b, int ith, int nth, void * userdata);
     typedef void (*lm_ggml_custom3_op_t)(struct lm_ggml_tensor * dst , const struct lm_ggml_tensor * a, const struct lm_ggml_tensor * b, const struct lm_ggml_tensor * c, int ith, int nth, void * userdata);
 
+#define LM_GGML_N_TASKS_MAX (-1)
+    // n_tasks == LM_GGML_N_TASKS_MAX means to use max number of tasks
+
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_map_custom1(
             struct lm_ggml_context   * ctx,
             struct lm_ggml_tensor    * a,
@@ -2037,23 +2045,44 @@ extern "C" {
             struct lm_ggml_tensor          * b,
             struct lm_ggml_tensor          * c);
 
+    // AdamW optimizer step
+    // Paper: https://arxiv.org/pdf/1711.05101v3.pdf
+    // PyTorch: https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html
+    LM_GGML_API struct lm_ggml_tensor * lm_ggml_opt_step_adamw(
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_tensor  * a,
+            float                 alpha,
+            float                 beta1,
+            float                 beta2,
+            float                 eps,
+            float                 wd); // weight decay
+
     //
     // automatic differentiation
     //
 
-    LM_GGML_API void lm_ggml_set_param(
-            struct lm_ggml_context * ctx,
-            struct lm_ggml_tensor  * tensor);
+    LM_GGML_API void lm_ggml_set_param(struct lm_ggml_context * ctx, struct lm_ggml_tensor * tensor);
+    LM_GGML_API void lm_ggml_set_loss(struct lm_ggml_tensor * tensor);
 
     LM_GGML_API void lm_ggml_build_forward_expand (struct lm_ggml_cgraph * cgraph, struct lm_ggml_tensor * tensor);
-    LM_GGML_API void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool keep);
+    LM_GGML_API void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool accumulate, bool keep);
+
+    LM_GGML_API void lm_ggml_build_opt_adamw(
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_cgraph  * gf,
+            struct lm_ggml_cgraph  * gb,
+            float                 alpha,
+            float                 beta1,
+            float                 beta2,
+            float                 eps,
+            float                 wd); // weight decay
 
     // graph allocation in a context
     LM_GGML_API struct lm_ggml_cgraph * lm_ggml_new_graph       (struct lm_ggml_context * ctx); // size = LM_GGML_DEFAULT_GRAPH_SIZE, grads = false
     LM_GGML_API struct lm_ggml_cgraph * lm_ggml_new_graph_custom(struct lm_ggml_context * ctx, size_t size, bool grads);
     LM_GGML_API struct lm_ggml_cgraph * lm_ggml_graph_dup       (struct lm_ggml_context * ctx, struct lm_ggml_cgraph * cgraph);
     LM_GGML_API void                 lm_ggml_graph_cpy       (struct lm_ggml_cgraph * src, struct lm_ggml_cgraph * dst);
-    LM_GGML_API void                 lm_ggml_graph_reset     (struct lm_ggml_cgraph * cgraph);  // zero grads
+    LM_GGML_API void                 lm_ggml_graph_reset     (struct lm_ggml_cgraph * cgraph); // set regular grads + optimizer momenta to 0, set loss grad to 1
     LM_GGML_API void                 lm_ggml_graph_clear     (struct lm_ggml_cgraph * cgraph);
 
     LM_GGML_API int                   lm_ggml_graph_size   (struct lm_ggml_cgraph * cgraph);

@@ -71,6 +71,7 @@ public class LlamaContext {
     }
 
     this.id = id;
+    eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
     this.context = initContext(
       // String model,
       params.getString("model"),
@@ -97,11 +98,11 @@ public class LlamaContext {
       // float rope_freq_base,
       params.hasKey("rope_freq_base") ? (float) params.getDouble("rope_freq_base") : 0.0f,
       // float rope_freq_scale
-      params.hasKey("rope_freq_scale") ? (float) params.getDouble("rope_freq_scale") : 0.0f
+      params.hasKey("rope_freq_scale") ? (float) params.getDouble("rope_freq_scale") : 0.0f,
+      this
     );
     this.modelDetails = loadModelDetails(this.context);
     this.reactContext = reactContext;
-    eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
   }
 
   public long getContext() {
@@ -352,6 +353,12 @@ public class LlamaContext {
     }
   }
 
+  public void emitModelProgressUpdate(int progress) {
+    WritableMap event = Arguments.createMap();
+    event.putInt("progress", progress);
+    eventEmitter.emit("@RNLlama_onModelProgress", event);
+  }
+
   protected static native long initContext(
     String model,
     boolean embedding,
@@ -365,7 +372,8 @@ public class LlamaContext {
     String lora,
     float lora_scaled,
     float rope_freq_base,
-    float rope_freq_scale
+    float rope_freq_scale,
+    LlamaContext javaLlamaContext
   );
   protected static native WritableMap loadModelDetails(
     long contextPtr

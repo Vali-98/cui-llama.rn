@@ -3167,6 +3167,7 @@ static struct lm_ggml_backend_buffer_i lm_ggml_backend_metal_buffer_i = {
     /* .free_buffer     = */ lm_ggml_backend_metal_buffer_free_buffer,
     /* .get_base        = */ lm_ggml_backend_metal_buffer_get_base,
     /* .init_tensor     = */ NULL,
+    /* .memset_tensor   = */ NULL,
     /* .set_tensor      = */ lm_ggml_backend_metal_buffer_set_tensor,
     /* .get_tensor      = */ lm_ggml_backend_metal_buffer_get_tensor,
     /* .cpy_tensor      = */ lm_ggml_backend_metal_buffer_cpy_tensor,

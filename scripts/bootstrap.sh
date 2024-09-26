@@ -18,6 +18,7 @@ cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
 cp ./llama.cpp/ggml/src/ggml-backend.c ./cpp/ggml-backend.c
 cp ./llama.cpp/ggml/src/ggml-backend-impl.h ./cpp/ggml-backend-impl.h
 cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
+cp ./llama.cpp/ggml/src/ggml-cpu-impl.h ./cpp/ggml-cpu-impl.h
 cp ./llama.cpp/ggml/src/ggml-common.h ./cpp/ggml-common.h
 cp ./llama.cpp/ggml/src/ggml-quants.h ./cpp/ggml-quants.h
 cp ./llama.cpp/ggml/src/ggml-quants.c ./cpp/ggml-quants.c
@@ -80,6 +81,7 @@ files=(
   "./cpp/ggml-backend.c"
   "./cpp/ggml-backend-impl.h"
   "./cpp/ggml-impl.h"
+  "./cpp/ggml-cpu-impl.h"
   "./cpp/ggml-common.h"
   "./cpp/sgemm.h"
   "./cpp/sgemm.cpp"
@@ -110,6 +112,8 @@ done
 
 # Clean up logs to be readable
 sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/ggml.h
+sed -i 's/#include <stdio.h>/&\n#include <string.h>/' ./cpp/ggml.h
+# end clean logs
 
 echo "Replacement completed successfully!"
 

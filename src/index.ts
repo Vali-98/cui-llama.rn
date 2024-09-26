@@ -19,6 +19,8 @@ export { SchemaGrammarConverter, convertJsonSchemaToGrammar }
 
 const EVENT_ON_TOKEN = '@RNLlama_onToken'
 
+const EVENT_ON_MODEL_PROGRESS = '@RNLlama_onModelProgress'
+
 let EventEmitter: NativeEventEmitter | DeviceEventEmitterStatic
 if (Platform.OS === 'ios') {
   // @ts-ignore
@@ -193,12 +195,23 @@ export async function setContextLimit(limit: number): Promise<void> {
 }
 
 export async function initLlama({
-  model,
-  is_model_asset: isModelAsset,
-  ...rest
-}: ContextParams): Promise<LlamaContext> {
+    model,
+    is_model_asset: isModelAsset,
+    ...rest
+  }: ContextParams, 
+  progressCallback?: (progress: number) => void
+): Promise<LlamaContext> {
   let path = model
   if (path.startsWith('file://')) path = path.slice(7)
+  
+  const modelProgressListener = EventEmitter.addListener(EVENT_ON_MODEL_PROGRESS, (event) => {
+    if(event.progress && progressCallback)
+      progressCallback(event.progress)
+    if(event.progress === 100) {
+      modelProgressListener.remove()
+    }
+  })
+
   const {
     contextId,
     gpu,
@@ -209,6 +222,7 @@ export async function initLlama({
     is_model_asset: !!isModelAsset,
     ...rest,
   })
+
   return new LlamaContext({ contextId, gpu, reasonNoGPU, model: modelDetails })
 }
 

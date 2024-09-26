@@ -128,6 +128,13 @@ static inline void putArray(JNIEnv *env, jobject map, const char *key, jobject v
 
 std::unordered_map<long, rnllama::llama_rn_context *> context_map;
 
+struct CallbackContext {
+    JNIEnv * env;
+    jobject  thiz;
+    jmethodID sendProgressMethod;
+    unsigned current;
+};
+
 JNIEXPORT jlong JNICALL
 Java_com_rnllama_LlamaContext_initContext(
     JNIEnv *env,
@@ -144,7 +151,8 @@ Java_com_rnllama_LlamaContext_initContext(
     jstring lora_str,
     jfloat lora_scaled,
     jfloat rope_freq_base,
-    jfloat rope_freq_scale
+    jfloat rope_freq_scale,
+    jobject javaLlamaContext
 ) {
     UNUSED(thiz);
 
@@ -169,7 +177,7 @@ Java_com_rnllama_LlamaContext_initContext(
     defaultParams.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
     defaultParams.n_gpu_layers = n_gpu_layers;
-
+    
     defaultParams.use_mlock = use_mlock;
     defaultParams.use_mmap = use_mmap;
 
@@ -181,6 +189,24 @@ Java_com_rnllama_LlamaContext_initContext(
 
     defaultParams.rope_freq_base = rope_freq_base;
     defaultParams.rope_freq_scale = rope_freq_scale;
+
+    // progress callback when loading
+    jclass llamaContextClass = env->GetObjectClass(javaLlamaContext);
+    jmethodID sendProgressMethod = env->GetMethodID(llamaContextClass, "emitModelProgressUpdate", "(I)V");
+
+    CallbackContext callbackctx = {env, javaLlamaContext, sendProgressMethod, 0};
+
+    defaultParams.progress_callback_user_data = &callbackctx;
+    defaultParams.progress_callback = [](float progress, void * ctx) {
+        unsigned percentage = (unsigned) (100 * progress);
+        CallbackContext * cbctx = static_cast<CallbackContext*>(ctx);
+        // reduce call frequency by only calling method when value changes
+        if (percentage <= cbctx->current) return true; 
+        cbctx->current = percentage;
+        cbctx->env->CallVoidMethod(cbctx->thiz, cbctx->sendProgressMethod, percentage);
+        return true;
+    };
+    
 
     auto llama = new rnllama::llama_rn_context();
     bool is_model_loaded = llama->loadModel(defaultParams);

@@ -246,6 +246,22 @@ LM_GGML_CALL void lm_ggml_backend_tensor_get(const struct lm_ggml_tensor * tenso
     buf->iface.get_tensor(buf, tensor, data, offset, size);
 }
 
+LM_GGML_API LM_GGML_CALL void lm_ggml_backend_tensor_memset(struct lm_ggml_tensor * tensor, uint8_t value, size_t offset, size_t size) {
+    lm_ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
+
+    LM_GGML_ASSERT(buf != NULL && "tensor buffer not set");
+    LM_GGML_ASSERT(tensor->data != NULL && "tensor not allocated");
+    LM_GGML_ASSERT(offset + size <= lm_ggml_nbytes(tensor) && "tensor write out of bounds");
+
+    if (!size) {
+        return;
+    }
+
+    LM_GGML_ASSERT(buf->iface.memset_tensor != NULL && "memset not supported by backend buffer");
+
+    buf->iface.memset_tensor(buf, tensor, value, offset, size);
+}
+
 void lm_ggml_backend_synchronize(lm_ggml_backend_t backend) {
     if (backend->iface.synchronize == NULL) {
         return;
@@ -569,6 +585,12 @@ LM_GGML_CALL static void lm_ggml_backend_cpu_buffer_free_buffer(lm_ggml_backend_
     free(buffer->context);
 }
 
+LM_GGML_CALL static void lm_ggml_backend_cpu_buffer_memset_tensor(lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor, uint8_t value, size_t offset, size_t size) {
+    memset((char *)tensor->data + offset, value, size);
+
+    LM_GGML_UNUSED(buffer);
+}
+
 LM_GGML_CALL static void lm_ggml_backend_cpu_buffer_set_tensor(lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
     memcpy((char *)tensor->data + offset, data, size);
 
@@ -600,6 +622,7 @@ static struct lm_ggml_backend_buffer_i cpu_backend_buffer_i = {
     /* .free_buffer     = */ lm_ggml_backend_cpu_buffer_free_buffer,
     /* .get_base        = */ lm_ggml_backend_cpu_buffer_get_base,
     /* .init_tensor     = */ NULL, // no initialization required
+    /* .memset_tensor   = */ lm_ggml_backend_cpu_buffer_memset_tensor,
     /* .set_tensor      = */ lm_ggml_backend_cpu_buffer_set_tensor,
     /* .get_tensor      = */ lm_ggml_backend_cpu_buffer_get_tensor,
     /* .cpy_tensor      = */ lm_ggml_backend_cpu_buffer_cpy_tensor,
@@ -613,6 +636,7 @@ static struct lm_ggml_backend_buffer_i cpu_backend_buffer_i_from_ptr = {
     /* .free_buffer     = */ NULL, // ptr is not owned by the buffer, so it does not need to be freed
     /* .get_base        = */ lm_ggml_backend_cpu_buffer_get_base,
     /* .init_tensor     = */ NULL, // no initialization required
+    /* .memset_tensor   = */ lm_ggml_backend_cpu_buffer_memset_tensor,
     /* .set_tensor      = */ lm_ggml_backend_cpu_buffer_set_tensor,
     /* .get_tensor      = */ lm_ggml_backend_cpu_buffer_get_tensor,
     /* .cpy_tensor      = */ lm_ggml_backend_cpu_buffer_cpy_tensor,
@@ -980,6 +1004,7 @@ static struct lm_ggml_backend_buffer_i lm_ggml_backend_multi_buffer_context_inte
         /* .free_buffer     = */ lm_ggml_backend_multi_buffer_free_buffer,
         /* .get_base        = */ NULL,
         /* .init_tensor     = */ NULL,
+        /* .memset_tensor   = */ NULL,
         /* .set_tensor      = */ NULL,
         /* .get_tensor      = */ NULL,
         /* .cpy_tensor      = */ NULL,

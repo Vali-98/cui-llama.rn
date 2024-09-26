@@ -82,7 +82,7 @@ struct gpt_log_entry {
             }
         }
 
-        if (level != LM_GGML_LOG_LEVEL_NONE && prefix) {
+        if (level != LM_GGML_LOG_LEVEL_NONE && level != LM_GGML_LOG_LEVEL_CONT && prefix) {
             if (timestamp) {
                 // [M.s.ms.us]
                 fprintf(fcur, "%s%d.%02d.%03d.%03d%s ",

@@ -66,6 +66,7 @@ extern "C" {
     // "offset" refers to the offset of the tensor data for setting/getting data
     LM_GGML_API LM_GGML_CALL void lm_ggml_backend_tensor_set(      struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size);
     LM_GGML_API LM_GGML_CALL void lm_ggml_backend_tensor_get(const struct lm_ggml_tensor * tensor,       void * data, size_t offset, size_t size);
+    LM_GGML_API LM_GGML_CALL void lm_ggml_backend_tensor_memset(   struct lm_ggml_tensor * tensor,     uint8_t value, size_t offset, size_t size);
 
     LM_GGML_API void lm_ggml_backend_synchronize(lm_ggml_backend_t backend);
 
@@ -122,7 +123,7 @@ extern "C" {
     // The backend registry is a registry of all the available backends, and allows initializing backends in a generic way
 
     LM_GGML_API size_t                     lm_ggml_backend_reg_get_count(void);
-    LM_GGML_API size_t                     lm_ggml_backend_reg_find_by_name(const char * name);
+    LM_GGML_API size_t                     lm_ggml_backend_reg_find_by_name(const char * name); // returns index of backend with name, or SIZE_MAX if not found
     LM_GGML_API lm_ggml_backend_t             lm_ggml_backend_reg_init_backend_from_str(const char * backend_str); // str is backend_name:params (params is optional)
     LM_GGML_API const char *               lm_ggml_backend_reg_get_name(size_t i);
     LM_GGML_API lm_ggml_backend_t             lm_ggml_backend_reg_init_backend(size_t i, const char * params); // params is backend-specific

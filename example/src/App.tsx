@@ -93,7 +93,8 @@ export default function App() {
       use_mlock: true,
       n_gpu_layers: Platform.OS === 'ios' ? 0 : 0, // > 0: enable GPU
       // embedding: true,
-    })
+    }, 
+    (progress) => console.log('Progress from RN: ',progress))
       .then((ctx) => {
         setContext(ctx)
         addSystemMessage(

@@ -225,6 +225,8 @@ enum llm_arch {
     LLM_ARCH_NEMOTRON,
     LLM_ARCH_EXAONE,
     LLM_ARCH_RWKV6,
+    LLM_ARCH_GRANITE,
+    LLM_ARCH_GRANITE_MOE,
     LLM_ARCH_UNKNOWN,
 };
 
@@ -275,6 +277,8 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
     { LLM_ARCH_NEMOTRON,        "nemotron"     },
     { LLM_ARCH_EXAONE,          "exaone"       },
     { LLM_ARCH_RWKV6,           "rwkv6"        },
+    { LLM_ARCH_GRANITE,         "granite"      },
+    { LLM_ARCH_GRANITE_MOE,     "granitemoe"   },
     { LLM_ARCH_UNKNOWN,         "(unknown)"    },
 };
 
@@ -314,6 +318,8 @@ enum llm_kv {
     LLM_KV_RESCALE_EVERY_N_LAYERS,
     LLM_KV_TIME_MIX_EXTRA_DIM,
     LLM_KV_TIME_DECAY_EXTRA_DIM,
+    LLM_KV_RESIDUAL_SCALE,
+    LLM_KV_EMBEDDING_SCALE,
 
     LLM_KV_ATTENTION_HEAD_COUNT,
     LLM_KV_ATTENTION_HEAD_COUNT_KV,
@@ -328,6 +334,7 @@ enum llm_kv {
     LLM_KV_ATTENTION_KV_LORA_RANK,
     LLM_KV_ATTENTION_RELATIVE_BUCKETS_COUNT,
     LLM_KV_ATTENTION_SLIDING_WINDOW,
+    LLM_KV_ATTENTION_SCALE,
 
     LLM_KV_ROPE_DIMENSION_COUNT,
     LLM_KV_ROPE_FREQ_BASE,
@@ -418,6 +425,8 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_RESCALE_EVERY_N_LAYERS,            "%s.rescale_every_n_layers"            },
     { LLM_KV_TIME_MIX_EXTRA_DIM,                "%s.time_mix_extra_dim"                },
     { LLM_KV_TIME_DECAY_EXTRA_DIM,              "%s.time_decay_extra_dim"              },
+    { LLM_KV_RESIDUAL_SCALE,                    "%s.residual_scale"                    },
+    { LLM_KV_EMBEDDING_SCALE,                   "%s.embedding_scale"                   },
 
     { LLM_KV_ATTENTION_HEAD_COUNT,             "%s.attention.head_count"             },
     { LLM_KV_ATTENTION_HEAD_COUNT_KV,          "%s.attention.head_count_kv"          },
@@ -432,6 +441,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_ATTENTION_KV_LORA_RANK,           "%s.attention.kv_lora_rank"           },
     { LLM_KV_ATTENTION_RELATIVE_BUCKETS_COUNT, "%s.attention.relative_buckets_count" },
     { LLM_KV_ATTENTION_SLIDING_WINDOW,         "%s.attention.sliding_window"         },
+    { LLM_KV_ATTENTION_SCALE,                  "%s.attention.scale"                  },
 
     { LLM_KV_ROPE_DIMENSION_COUNT,          "%s.rope.dimension_count"                 },
     { LLM_KV_ROPE_FREQ_BASE,                "%s.rope.freq_base"                       },
@@ -1466,6 +1476,41 @@ static const std::map<llm_arch, std::map<llm_tensor, std::string>> LLM_TENSOR_NA
         },
     },
     {
+        LLM_ARCH_GRANITE,
+        {
+            { LLM_TENSOR_TOKEN_EMBD,      "token_embd" },
+            { LLM_TENSOR_OUTPUT_NORM,     "output_norm" },
+            { LLM_TENSOR_OUTPUT,          "output" },
+            { LLM_TENSOR_ATTN_NORM,       "blk.%d.attn_norm" },
+            { LLM_TENSOR_ATTN_Q,          "blk.%d.attn_q" },
+            { LLM_TENSOR_ATTN_K,          "blk.%d.attn_k" },
+            { LLM_TENSOR_ATTN_V,          "blk.%d.attn_v" },
+            { LLM_TENSOR_ATTN_OUT,        "blk.%d.attn_output" },
+            { LLM_TENSOR_FFN_NORM,        "blk.%d.ffn_norm" },
+            { LLM_TENSOR_FFN_GATE,        "blk.%d.ffn_gate" },
+            { LLM_TENSOR_FFN_DOWN,        "blk.%d.ffn_down" },
+            { LLM_TENSOR_FFN_UP,          "blk.%d.ffn_up" },
+        },
+    },
+    {
+        LLM_ARCH_GRANITE_MOE,
+        {
+            { LLM_TENSOR_TOKEN_EMBD,      "token_embd" },
+            { LLM_TENSOR_OUTPUT_NORM,     "output_norm" },
+            { LLM_TENSOR_OUTPUT,          "output" },
+            { LLM_TENSOR_ATTN_NORM,       "blk.%d.attn_norm" },
+            { LLM_TENSOR_ATTN_Q,          "blk.%d.attn_q" },
+            { LLM_TENSOR_ATTN_K,          "blk.%d.attn_k" },
+            { LLM_TENSOR_ATTN_V,          "blk.%d.attn_v" },
+            { LLM_TENSOR_ATTN_OUT,        "blk.%d.attn_output" },
+            { LLM_TENSOR_FFN_NORM,        "blk.%d.ffn_norm" },
+            { LLM_TENSOR_FFN_GATE_INP,    "blk.%d.ffn_gate_inp" },
+            { LLM_TENSOR_FFN_GATE_EXPS,   "blk.%d.ffn_gate_exps" },
+            { LLM_TENSOR_FFN_DOWN_EXPS,   "blk.%d.ffn_down_exps" },
+            { LLM_TENSOR_FFN_UP_EXPS,     "blk.%d.ffn_up_exps" },
+        },
+    },
+    {
         LLM_ARCH_UNKNOWN,
         {
             { LLM_TENSOR_TOKEN_EMBD,      "token_embd" },
@@ -2383,6 +2428,11 @@ struct llama_hparams {
     float f_max_alibi_bias = 0.0f;
     float f_logit_scale    = 0.0f;
 
+    // Additional scale factors (Granite/Granite MoE)
+    float f_residual_scale  = 0.0f;
+    float f_embedding_scale = 0.0f;
+    float f_attention_scale = 0.0f;
+
     bool causal_attn   = true;
     bool use_alibi     = false;
     bool attn_soft_cap = false;
@@ -2445,6 +2495,9 @@ struct llama_hparams {
         if (!is_float_close(this->rope_freq_scale_train, other.rope_freq_scale_train, EPSILON)) return true;
         if (!is_float_close(this->expert_weights_scale,  other.expert_weights_scale,  EPSILON)) return true;
         if (!is_float_close(this->rope_yarn_log_mul,     other.rope_yarn_log_mul,     EPSILON)) return true;
+        if (!is_float_close(this->f_residual_scale,      other.f_residual_scale,      EPSILON)) return true;
+        if (!is_float_close(this->f_embedding_scale,     other.f_embedding_scale,     EPSILON)) return true;
+        if (!is_float_close(this->f_attention_scale,     other.f_attention_scale,     EPSILON)) return true;
 
         return false;
     }
@@ -3035,18 +3088,14 @@ struct llama_sbatch {
         } else {
             // simple split
             if (batch->n_seq_id) {
-                for (size_t i = 0; i < length; ++i) {
-                    ubatch.n_seq_id = batch->n_seq_id + seq.offset;
-                }
+                ubatch.n_seq_id = batch->n_seq_id + seq.offset;
             } else {
                 for (size_t i = 0; i < length; ++i) {
                     ubatch.n_seq_id[ubatch.n_seqs + i] = 1;
                 }
             }
             if (batch->seq_id) {
-                for (size_t i = 0; i < length; ++i) {
-                    ubatch.seq_id = batch->seq_id + seq.offset;
-                }
+                ubatch.seq_id = batch->seq_id + seq.offset;
             } else {
                 for (size_t i = 0; i < length; ++i) {
                     ubatch.seq_id[ubatch.n_seqs + i] = &seq.all_seq_id;
@@ -6030,6 +6079,22 @@ static void llm_load_hparams(
                     default: model.type = e_model::MODEL_UNKNOWN;
                 }
             } break;
+        case LLM_ARCH_GRANITE:
+        case LLM_ARCH_GRANITE_MOE:
+            {
+                ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+                ml.get_key(LLM_KV_LOGIT_SCALE, hparams.f_logit_scale);
+                ml.get_key(LLM_KV_RESIDUAL_SCALE, hparams.f_residual_scale);
+                ml.get_key(LLM_KV_EMBEDDING_SCALE, hparams.f_embedding_scale);
+                ml.get_key(LLM_KV_ATTENTION_SCALE, hparams.f_attention_scale);
+
+                switch (hparams.n_layer) {
+                    case 32: model.type = e_model::MODEL_3B; break;
+                    case 40: model.type = e_model::MODEL_3B; break;
+                    // Add additional layer/vocab/etc checks here for other model sizes
+                    default: model.type = e_model::MODEL_UNKNOWN;
+                }
+            } break;
         default: (void)0;
     }
 
@@ -6072,8 +6137,15 @@ static void llm_load_vocab(
             vocab.special_mask_id = -1;
             vocab.linefeed_id     = -1;
 
+            // read vocab size from metadata
+            if (!ml.get_key(LLM_KV_VOCAB_SIZE, vocab.n_vocab, false)) {
+                vocab.n_vocab = 0;
+                LLAMA_LOG_WARN("%s: there is no vocab_size in metadata, vocab.n_vocab will be set to %u\n", __func__, vocab.n_vocab);
+            }
             return;
-        } else if (tokenizer_model == "llama") {
+        }
+
+        if (tokenizer_model == "llama") {
             vocab.type = LLAMA_VOCAB_TYPE_SPM;
 
             // default special tokens
@@ -6471,21 +6543,21 @@ static void llm_load_vocab(
         //       for now, we apply this workaround to find the EOT token based on its text
         if (vocab.special_eot_id == -1) {
             for (const auto & t : vocab.token_to_id) {
-                if (
+                if (false
                         // TODO: gemma "<end_of_turn>" is exported as a normal token, so the following check does not work
                         //       need to fix convert script
                         //vocab.id_to_token[t.second].type == LLAMA_TOKEN_TYPE_CONTROL &&
-                        (t.first == "<|eot_id|>" ||
-                         t.first == "<|im_end|>" ||
-                         t.first == "<|end|>" ||
-                         t.first == "<end_of_turn>" ||
-                         t.first == "<|endoftext|>"
-                        )
+                        || t.first == "<|eot_id|>"
+                        || t.first == "<|im_end|>"
+                        || t.first == "<|end|>"
+                        || t.first == "<end_of_turn>"
+                        || t.first == "<|endoftext|>"
+                        || t.first == "<EOT>"
                    ) {
                     vocab.special_eot_id = t.second;
                     if ((vocab.id_to_token[t.second].attr & LLAMA_TOKEN_ATTR_CONTROL) == 0) {
                         LLAMA_LOG_WARN("%s: control-looking token: '%s' was not control-type; this is probably a bug in the model. its type will be overridden\n",
-                            __func__, t.first.c_str());
+                                __func__, t.first.c_str());
                         vocab.id_to_token[t.second].attr = LLAMA_TOKEN_ATTR_CONTROL;
                     }
                     break;
@@ -6507,6 +6579,44 @@ static void llm_load_vocab(
                     vocab.id_to_token[t->second].attr = LLAMA_TOKEN_ATTR_CONTROL;
                 }
             }
+        }
+
+        // maintain a list of tokens that cause end-of-generation
+        // this is currently determined based on the token text, which is obviously not ideal
+        // ref: https://github.com/ggerganov/llama.cpp/issues/9606
+        vocab.special_eog_ids.clear();
+        for (const auto & t : vocab.token_to_id) {
+            if (false
+                    || t.first == "<|eot_id|>"
+                    || t.first == "<|im_end|>"
+                    || t.first == "<|end|>"
+                    || t.first == "<end_of_turn>"
+                    || t.first == "<|endoftext|>"
+                    || t.first == "<|eom_id|>"
+                    || t.first == "<EOT>"
+               ) {
+                vocab.special_eog_ids.insert(t.second);
+                if ((vocab.id_to_token[t.second].attr & LLAMA_TOKEN_ATTR_CONTROL) == 0) {
+                    LLAMA_LOG_WARN("%s: control-looking token: '%s' was not control-type; this is probably a bug in the model. its type will be overridden\n",
+                            __func__, t.first.c_str());
+                    vocab.id_to_token[t.second].attr = LLAMA_TOKEN_ATTR_CONTROL;
+                }
+            }
+        }
+
+        if (vocab.special_eos_id != -1 && vocab.special_eog_ids.count(vocab.special_eos_id) == 0) {
+            vocab.special_eog_ids.insert(vocab.special_eos_id);
+            LLAMA_LOG_WARN("%s: special_eos_id is not in special_eog_ids - the tokenizer config may be incorrect\n", __func__);
+        }
+
+        if (vocab.special_eot_id != -1 && vocab.special_eog_ids.count(vocab.special_eot_id) == 0) {
+            vocab.special_eog_ids.insert(vocab.special_eot_id);
+            LLAMA_LOG_WARN("%s: special_eot_id is not in special_eog_ids - the tokenizer config may be incorrect\n", __func__);
+        }
+
+        if (vocab.special_eom_id != -1 && vocab.special_eog_ids.count(vocab.special_eom_id) == 0) {
+            vocab.special_eog_ids.insert(vocab.special_eom_id);
+            LLAMA_LOG_WARN("%s: special_eom_id is not in special_eog_ids - the tokenizer config may be incorrect\n", __func__);
         }
     }
 
@@ -6711,6 +6821,11 @@ static void llm_load_print_meta(llama_model_loader & ml, llama_model & model) {
     if (vocab.special_suffix_id != -1) { LLAMA_LOG_INFO( "%s: SUF token        = %d '%s'\n", __func__, vocab.special_suffix_id, vocab.id_to_token[vocab.special_suffix_id].text.c_str() ); }
     if (vocab.special_middle_id != -1) { LLAMA_LOG_INFO( "%s: MID token        = %d '%s'\n", __func__, vocab.special_middle_id, vocab.id_to_token[vocab.special_middle_id].text.c_str() ); }
     if (vocab.special_eot_id    != -1) { LLAMA_LOG_INFO( "%s: EOT token        = %d '%s'\n", __func__, vocab.special_eot_id,    vocab.id_to_token[vocab.special_eot_id].text.c_str() );    }
+    if (vocab.special_eom_id    != -1) { LLAMA_LOG_INFO( "%s: EOM token        = %d '%s'\n", __func__, vocab.special_eom_id,    vocab.id_to_token[vocab.special_eom_id].text.c_str() );    }
+
+    for (const auto & id : vocab.special_eog_ids) {
+        LLAMA_LOG_INFO( "%s: EOG token        = %d '%s'\n", __func__, id, vocab.id_to_token[id].text.c_str() );
+    }
 
     LLAMA_LOG_INFO("%s: max token length = %d\n", __func__, vocab.max_token_len);
 
@@ -6727,6 +6842,12 @@ static void llm_load_print_meta(llama_model_loader & ml, llama_model & model) {
     if (model.arch == LLM_ARCH_QWEN2MOE) {
         LLAMA_LOG_INFO("%s: n_ff_exp         = %d\n",     __func__, hparams.n_ff_exp);
         LLAMA_LOG_INFO("%s: n_ff_shexp       = %d\n",     __func__, hparams.n_ff_shexp);
+    }
+
+    if (model.arch == LLM_ARCH_GRANITE || model.arch == LLM_ARCH_GRANITE_MOE) {
+        LLAMA_LOG_INFO("%s: f_embedding_scale = %f\n", __func__, hparams.f_embedding_scale);
+        LLAMA_LOG_INFO("%s: f_residual_scale  = %f\n", __func__, hparams.f_residual_scale);
+        LLAMA_LOG_INFO("%s: f_attention_scale = %f\n", __func__, hparams.f_attention_scale);
     }
 }
 
@@ -6896,6 +7017,8 @@ static bool llm_load_tensors(
             case LLM_ARCH_LLAMA:
             case LLM_ARCH_REFACT:
             case LLM_ARCH_MINICPM:
+            case LLM_ARCH_GRANITE:
+            case LLM_ARCH_GRANITE_MOE:
                 {
                     model.tok_embd = ml.create_tensor(ctx_input, tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab});
 
@@ -8879,6 +9002,11 @@ static struct lm_ggml_tensor * llm_build_inp_embd(
         lm_ggml_set_input(lctx.inp_embd);
     }
 
+    // For Granite architecture
+    if (hparams.f_embedding_scale != 0.0f) {
+        inpL = lm_ggml_scale(ctx, inpL, hparams.f_embedding_scale);
+    }
+
     cb(inpL, "inp_embd", -1);
 
     return inpL;
@@ -9880,17 +10008,36 @@ struct llm_build_context {
             const int64_t n_head_kv = hparams.n_head_kv(il);
             const int64_t n_embd_k_gqa = hparams.n_embd_k_gqa(il);
             struct lm_ggml_tensor * rope_factors = build_rope_factors(il);
-            struct lm_ggml_tensor * tmp =
-                // we rotate only the first n_rot dimensions
-                lm_ggml_rope_ext_inplace(ctx0,
-                        lm_ggml_view_3d(ctx0, kv_self.k_l[il],
-                            n_embd_head_k, n_head_kv, n_ctx,
-                            lm_ggml_row_size(kv_self.k_l[il]->type, n_embd_head_k),
-                            lm_ggml_row_size(kv_self.k_l[il]->type, n_embd_k_gqa),
-                            0),
+            struct lm_ggml_tensor * k =
+                lm_ggml_view_3d(ctx0, kv_self.k_l[il],
+                    n_embd_head_k, n_head_kv, n_ctx,
+                    lm_ggml_row_size(kv_self.k_l[il]->type, n_embd_head_k),
+                    lm_ggml_row_size(kv_self.k_l[il]->type, n_embd_k_gqa),
+                    0);
+
+            struct lm_ggml_tensor * tmp;
+            if (lm_ggml_is_quantized(k->type)) {
+                // dequantize to f32 -> RoPE -> quantize back
+                tmp = lm_ggml_cast(ctx0, k, LM_GGML_TYPE_F32);
+                cb(tmp, "K_f32", il);
+                for (auto * backend : lctx.backends) {
+                    // Figure out which backend KV cache belongs to
+                    if (lm_ggml_backend_supports_buft(backend, lctx.model.buft_layer[il].buft)) {
+                        lm_ggml_backend_sched_set_tensor_backend(lctx.sched, tmp, backend);
+                        break;
+                    }
+                }
+                tmp = lm_ggml_rope_ext_inplace(ctx0, tmp,
                         lctx.inp_K_shift, rope_factors, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
                         ext_factor, attn_factor, beta_fast, beta_slow);
-
+                cb(tmp, "K_shifted_f32", il);
+                tmp = lm_ggml_cpy(ctx0, tmp, k);
+            } else {
+                // we rotate only the first n_rot dimensions
+                tmp = lm_ggml_rope_ext_inplace(ctx0, k,
+                        lctx.inp_K_shift, rope_factors, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                        ext_factor, attn_factor, beta_fast, beta_slow);
+            }
             cb(tmp, "K_shifted", il);
             lm_ggml_build_forward_expand(gf, tmp);
         }
@@ -10157,6 +10304,7 @@ struct llm_build_context {
         // KQ_mask (mask for 1 head, it will be broadcasted to all heads)
         struct lm_ggml_tensor * KQ_mask = build_inp_KQ_mask();
 
+        const float kq_scale = hparams.f_attention_scale == 0.0f ? 1.0f/sqrtf(float(n_embd_head)) : hparams.f_attention_scale;
         for (int il = 0; il < n_layer; ++il) {
             struct lm_ggml_tensor * inpSA = inpL;
 
@@ -10209,7 +10357,7 @@ struct llm_build_context {
 
                 cur = llm_build_kv(ctx0, lctx, kv_self, gf,
                         model.layers[il].wo, model.layers[il].bo,
-                        Kcur, Vcur, Qcur, KQ_mask, n_tokens, kv_head, n_kv, 1.0f/sqrtf(float(n_embd_head)), cb, il);
+                        Kcur, Vcur, Qcur, KQ_mask, n_tokens, kv_head, n_kv, kq_scale, cb, il);
             }
 
             if (il == n_layer - 1) {
@@ -10218,6 +10366,11 @@ struct llm_build_context {
                 n_tokens = n_outputs;
                 cur   = lm_ggml_get_rows(ctx0,   cur, inp_out_ids);
                 inpSA = lm_ggml_get_rows(ctx0, inpSA, inp_out_ids);
+            }
+
+            // For Granite architecture
+            if (hparams.f_residual_scale) {
+                cur = lm_ggml_scale(ctx0, cur, hparams.f_residual_scale);
             }
 
             struct lm_ggml_tensor * ffn_inp = lm_ggml_add(ctx0, cur, inpSA);
@@ -10256,6 +10409,11 @@ struct llm_build_context {
                 cb(cur, "ffn_moe_out", il);
             }
 
+            // For Granite architecture
+            if (hparams.f_residual_scale) {
+                cur = lm_ggml_scale(ctx0, cur, hparams.f_residual_scale);
+            }
+
             cur = lm_ggml_add(ctx0, cur, ffn_inp);
             cb(cur, "ffn_out", il);
 
@@ -10275,6 +10433,12 @@ struct llm_build_context {
 
         // lm_head
         cur = llm_build_lora_mm(lctx, ctx0, model.output, cur);
+
+        // For Granite architecture
+        if (hparams.f_logit_scale) {
+            cur = lm_ggml_scale(ctx0, cur, 1.0f / hparams.f_logit_scale);
+        }
+
         cb(cur, "result_output", -1);
 
         lm_ggml_build_forward_expand(gf, cur);
@@ -15800,6 +15964,8 @@ static struct lm_ggml_cgraph * llama_build_graph(
 
     switch (model.arch) {
         case LLM_ARCH_LLAMA:
+        case LLM_ARCH_GRANITE:
+        case LLM_ARCH_GRANITE_MOE:
             {
                 result = llm.build_llama();
             } break;
@@ -16588,7 +16754,7 @@ static int llama_decode_internal(
     const uint32_t n_tokens_all = batch_all.n_tokens;
 
     if (n_tokens_all == 0) {
-        LLAMA_LOG_ERROR("%s: n_tokens == 0", __func__);
+        LLAMA_LOG_ERROR("%s: n_tokens == 0\n", __func__);
         return -1;
     }
 
@@ -16601,7 +16767,7 @@ static int llama_decode_internal(
     if (batch_all.token) {
         for (uint32_t i = 0; i < n_tokens_all; ++i) {
             if (batch_all.token[i] < 0 || (uint32_t)batch_all.token[i] >= model.vocab.n_vocab) {
-                LLAMA_LOG_ERROR("%s: invalid token[%d] = %d", __func__, i, batch_all.token[i]);
+                LLAMA_LOG_ERROR("%s: invalid token[%d] = %d\n", __func__, i, batch_all.token[i]);
                 return -1;
             }
         }
@@ -16889,7 +17055,7 @@ static int llama_encode_internal(
     const uint32_t n_tokens = batch.n_tokens;
 
     if (n_tokens == 0) {
-        LLAMA_LOG_ERROR("%s: n_tokens == 0", __func__);
+        LLAMA_LOG_ERROR("%s: n_tokens == 0\n", __func__);
         return -1;
     }
 
@@ -16902,7 +17068,7 @@ static int llama_encode_internal(
     if (batch.token) {
         for (uint32_t i = 0; i < n_tokens; ++i) {
             if (batch.token[i] < 0 || (uint32_t)batch.token[i] >= model.vocab.n_vocab) {
-                LLAMA_LOG_ERROR("%s: invalid token[%d] = %d", __func__, i, batch.token[i]);
+                LLAMA_LOG_ERROR("%s: invalid token[%d] = %d\n", __func__, i, batch.token[i]);
                 return -1;
             }
         }
@@ -18584,9 +18750,9 @@ struct llama_model * llama_load_model_from_file(
             unsigned percentage = (unsigned) (100 * progress);
             while (percentage > *cur_percentage_p) {
                 *cur_percentage_p = percentage;
-                LLAMA_LOG(".");
+                LLAMA_LOG_CONT(".");
                 if (percentage >= 100) {
-                    LLAMA_LOG("\n");
+                    LLAMA_LOG_CONT("\n");
                 }
             }
             return true;
@@ -19058,6 +19224,10 @@ int32_t llama_n_layer(const struct llama_model * model) {
     return model->hparams.n_layer;
 }
 
+int32_t llama_n_head(const struct llama_model * model) {
+    return model->hparams.n_head();
+}
+
 const struct llama_model * llama_get_model(const struct llama_context * ctx) {
     return &ctx->model;
 }
@@ -19096,6 +19266,8 @@ enum llama_rope_type llama_rope_type(const struct llama_model * model) {
         case LLM_ARCH_ARCTIC:
         case LLM_ARCH_DEEPSEEK2:
         case LLM_ARCH_CHATGLM:
+        case LLM_ARCH_GRANITE:
+        case LLM_ARCH_GRANITE_MOE:
             return LLAMA_ROPE_TYPE_NORM;
 
         // the pairs of head values are offset by n_rot/2

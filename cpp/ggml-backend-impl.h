@@ -38,15 +38,16 @@ extern "C" {
     typedef void * lm_ggml_backend_buffer_context_t;
 
     struct lm_ggml_backend_buffer_i {
-        const char * (*LM_GGML_CALL get_name)   (lm_ggml_backend_buffer_t buffer);
-        void         (*LM_GGML_CALL free_buffer)(lm_ggml_backend_buffer_t buffer);
-        void *       (*LM_GGML_CALL get_base)   (lm_ggml_backend_buffer_t buffer);
-        void         (*LM_GGML_CALL init_tensor)(lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor);
-        void         (*LM_GGML_CALL set_tensor) (lm_ggml_backend_buffer_t buffer,       struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size);
-        void         (*LM_GGML_CALL get_tensor) (lm_ggml_backend_buffer_t buffer, const struct lm_ggml_tensor * tensor,       void * data, size_t offset, size_t size);
-        bool         (*LM_GGML_CALL cpy_tensor) (lm_ggml_backend_buffer_t buffer, const struct lm_ggml_tensor * src, struct lm_ggml_tensor * dst); // dst is in the buffer, src may be in any buffer
-        void         (*LM_GGML_CALL clear)      (lm_ggml_backend_buffer_t buffer, uint8_t value);
-        void         (*LM_GGML_CALL reset)      (lm_ggml_backend_buffer_t buffer); // reset any internal state due to tensor initialization, such as tensor extras
+        const char * (*LM_GGML_CALL get_name)      (lm_ggml_backend_buffer_t buffer);
+        void         (*LM_GGML_CALL free_buffer)   (lm_ggml_backend_buffer_t buffer);
+        void *       (*LM_GGML_CALL get_base)      (lm_ggml_backend_buffer_t buffer);
+        void         (*LM_GGML_CALL init_tensor)   (lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor);
+        void         (*LM_GGML_CALL memset_tensor) (lm_ggml_backend_buffer_t buffer,       struct lm_ggml_tensor * tensor,     uint8_t value, size_t offset, size_t size);
+        void         (*LM_GGML_CALL set_tensor)    (lm_ggml_backend_buffer_t buffer,       struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size);
+        void         (*LM_GGML_CALL get_tensor)    (lm_ggml_backend_buffer_t buffer, const struct lm_ggml_tensor * tensor,       void * data, size_t offset, size_t size);
+        bool         (*LM_GGML_CALL cpy_tensor)    (lm_ggml_backend_buffer_t buffer, const struct lm_ggml_tensor * src, struct lm_ggml_tensor * dst); // dst is in the buffer, src may be in any buffer
+        void         (*LM_GGML_CALL clear)         (lm_ggml_backend_buffer_t buffer, uint8_t value);
+        void         (*LM_GGML_CALL reset)         (lm_ggml_backend_buffer_t buffer); // reset any internal state due to tensor initialization, such as tensor extras
     };
 
     struct lm_ggml_backend_buffer {
