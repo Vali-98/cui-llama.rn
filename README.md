@@ -12,6 +12,8 @@ The following features have been added for Android:
 - tokenizeSync: non-blocking, synchronous tokenizer function
 - Context Shift taken from [kobold.cpp](https://github.com/LostRuins/koboldcpp)
 - XTC sampling
+- Progress callback
+- Retrieving CPU Features to check for i8mm and dotprod flags
 
 Original repo README.md below.
 

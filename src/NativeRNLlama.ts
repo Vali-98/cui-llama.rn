@@ -118,6 +118,12 @@ export type NativeLlamaChatMessage = {
   content: string
 }
 
+export type NativeCPUFeatures = {
+  armv8: boolean
+  i8mm: boolean
+  dotprod: boolean
+}
+
 export interface Spec extends TurboModule {
   setContextLimit(limit: number): Promise<void>
   initContext(params: NativeContextParams): Promise<NativeLlamaContext>
@@ -138,6 +144,7 @@ export interface Spec extends TurboModule {
   stopCompletion(contextId: number): Promise<void>
   tokenizeAsync(contextId: number, text: string): Promise<NativeTokenizeResult>
   tokenizeSync(contextId: number, text: string): NativeTokenizeResult
+  getCpuFeatures() : Promise<NativeCPUFeatures>
   getFormattedChat(
     contextId: number,
     messages: NativeLlamaChatMessage[],

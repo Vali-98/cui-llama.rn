@@ -294,7 +294,46 @@ public class RNLlama implements LifecycleEventListener {
     return context.tokenize(text);
   }
 
+  public void getCpuFeatures(Promise promise) {
+    AsyncTask task = new AsyncTask<Void, Void, WritableMap>() {
+      private Exception exception;
+      @Override
+      protected WritableMap doInBackground(Void... voids) {
+        try {
+          WritableMap result = Arguments.createMap();
+          boolean isV8 = LlamaContext.isArm64V8a();
+          result.putBoolean("armv8", isV8);
+          
+          if(isV8) {
+            String cpuFeatures = LlamaContext.getCpuFeatures();
+            boolean hasDotProd = cpuFeatures.contains("dotprod") || cpuFeatures.contains("asimddp");
+            boolean hasInt8Matmul = cpuFeatures.contains("i8mm");
+            result.putBoolean("i8mm", hasInt8Matmul);
+            result.putBoolean("dotprod", hasDotProd);
+          } else {
+            result.putBoolean("i8mm", false);
+            result.putBoolean("dotprod", false);
+          }
+          return result;
+        } catch (Exception e) {
+          exception = e;
+          return null;
+        }
+      }
 
+      @Override
+      protected void onPostExecute(WritableMap result) {
+        if (exception != null) {
+          promise.reject(exception);
+          return;
+        }
+        promise.resolve(result);
+        tasks.remove(this);
+      }
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    tasks.put(task, "getCPUFeatures");
+  }
+  
   public void detokenize(double id, final ReadableArray tokens, final Promise promise) {
     final int contextId = (int) id;
     AsyncTask task = new AsyncTask<Void, Void, String>() {

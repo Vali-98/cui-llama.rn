@@ -79,6 +79,11 @@ public class RNLlamaModule extends NativeRNLlamaSpec {
   }
 
   @ReactMethod
+  public void getCpuFeatures(final Promise promise) {
+    rnllama.getCpuFeatures(promise);
+  }
+
+  @ReactMethod
   public void detokenize(double id, final ReadableArray tokens, final Promise promise) {
     rnllama.detokenize(id, tokens, promise);
   }

@@ -325,7 +325,7 @@ public class LlamaContext {
     }
   }
 
-  private static boolean isArm64V8a() {
+  public static boolean isArm64V8a() {
     return Build.SUPPORTED_ABIS[0].equals("arm64-v8a");
   }
 
@@ -333,7 +333,7 @@ public class LlamaContext {
     return Build.SUPPORTED_ABIS[0].equals("x86_64");
   }
 
-  private static String getCpuFeatures() {
+  public static String getCpuFeatures() {
     File file = new File("/proc/cpuinfo");
     StringBuilder stringBuilder = new StringBuilder();
     try {

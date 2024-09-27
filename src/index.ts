@@ -10,6 +10,7 @@ import type {
   NativeTokenizeResult,
   NativeEmbeddingResult,
   NativeSessionLoadResult,
+  NativeCPUFeatures,
 } from './NativeRNLlama'
 import { SchemaGrammarConverter, convertJsonSchemaToGrammar } from './grammar'
 import type { RNLlamaOAICompatibleMessage } from './chat'
@@ -188,6 +189,10 @@ export class LlamaContext {
   async release(): Promise<void> {
     return RNLlama.releaseContext(this.id)
   }
+}
+
+export async function getCpuFeatures() : Promise<NativeCPUFeatures> {
+  return RNLlama.getCpuFeatures()
 }
 
 export async function setContextLimit(limit: number): Promise<void> {
