@@ -844,6 +844,31 @@ struct llama_init_result llama_init_from_gpt_params(gpt_params & params) {
         return iparams;
     }
 
+    if (params.reranking) {
+        bool ok = true;
+
+        if (llama_token_bos(model) == LLAMA_TOKEN_NULL) {
+            LOG_WRN("%s: warning: model does not have a  BOS token, reranking will not work\n", __func__);
+            ok = false;
+        }
+
+        if (llama_token_eos(model) == LLAMA_TOKEN_NULL) {
+            LOG_WRN("%s: warning: model does not have an EOS token, reranking will not work\n", __func__);
+            ok = false;
+        }
+
+        if (llama_token_sep(model) == LLAMA_TOKEN_NULL) {
+            LOG_WRN("%s: warning: model does not have a  SEP token, reranking will not work\n", __func__);
+            ok = false;
+        }
+
+        if (!ok) {
+            llama_free_model(model);
+
+            return iparams;
+        }
+    }
+
     auto cparams = llama_context_params_from_gpt_params(params);
 
     llama_context * lctx = llama_new_context_with_model(model, cparams);
@@ -861,6 +886,7 @@ struct llama_init_result llama_init_from_gpt_params(gpt_params & params) {
         if (cvec.n_embd == -1) {
             llama_free(lctx);
             llama_free_model(model);
+
             return iparams;
         }
 
@@ -873,6 +899,7 @@ struct llama_init_result llama_init_from_gpt_params(gpt_params & params) {
         if (err) {
             llama_free(lctx);
             llama_free_model(model);
+
             return iparams;
         }
     }
@@ -895,7 +922,7 @@ struct llama_init_result llama_init_from_gpt_params(gpt_params & params) {
         llama_lora_adapters_apply(lctx, iparams.lora_adapters);
     }
 
-    if (params.sparams.ignore_eos && llama_token_eos(model) == -1) {
+    if (params.sparams.ignore_eos && llama_token_eos(model) == LLAMA_TOKEN_NULL) {
         LOG_WRN("%s: warning: model does not have an EOS token, ignoring --ignore-eos\n", __func__);
         params.sparams.ignore_eos = false;
     }
@@ -936,6 +963,7 @@ struct llama_init_result llama_init_from_gpt_params(gpt_params & params) {
 
     iparams.model   = model;
     iparams.context = lctx;
+
     return iparams;
 }
 
@@ -1032,6 +1060,11 @@ struct llama_context_params llama_context_params_from_gpt_params(const gpt_param
     cparams.offload_kqv       = !params.no_kv_offload;
     cparams.flash_attn        = params.flash_attn;
     cparams.no_perf           = params.no_perf;
+
+    if (params.reranking) {
+        cparams.embeddings    = true;
+        cparams.pooling_type  = LLAMA_POOLING_TYPE_RANK;
+    }
 
     cparams.type_k = kv_cache_type_from_str(params.cache_type_k);
     cparams.type_v = kv_cache_type_from_str(params.cache_type_v);
@@ -1442,6 +1475,8 @@ void llama_batch_add(
                           llama_pos   pos,
     const std::vector<llama_seq_id> & seq_ids,
                                bool   logits) {
+    LM_GGML_ASSERT(batch.seq_id[batch.n_tokens] && "llama_batch size exceeded");
+
     batch.token   [batch.n_tokens] = id;
     batch.pos     [batch.n_tokens] = pos;
     batch.n_seq_id[batch.n_tokens] = seq_ids.size();

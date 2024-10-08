@@ -15,7 +15,7 @@ cp ./llama.cpp/ggml/include/ggml-metal.h ./cpp/ggml-metal.h
 cp ./llama.cpp/ggml/src/ggml.c ./cpp/ggml.c
 cp ./llama.cpp/ggml/src/ggml-metal.m ./cpp/ggml-metal.m
 cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
-cp ./llama.cpp/ggml/src/ggml-backend.c ./cpp/ggml-backend.c
+cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
 cp ./llama.cpp/ggml/src/ggml-backend-impl.h ./cpp/ggml-backend-impl.h
 cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
 cp ./llama.cpp/ggml/src/ggml-cpu-impl.h ./cpp/ggml-cpu-impl.h
@@ -78,7 +78,7 @@ files=(
   "./cpp/ggml-alloc.h"
   "./cpp/ggml-alloc.c"
   "./cpp/ggml-backend.h"
-  "./cpp/ggml-backend.c"
+  "./cpp/ggml-backend.cpp"
   "./cpp/ggml-backend-impl.h"
   "./cpp/ggml-impl.h"
   "./cpp/ggml-cpu-impl.h"

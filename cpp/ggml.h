@@ -187,16 +187,6 @@
 #    define LM_GGML_API
 #endif
 
-#ifdef LM_GGML_MULTIPLATFORM
-#    if defined(_WIN32)
-#        define LM_GGML_CALL
-#    else
-#        define LM_GGML_CALL __attribute__((__ms_abi__))
-#    endif
-#else
-#    define LM_GGML_CALL
-#endif
-
 // TODO: support for clang
 #ifdef __GNUC__
 #    define LM_GGML_DEPRECATED(func, hint) func __attribute__((deprecated(hint)))
@@ -230,14 +220,16 @@
 #define LM_GGML_MAX_PARAMS         2048
 #define LM_GGML_MAX_CONTEXTS       64
 #define LM_GGML_MAX_SRC            10
-#ifndef LM_GGML_MAX_NAME
-#define LM_GGML_MAX_NAME           64
 #define LM_GGML_MAX_N_THREADS      512
-
-#endif
 #define LM_GGML_MAX_OP_PARAMS      64
+
+#ifndef LM_GGML_MAX_NAME
+#   define LM_GGML_MAX_NAME        64
+#endif
+
 #define LM_GGML_DEFAULT_N_THREADS  4
 #define LM_GGML_DEFAULT_GRAPH_SIZE 2048
+
 #if UINTPTR_MAX == 0xFFFFFFFF
     #define LM_GGML_MEM_ALIGN 4
 #else
@@ -260,21 +252,21 @@
 #define LM_GGML_PAD(x, n) (((x) + (n) - 1) & ~((n) - 1))
 
 #ifndef NDEBUG
-#define LM_GGML_UNREACHABLE() do { fprintf(stderr, "statement should be unreachable\n"); abort(); } while(0)
+#   define LM_GGML_UNREACHABLE() do { fprintf(stderr, "statement should be unreachable\n"); abort(); } while(0)
 #elif defined(__GNUC__)
-#define LM_GGML_UNREACHABLE() __builtin_unreachable()
+#   define LM_GGML_UNREACHABLE() __builtin_unreachable()
 #elif defined(_MSC_VER)
-#define LM_GGML_UNREACHABLE() __assume(0)
+#   define LM_GGML_UNREACHABLE() __assume(0)
 #else
-#define LM_GGML_UNREACHABLE() ((void) 0)
+#   define LM_GGML_UNREACHABLE() ((void) 0)
 #endif
 
 #ifdef __cplusplus
-#define LM_GGML_NORETURN [[noreturn]]
+#   define LM_GGML_NORETURN [[noreturn]]
 #elif defined(_MSC_VER)
-#define LM_GGML_NORETURN __declspec(noreturn)
+#   define LM_GGML_NORETURN __declspec(noreturn)
 #else
-#define LM_GGML_NORETURN _Noreturn
+#   define LM_GGML_NORETURN _Noreturn
 #endif
 
 #define LM_GGML_ABORT(...) lm_ggml_abort((strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), __LINE__, __VA_ARGS__)
@@ -339,7 +331,7 @@ extern "C" {
     };
 
     // get lm_ggml_status name string
-    LM_GGML_API LM_GGML_CALL const char * lm_ggml_status_to_string(enum lm_ggml_status status);
+    LM_GGML_API const char * lm_ggml_status_to_string(enum lm_ggml_status status);
 
     // ieee 754-2008 half-precision float16
     // todo: make this not an integral type
@@ -465,6 +457,7 @@ extern "C" {
         LM_GGML_OP_SUM_ROWS,
         LM_GGML_OP_MEAN,
         LM_GGML_OP_ARGMAX,
+        LM_GGML_OP_COUNT_EQUAL,
         LM_GGML_OP_REPEAT,
         LM_GGML_OP_REPEAT_BACK,
         LM_GGML_OP_CONCAT,
@@ -576,10 +569,10 @@ extern "C" {
 
     // this tensor...
     enum lm_ggml_tensor_flag {
-        LM_GGML_TENSOR_FLAG_INPUT    = 1, // ...is an input for the GGML compute graph
-        LM_GGML_TENSOR_FLAG_OUTPUT   = 2, // ...is an output for the GGML compute graph
-        LM_GGML_TENSOR_FLAG_PARAM    = 4, // ...contains trainable parameters
-        LM_GGML_TENSOR_FLAG_LOSS     = 8, // ...defines loss for numerical optimization (multiple loss tensors add up)
+        LM_GGML_TENSOR_FLAG_INPUT  =  1, // ...is an input for the GGML compute graph
+        LM_GGML_TENSOR_FLAG_OUTPUT =  2, // ...is an output for the GGML compute graph
+        LM_GGML_TENSOR_FLAG_PARAM  =  4, // ...contains trainable parameters
+        LM_GGML_TENSOR_FLAG_LOSS   =  8, // ...defines loss for numerical optimization (multiple loss tensors add up)
     };
 
     // n-dimensional tensor
@@ -715,46 +708,46 @@ extern "C" {
     LM_GGML_API void    lm_ggml_print_object (const struct lm_ggml_object * obj);
     LM_GGML_API void    lm_ggml_print_objects(const struct lm_ggml_context * ctx);
 
-    LM_GGML_API LM_GGML_CALL int64_t lm_ggml_nelements   (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API LM_GGML_CALL int64_t lm_ggml_nrows       (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API LM_GGML_CALL size_t  lm_ggml_nbytes      (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API           size_t  lm_ggml_nbytes_pad  (const struct lm_ggml_tensor * tensor); // same as lm_ggml_nbytes() but padded to LM_GGML_MEM_ALIGN
+    LM_GGML_API int64_t lm_ggml_nelements (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API int64_t lm_ggml_nrows     (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API size_t  lm_ggml_nbytes    (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API size_t  lm_ggml_nbytes_pad(const struct lm_ggml_tensor * tensor); // same as lm_ggml_nbytes() but padded to LM_GGML_MEM_ALIGN
 
-    LM_GGML_API LM_GGML_CALL int64_t lm_ggml_blck_size(enum lm_ggml_type type);
-    LM_GGML_API LM_GGML_CALL size_t  lm_ggml_type_size(enum lm_ggml_type type);             // size in bytes for all elements in a block
-    LM_GGML_API LM_GGML_CALL size_t  lm_ggml_row_size (enum lm_ggml_type type, int64_t ne); // size in bytes for all elements in a row
+    LM_GGML_API int64_t lm_ggml_blck_size(enum lm_ggml_type type);
+    LM_GGML_API size_t  lm_ggml_type_size(enum lm_ggml_type type);             // size in bytes for all elements in a block
+    LM_GGML_API size_t  lm_ggml_row_size (enum lm_ggml_type type, int64_t ne); // size in bytes for all elements in a row
 
     LM_GGML_DEPRECATED(
     LM_GGML_API double lm_ggml_type_sizef(enum lm_ggml_type type), // lm_ggml_type_size()/lm_ggml_blck_size() as float
     "use lm_ggml_row_size() instead");
 
-    LM_GGML_API LM_GGML_CALL const char * lm_ggml_type_name(enum lm_ggml_type type);
-    LM_GGML_API LM_GGML_CALL const char * lm_ggml_op_name  (enum lm_ggml_op   op);
-    LM_GGML_API           const char * lm_ggml_op_symbol(enum lm_ggml_op   op);
+    LM_GGML_API const char * lm_ggml_type_name(enum lm_ggml_type type);
+    LM_GGML_API const char * lm_ggml_op_name  (enum lm_ggml_op   op);
+    LM_GGML_API const char * lm_ggml_op_symbol(enum lm_ggml_op   op);
 
-    LM_GGML_API           const char * lm_ggml_unary_op_name(enum lm_ggml_unary_op op);
-    LM_GGML_API LM_GGML_CALL const char * lm_ggml_op_desc(const struct lm_ggml_tensor * t); // unary or op name
+    LM_GGML_API const char * lm_ggml_unary_op_name(enum lm_ggml_unary_op op);
+    LM_GGML_API const char * lm_ggml_op_desc(const struct lm_ggml_tensor * t); // unary or op name
 
-    LM_GGML_API LM_GGML_CALL size_t  lm_ggml_element_size(const struct lm_ggml_tensor * tensor);
+    LM_GGML_API size_t  lm_ggml_element_size(const struct lm_ggml_tensor * tensor);
 
-    LM_GGML_API LM_GGML_CALL bool    lm_ggml_is_quantized(enum lm_ggml_type type);
+    LM_GGML_API bool    lm_ggml_is_quantized(enum lm_ggml_type type);
 
     // TODO: temporary until model loading of ggml examples is refactored
     LM_GGML_API enum lm_ggml_type lm_ggml_ftype_to_lm_ggml_type(enum lm_ggml_ftype ftype);
 
-    LM_GGML_API LM_GGML_CALL bool lm_ggml_is_transposed(const struct lm_ggml_tensor * tensor);
-    LM_GGML_API LM_GGML_CALL bool lm_ggml_is_permuted  (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API LM_GGML_CALL bool lm_ggml_is_empty     (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API           bool lm_ggml_is_scalar    (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API           bool lm_ggml_is_vector    (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API           bool lm_ggml_is_matrix    (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API           bool lm_ggml_is_3d        (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API           int  lm_ggml_n_dims       (const struct lm_ggml_tensor * tensor); // returns 1 for scalars
+    LM_GGML_API bool lm_ggml_is_transposed(const struct lm_ggml_tensor * tensor);
+    LM_GGML_API bool lm_ggml_is_permuted  (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API bool lm_ggml_is_empty     (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API bool lm_ggml_is_scalar    (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API bool lm_ggml_is_vector    (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API bool lm_ggml_is_matrix    (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API bool lm_ggml_is_3d        (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API int  lm_ggml_n_dims       (const struct lm_ggml_tensor * tensor); // returns 1 for scalars
 
-    LM_GGML_API LM_GGML_CALL bool lm_ggml_is_contiguous  (const struct lm_ggml_tensor * tensor);
-    LM_GGML_API LM_GGML_CALL bool lm_ggml_is_contiguous_0(const struct lm_ggml_tensor * tensor); // same as lm_ggml_is_contiguous()
-    LM_GGML_API LM_GGML_CALL bool lm_ggml_is_contiguous_1(const struct lm_ggml_tensor * tensor); // contiguous for dims >= 1
-    LM_GGML_API LM_GGML_CALL bool lm_ggml_is_contiguous_2(const struct lm_ggml_tensor * tensor); // contiguous for dims >= 2
+    LM_GGML_API bool lm_ggml_is_contiguous  (const struct lm_ggml_tensor * tensor);
+    LM_GGML_API bool lm_ggml_is_contiguous_0(const struct lm_ggml_tensor * tensor); // same as lm_ggml_is_contiguous()
+    LM_GGML_API bool lm_ggml_is_contiguous_1(const struct lm_ggml_tensor * tensor); // contiguous for dims >= 1
+    LM_GGML_API bool lm_ggml_is_contiguous_2(const struct lm_ggml_tensor * tensor); // contiguous for dims >= 2
 
     LM_GGML_API bool lm_ggml_are_same_shape (const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1);
     LM_GGML_API bool lm_ggml_are_same_stride(const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1);
@@ -846,7 +839,7 @@ extern "C" {
     LM_GGML_API void *  lm_ggml_get_data    (const struct lm_ggml_tensor * tensor);
     LM_GGML_API float * lm_ggml_get_data_f32(const struct lm_ggml_tensor * tensor);
 
-    LM_GGML_API LM_GGML_CALL enum lm_ggml_unary_op lm_ggml_get_unary_op(const struct lm_ggml_tensor * tensor);
+    LM_GGML_API enum lm_ggml_unary_op lm_ggml_get_unary_op(const struct lm_ggml_tensor * tensor);
 
     LM_GGML_API const char *         lm_ggml_get_name   (const struct lm_ggml_tensor * tensor);
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_set_name   (      struct lm_ggml_tensor * tensor, const char * name);
@@ -1002,6 +995,12 @@ extern "C" {
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_argmax(
             struct lm_ggml_context * ctx,
             struct lm_ggml_tensor  * a);
+
+    // count number of equal elements in a and b
+    LM_GGML_API struct lm_ggml_tensor * lm_ggml_count_equal(
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_tensor  * a,
+            struct lm_ggml_tensor  * b);
 
     // if a is the same shape as b, and a is not parameter, return a
     // otherwise, return a new tensor: repeat(a) to fit in b
@@ -1409,14 +1408,14 @@ extern "C" {
     // supports 3D: a->ne[2] == b->ne[1]
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_get_rows(
             struct lm_ggml_context * ctx,
-            struct lm_ggml_tensor  * a,
-            struct lm_ggml_tensor  * b);
+            struct lm_ggml_tensor  * a,  // data
+            struct lm_ggml_tensor  * b); // row indices
 
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_get_rows_back(
             struct lm_ggml_context * ctx,
-            struct lm_ggml_tensor  * a,
-            struct lm_ggml_tensor  * b,
-            struct lm_ggml_tensor  * c);
+            struct lm_ggml_tensor  * a,  // gradients of lm_ggml_get_rows result
+            struct lm_ggml_tensor  * b,  // row indices
+            struct lm_ggml_tensor  * c); // data for lm_ggml_get_rows, only used for its shape
 
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_diag(
         struct lm_ggml_context     * ctx,
@@ -1560,16 +1559,16 @@ extern "C" {
         "use lm_ggml_rope_ext_inplace instead");
 
     // compute correction dims for YaRN RoPE scaling
-    LM_GGML_CALL void lm_ggml_rope_yarn_corr_dims(
+    void lm_ggml_rope_yarn_corr_dims(
         int n_dims, int n_ctx_orig, float freq_base, float beta_fast, float beta_slow, float dims[2]);
 
     // rotary position embedding backward, i.e compute dx from dy
     // a - dy
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_rope_back(
             struct lm_ggml_context * ctx,
-            struct lm_ggml_tensor  * a,
-            struct lm_ggml_tensor  * b,
-            struct lm_ggml_tensor  * c,
+            struct lm_ggml_tensor  * a, // gradients of lm_ggml_rope result
+            struct lm_ggml_tensor  * b, // positions
+            struct lm_ggml_tensor  * c, // freq factors
             int                   n_dims,
             int                   mode,
             int                   n_ctx_orig,
@@ -2035,15 +2034,15 @@ extern "C" {
     // loss function
 
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_cross_entropy_loss(
-            struct lm_ggml_context         * ctx,
-            struct lm_ggml_tensor          * a,
-            struct lm_ggml_tensor          * b);
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_tensor  * a,  // logits
+            struct lm_ggml_tensor  * b); // labels
 
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_cross_entropy_loss_back(
-            struct lm_ggml_context         * ctx,
-            struct lm_ggml_tensor          * a,
-            struct lm_ggml_tensor          * b,
-            struct lm_ggml_tensor          * c);
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_tensor  * a,  // logits
+            struct lm_ggml_tensor  * b,  // labels
+            struct lm_ggml_tensor  * c); // gradients of cross_entropy_loss result
 
     // AdamW optimizer step
     // Paper: https://arxiv.org/pdf/1711.05101v3.pdf
@@ -2051,6 +2050,7 @@ extern "C" {
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_opt_step_adamw(
             struct lm_ggml_context * ctx,
             struct lm_ggml_tensor  * a,
+            struct lm_ggml_tensor  * grad,
             float                 alpha,
             float                 beta1,
             float                 beta2,
@@ -2065,7 +2065,7 @@ extern "C" {
     LM_GGML_API void lm_ggml_set_loss(struct lm_ggml_tensor * tensor);
 
     LM_GGML_API void lm_ggml_build_forward_expand (struct lm_ggml_cgraph * cgraph, struct lm_ggml_tensor * tensor);
-    LM_GGML_API void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool accumulate, bool keep);
+    LM_GGML_API void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool accumulate);
 
     LM_GGML_API void lm_ggml_build_opt_adamw(
             struct lm_ggml_context * ctx,
@@ -2174,6 +2174,10 @@ extern "C" {
 
     typedef void (*lm_ggml_opt_callback)(void * data, int accum_step, float * sched, bool * cancel);
     typedef void (*lm_ggml_log_callback)(enum lm_ggml_log_level level, const char * text, void * user_data);
+
+    // Set callback for all future logging events.
+    // If this is not called, or NULL is supplied, everything is output on stderr.
+    LM_GGML_API void lm_ggml_log_set(lm_ggml_log_callback log_callback, void * user_data);
 
     // optimization parameters
     //
@@ -2508,6 +2512,9 @@ extern "C" {
     LM_GGML_API int lm_ggml_cpu_has_cann       (void);
     LM_GGML_API int lm_ggml_cpu_has_llamafile  (void);
 
+    // get the sve vector length in bytes
+    LM_GGML_API int lm_ggml_cpu_get_sve_cnt(void);
+
     //
     // Internal types and functions exposed for tests and benchmarks
     //
@@ -2529,7 +2536,7 @@ extern "C" {
     typedef void (*lm_ggml_gemm_t)     (int n, float * LM_GGML_RESTRICT s, size_t bs, const void * LM_GGML_RESTRICT x,
                                        const void * LM_GGML_RESTRICT y, int nr, int nc);
 
-    typedef struct {
+    struct lm_ggml_type_traits {
         const char             * type_name;
         int64_t                  blck_size;
         int64_t                  blck_size_interleave; // interleave elements in blocks
@@ -2545,9 +2552,9 @@ extern "C" {
         int64_t                  ncols; // number of columns to process simultaneously
         lm_ggml_gemv_t              gemv;
         lm_ggml_gemm_t              gemm;
-    } lm_ggml_type_traits_t;
+    };
 
-    LM_GGML_API lm_ggml_type_traits_t lm_ggml_internal_get_type_traits(enum lm_ggml_type type);
+    LM_GGML_API const struct lm_ggml_type_traits * lm_ggml_get_type_traits(enum lm_ggml_type type);
 
 #ifdef  __cplusplus
 }

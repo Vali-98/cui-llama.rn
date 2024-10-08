@@ -16,7 +16,7 @@ set(
 
     ${RNLLAMA_LIB_DIR}/ggml-aarch64.c
     ${RNLLAMA_LIB_DIR}/ggml-alloc.c
-    ${RNLLAMA_LIB_DIR}/ggml-backend.c
+    ${RNLLAMA_LIB_DIR}/ggml-backend.cpp
     ${RNLLAMA_LIB_DIR}/ggml.c
     ${RNLLAMA_LIB_DIR}/ggml-quants.c
     ${RNLLAMA_LIB_DIR}/common.cpp
@@ -55,7 +55,7 @@ function(build_library target_name cpu_flags)
     # NOTE: If you want to debug the native code, you can uncomment if and endif
     # Note that it will be extremely slow
     # if (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        target_compile_options(${target_name} PRIVATE -O3 -DNDEBUG)
+        target_compile_options(${target_name} PRIVATE -O3 -DNDEBUG -DRNLLAMA_USE_FD_FILE)
         target_compile_options(${target_name} PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
         target_compile_options(${target_name} PRIVATE -ffunction-sections -fdata-sections)
 

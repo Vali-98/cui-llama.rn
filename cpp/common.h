@@ -290,6 +290,7 @@ struct gpt_params {
     int32_t embd_normalize = 2;     // normalisation for embendings (-1=none, 0=max absolute int16, 1=taxicab, 2=euclidean, >2=p-norm)
     std::string embd_out   = "";    // empty = default, "array" = [[],[]...], "json" = openai style, "json+" = same "json" + cosine similarity matrix
     std::string embd_sep   = "\n";  // separator of embendings
+    bool reranking         = false; // enable reranking support on server
 
     // server params
     int32_t port           = 8080;         // server listens on this network port
@@ -308,7 +309,10 @@ struct gpt_params {
     std::string ssl_file_key  = "";                                                                         // NOLINT
     std::string ssl_file_cert = "";                                                                         // NOLINT
 
-    bool endpoint_slots   = true;
+    // "advanced" endpoints are disabled by default for better security
+    bool webui            = true;
+    bool endpoint_slots   = false;
+    bool endpoint_props   = false; // only control POST requests, not GET
     bool endpoint_metrics = false;
 
     bool log_json = false;

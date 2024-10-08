@@ -39,9 +39,6 @@
 #include <unistd.h>
 #endif
 
-#if defined(__ARM_FEATURE_SVE)
-int lm_ggml_sve_cnt_b = 0;
-#endif
 #if defined(__ARM_FEATURE_SVE) || defined(__ARM_FEATURE_MATMUL_INT8)
 #undef LM_GGML_USE_LLAMAFILE
 #endif
@@ -322,25 +319,62 @@ void lm_ggml_abort(const char * file, int line, const char * fmt, ...) {
 // logging
 //
 
+struct lm_ggml_logger_state {
+    lm_ggml_log_callback log_callback;
+    void * log_callback_user_data;
+};
+static struct lm_ggml_logger_state g_logger_state = {lm_ggml_log_callback_default, NULL};
+
+static void lm_ggml_log_internal_v(enum lm_ggml_log_level level, const char * format, va_list args) {
+    if (format == NULL)
+        return;
+    va_list args_copy;
+    va_copy(args_copy, args);
+    char buffer[128];
+    int len = vsnprintf(buffer, 128, format, args);
+    if (len < 128) {
+        g_logger_state.log_callback(level, buffer, g_logger_state.log_callback_user_data);
+    } else {
+        char * buffer2 = (char *) calloc(len + 1, sizeof(char));
+        vsnprintf(buffer2, len + 1, format, args_copy);
+        buffer2[len] = 0;
+        g_logger_state.log_callback(level, buffer2, g_logger_state.log_callback_user_data);
+        free(buffer2);
+    }
+    va_end(args_copy);
+}
+
+void lm_ggml_log_internal(enum lm_ggml_log_level level, const char * format, ...) {
+    va_list args;
+    va_start(args, format);
+    lm_ggml_log_internal_v(level, format, args);
+    va_end(args);
+}
+
+void lm_ggml_log_callback_default(enum lm_ggml_log_level level, const char * text, void * user_data) {
+    (void) level;
+    (void) user_data;
+    fputs(text, stderr);
+    fflush(stderr);
+}
+
 #if (LM_GGML_DEBUG >= 1)
-#define LM_GGML_PRINT_DEBUG(...) printf(__VA_ARGS__)
+#define LM_GGML_PRINT_DEBUG(...) LM_GGML_LOG_DEBUG(__VA_ARGS__)
 #else
 #define LM_GGML_PRINT_DEBUG(...)
 #endif
 
 #if (LM_GGML_DEBUG >= 5)
-#define LM_GGML_PRINT_DEBUG_5(...) printf(__VA_ARGS__)
+#define LM_GGML_PRINT_DEBUG_5(...) LM_GGML_LOG_DEBUG(__VA_ARGS__)
 #else
 #define LM_GGML_PRINT_DEBUG_5(...)
 #endif
 
 #if (LM_GGML_DEBUG >= 10)
-#define LM_GGML_PRINT_DEBUG_10(...) printf(__VA_ARGS__)
+#define LM_GGML_PRINT_DEBUG_10(...) LM_GGML_LOG_DEBUG(__VA_ARGS__)
 #else
 #define LM_GGML_PRINT_DEBUG_10(...)
 #endif
-
-#define LM_GGML_PRINT(...) printf(__VA_ARGS__)
 
 //
 // end of logging block
@@ -358,7 +392,7 @@ void lm_ggml_abort(const char * file, int line, const char * fmt, ...) {
 #else
 inline static void * lm_ggml_aligned_malloc(size_t size) {
     if (size == 0) {
-        LM_GGML_PRINT("WARNING: Behavior may be unexpected when allocating 0 bytes for lm_ggml_aligned_malloc!\n");
+        LM_GGML_LOG_WARN("Behavior may be unexpected when allocating 0 bytes for lm_ggml_aligned_malloc!\n");
         return NULL;
     }
     void * aligned_memory = NULL;
@@ -380,7 +414,7 @@ inline static void * lm_ggml_aligned_malloc(size_t size) {
                 error_desc = "insufficient memory";
                 break;
         }
-        LM_GGML_PRINT("%s: %s (attempted to allocate %6.2f MB)\n", __func__, error_desc, size/(1024.0*1024.0));
+        LM_GGML_LOG_ERROR("%s: %s (attempted to allocate %6.2f MB)\n", __func__, error_desc, size/(1024.0*1024.0));
         LM_GGML_ABORT("fatal error");
         return NULL;
     }
@@ -396,12 +430,12 @@ inline static void * lm_ggml_aligned_malloc(size_t size) {
 
 inline static void * lm_ggml_malloc(size_t size) {
     if (size == 0) {
-        LM_GGML_PRINT("WARNING: Behavior may be unexpected when allocating 0 bytes for lm_ggml_malloc!\n");
+        LM_GGML_LOG_WARN("Behavior may be unexpected when allocating 0 bytes for lm_ggml_malloc!\n");
         return NULL;
     }
     void * result = malloc(size);
     if (result == NULL) {
-        LM_GGML_PRINT("%s: failed to allocate %6.2f MB\n", __func__, size/(1024.0*1024.0));
+        LM_GGML_LOG_ERROR("%s: failed to allocate %6.2f MB\n", __func__, size/(1024.0*1024.0));
         LM_GGML_ABORT("fatal error");
     }
     return result;
@@ -410,12 +444,12 @@ inline static void * lm_ggml_malloc(size_t size) {
 // calloc
 inline static void * lm_ggml_calloc(size_t num, size_t size) {
     if (num == 0 || size == 0) {
-        LM_GGML_PRINT("WARNING: Behavior may be unexpected when allocating 0 bytes for lm_ggml_calloc!\n");
+        LM_GGML_LOG_WARN("Behavior may be unexpected when allocating 0 bytes for lm_ggml_calloc!\n");
         return NULL;
     }
     void * result = calloc(num, size);
     if (result == NULL) {
-        LM_GGML_PRINT("%s: failed to allocate %6.2f MB\n", __func__, size/(1024.0*1024.0));
+        LM_GGML_LOG_ERROR("%s: failed to allocate %6.2f MB\n", __func__, size/(1024.0*1024.0));
         LM_GGML_ABORT("fatal error");
     }
     return result;
@@ -455,7 +489,16 @@ static lm_ggml_fp16_t lm_ggml_table_gelu_quick_f16[1 << 16];
 // precomputed f32 table for f16 (256 KB) (ggml-impl.h)
 float lm_ggml_table_f32_f16[1 << 16];
 
-LM_GGML_CALL const char * lm_ggml_status_to_string(enum lm_ggml_status status) {
+#if defined(__ARM_ARCH)
+struct lm_ggml_arm_arch_features_type {
+    int has_neon;
+    int has_i8mm;
+    int has_sve;
+    int sve_cnt;
+} lm_ggml_arm_arch_features = {-1, -1, -1, 0};
+#endif
+
+const char * lm_ggml_status_to_string(enum lm_ggml_status status) {
     switch (status) {
         case LM_GGML_STATUS_ALLOC_FAILED: return "GGML status: error (failed to allocate memory)";
         case LM_GGML_STATUS_FAILED:       return "GGML status: error (operation failed)";
@@ -661,6 +704,19 @@ FILE * lm_ggml_fopen(const char * fname, const char * mode) {
     }
 
     return file;
+#elif defined(RNLLAMA_USE_FD_FILE)
+    // [RNLLAMA] VERY UNSAFE, ASSUMES GIVEN fname is FileDescriptor id
+    
+    if (strchr(fname, '/') == NULL) {
+        char *endptr;
+        long num = strtol(fname, &endptr, 10);
+        FILE *file = fdopen(dup(num), mode);
+
+        if (file != NULL) {
+            return file;
+        } 
+    }
+    return fopen(fname, mode);
 #else
     return fopen(fname, mode);
 #endif
@@ -686,7 +742,7 @@ static void lm_ggml_vec_dot_f32(int n, float * restrict s, size_t bs, const floa
 static void lm_ggml_vec_dot_f16(int n, float * restrict s, size_t bs, lm_ggml_fp16_t * restrict x, size_t bx, lm_ggml_fp16_t * restrict y, size_t by, int nrc);
 static void lm_ggml_vec_dot_bf16(int n, float * restrict s, size_t bs, lm_ggml_bf16_t * restrict x, size_t bx, lm_ggml_bf16_t * restrict y, size_t by, int nrc);
 
-static const lm_ggml_type_traits_t type_traits[LM_GGML_TYPE_COUNT] = {
+static const struct lm_ggml_type_traits type_traits[LM_GGML_TYPE_COUNT] = {
     [LM_GGML_TYPE_I8] = {
         .type_name                = "i8",
         .blck_size                = 1,
@@ -1108,9 +1164,9 @@ static const lm_ggml_type_traits_t type_traits[LM_GGML_TYPE_COUNT] = {
 };
 
 // For internal test use
-lm_ggml_type_traits_t lm_ggml_internal_get_type_traits(enum lm_ggml_type type) {
+const struct lm_ggml_type_traits * lm_ggml_get_type_traits(enum lm_ggml_type type) {
     LM_GGML_ASSERT(type < LM_GGML_TYPE_COUNT);
-    return type_traits[type];
+    return &type_traits[type];
 }
 
 //
@@ -2951,6 +3007,7 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "SUM_ROWS",
     "MEAN",
     "ARGMAX",
+    "COUNT_EQUAL",
     "REPEAT",
     "REPEAT_BACK",
     "CONCAT",
@@ -3024,7 +3081,7 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "OPT_STEP_ADAMW",
 };
 
-static_assert(LM_GGML_OP_COUNT == 80, "LM_GGML_OP_COUNT != 80");
+static_assert(LM_GGML_OP_COUNT == 81, "LM_GGML_OP_COUNT != 81");
 
 static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "none",
@@ -3045,6 +3102,7 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "Σx_k",
     "Σx/n",
     "argmax(x)",
+    "count_equal(x)",
     "repeat(x)",
     "repeat_back(x)",
     "concat(x, y)",
@@ -3118,7 +3176,7 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "adamw(x)",
 };
 
-static_assert(LM_GGML_OP_COUNT == 80, "LM_GGML_OP_COUNT != 80");
+static_assert(LM_GGML_OP_COUNT == 81, "LM_GGML_OP_COUNT != 81");
 
 static_assert(LM_GGML_OP_POOL_COUNT == 2, "LM_GGML_OP_POOL_COUNT != 2");
 
@@ -3341,7 +3399,7 @@ void lm_ggml_numa_init(enum lm_ggml_numa_strategy numa_flag) {
         if (fptr != NULL) {
             char buf[42];
             if (fgets(buf, sizeof(buf), fptr) && strncmp(buf, "0\n", sizeof(buf)) != 0) {
-                LM_GGML_PRINT("WARNING: /proc/sys/kernel/numa_balancing is enabled, this has been observed to impair performance\n");
+                LM_GGML_LOG_WARN("/proc/sys/kernel/numa_balancing is enabled, this has been observed to impair performance\n");
             }
             fclose(fptr);
         }
@@ -3359,36 +3417,36 @@ bool lm_ggml_is_numa(void) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void lm_ggml_print_object(const struct lm_ggml_object * obj) {
-    LM_GGML_PRINT(" - lm_ggml_object: type = %d, offset = %zu, size = %zu, next = %p\n",
+    LM_GGML_LOG_INFO(" - lm_ggml_object: type = %d, offset = %zu, size = %zu, next = %p\n",
             obj->type, obj->offs, obj->size, (const void *) obj->next);
 }
 
 void lm_ggml_print_objects(const struct lm_ggml_context * ctx) {
     struct lm_ggml_object * obj = ctx->objects_begin;
 
-    LM_GGML_PRINT("%s: objects in context %p:\n", __func__, (const void *) ctx);
+    LM_GGML_LOG_INFO("%s: objects in context %p:\n", __func__, (const void *) ctx);
 
     while (obj != NULL) {
         lm_ggml_print_object(obj);
         obj = obj->next;
     }
 
-    LM_GGML_PRINT("%s: --- end ---\n", __func__);
+    LM_GGML_LOG_INFO("%s: --- end ---\n", __func__);
 }
 
-LM_GGML_CALL int64_t lm_ggml_nelements(const struct lm_ggml_tensor * tensor) {
+int64_t lm_ggml_nelements(const struct lm_ggml_tensor * tensor) {
     static_assert(LM_GGML_MAX_DIMS == 4, "LM_GGML_MAX_DIMS is not 4 - update this function");
 
     return tensor->ne[0]*tensor->ne[1]*tensor->ne[2]*tensor->ne[3];
 }
 
-LM_GGML_CALL int64_t lm_ggml_nrows(const struct lm_ggml_tensor * tensor) {
+int64_t lm_ggml_nrows(const struct lm_ggml_tensor * tensor) {
     static_assert(LM_GGML_MAX_DIMS == 4, "LM_GGML_MAX_DIMS is not 4 - update this function");
 
     return tensor->ne[1]*tensor->ne[2]*tensor->ne[3];
 }
 
-LM_GGML_CALL size_t lm_ggml_nbytes(const struct lm_ggml_tensor * tensor) {
+size_t lm_ggml_nbytes(const struct lm_ggml_tensor * tensor) {
     size_t nbytes;
     size_t blck_size = lm_ggml_blck_size(tensor->type);
     if (blck_size == 1) {
@@ -3411,15 +3469,15 @@ size_t lm_ggml_nbytes_pad(const struct lm_ggml_tensor * tensor) {
     return LM_GGML_PAD(lm_ggml_nbytes(tensor), LM_GGML_MEM_ALIGN);
 }
 
-LM_GGML_CALL int64_t lm_ggml_blck_size(enum lm_ggml_type type) {
+int64_t lm_ggml_blck_size(enum lm_ggml_type type) {
     return type_traits[type].blck_size;
 }
 
-LM_GGML_CALL size_t lm_ggml_type_size(enum lm_ggml_type type) {
+size_t lm_ggml_type_size(enum lm_ggml_type type) {
     return type_traits[type].type_size;
 }
 
-LM_GGML_CALL size_t lm_ggml_row_size(enum lm_ggml_type type, int64_t ne) {
+size_t lm_ggml_row_size(enum lm_ggml_type type, int64_t ne) {
     assert(ne % lm_ggml_blck_size(type) == 0);
     return lm_ggml_type_size(type)*ne/lm_ggml_blck_size(type);
 }
@@ -3428,15 +3486,15 @@ double lm_ggml_type_sizef(enum lm_ggml_type type) {
     return ((double)(type_traits[type].type_size))/type_traits[type].blck_size;
 }
 
-LM_GGML_CALL const char * lm_ggml_type_name(enum lm_ggml_type type) {
+const char * lm_ggml_type_name(enum lm_ggml_type type) {
     return type < LM_GGML_TYPE_COUNT ? type_traits[type].type_name : "NONE";
 }
 
-LM_GGML_CALL bool lm_ggml_is_quantized(enum lm_ggml_type type) {
+bool lm_ggml_is_quantized(enum lm_ggml_type type) {
     return type_traits[type].is_quantized;
 }
 
-LM_GGML_CALL const char * lm_ggml_op_name(enum lm_ggml_op op) {
+const char * lm_ggml_op_name(enum lm_ggml_op op) {
     return LM_GGML_OP_NAME[op];
 }
 
@@ -3448,7 +3506,7 @@ const char * lm_ggml_unary_op_name(enum lm_ggml_unary_op op) {
     return LM_GGML_UNARY_OP_NAME[op];
 }
 
-LM_GGML_CALL const char * lm_ggml_op_desc(const struct lm_ggml_tensor * t) {
+const char * lm_ggml_op_desc(const struct lm_ggml_tensor * t) {
     if (t->op == LM_GGML_OP_UNARY) {
         enum lm_ggml_unary_op uop = lm_ggml_get_unary_op(t);
         return lm_ggml_unary_op_name(uop);
@@ -3456,7 +3514,7 @@ LM_GGML_CALL const char * lm_ggml_op_desc(const struct lm_ggml_tensor * t) {
     return lm_ggml_op_name(t->op);
 }
 
-LM_GGML_CALL size_t lm_ggml_element_size(const struct lm_ggml_tensor * tensor) {
+size_t lm_ggml_element_size(const struct lm_ggml_tensor * tensor) {
     return lm_ggml_type_size(tensor->type);
 }
 
@@ -3549,7 +3607,7 @@ size_t lm_ggml_tensor_overhead(void) {
     return LM_GGML_OBJECT_SIZE + LM_GGML_TENSOR_SIZE;
 }
 
-LM_GGML_CALL bool lm_ggml_is_transposed(const struct lm_ggml_tensor * tensor) {
+bool lm_ggml_is_transposed(const struct lm_ggml_tensor * tensor) {
     return tensor->nb[0] > tensor->nb[1];
 }
 
@@ -3575,23 +3633,23 @@ static bool lm_ggml_is_contiguous_n(const struct lm_ggml_tensor * tensor, int n)
     return true;
 }
 
-LM_GGML_CALL bool lm_ggml_is_contiguous(const struct lm_ggml_tensor * tensor) {
+bool lm_ggml_is_contiguous(const struct lm_ggml_tensor * tensor) {
     return lm_ggml_is_contiguous_0(tensor);
 }
 
-LM_GGML_CALL bool lm_ggml_is_contiguous_0(const struct lm_ggml_tensor * tensor) {
+bool lm_ggml_is_contiguous_0(const struct lm_ggml_tensor * tensor) {
     return lm_ggml_is_contiguous_n(tensor, 0);
 }
 
-LM_GGML_CALL bool lm_ggml_is_contiguous_1(const struct lm_ggml_tensor * tensor) {
+bool lm_ggml_is_contiguous_1(const struct lm_ggml_tensor * tensor) {
     return lm_ggml_is_contiguous_n(tensor, 1);
 }
 
-LM_GGML_CALL bool lm_ggml_is_contiguous_2(const struct lm_ggml_tensor * tensor) {
+bool lm_ggml_is_contiguous_2(const struct lm_ggml_tensor * tensor) {
     return lm_ggml_is_contiguous_n(tensor, 2);
 }
 
-LM_GGML_CALL bool lm_ggml_is_permuted(const struct lm_ggml_tensor * tensor) {
+bool lm_ggml_is_permuted(const struct lm_ggml_tensor * tensor) {
     static_assert(LM_GGML_MAX_DIMS == 4, "LM_GGML_MAX_DIMS is not 4 - update this function");
 
     return tensor->nb[0] > tensor->nb[1] || tensor->nb[1] > tensor->nb[2] || tensor->nb[2] > tensor->nb[3];
@@ -3606,7 +3664,7 @@ static inline bool lm_ggml_is_padded_1d(const struct lm_ggml_tensor * tensor) {
         tensor->nb[3] == tensor->nb[2]*tensor->ne[2];
 }
 
-LM_GGML_CALL bool lm_ggml_is_empty(const struct lm_ggml_tensor * tensor) {
+bool lm_ggml_is_empty(const struct lm_ggml_tensor * tensor) {
     for (int i = 0; i < LM_GGML_MAX_DIMS; ++i) {
         if (tensor->ne[i] == 0) {
             // empty if any dimension has no elements
@@ -3673,6 +3731,70 @@ static inline int lm_ggml_up(int n, int m) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+#if defined(__ARM_ARCH)
+
+#if defined(__linux__) && defined(__aarch64__)
+#include <sys/auxv.h>
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
+
+#if !defined(HWCAP2_I8MM)
+#define HWCAP2_I8MM 0
+#endif
+
+static void lm_ggml_init_arm_arch_features(void) {
+#if defined(__linux__) && defined(__aarch64__)
+    uint32_t hwcap = getauxval(AT_HWCAP);
+    uint32_t hwcap2 = getauxval(AT_HWCAP2);
+
+    lm_ggml_arm_arch_features.has_neon = !!(hwcap & HWCAP_ASIMD);
+    lm_ggml_arm_arch_features.has_i8mm = !!(hwcap2 & HWCAP2_I8MM);
+    lm_ggml_arm_arch_features.has_sve  = !!(hwcap & HWCAP_SVE);
+
+#if defined(__ARM_FEATURE_SVE)
+    lm_ggml_arm_arch_features.sve_cnt = PR_SVE_VL_LEN_MASK & prctl(PR_SVE_GET_VL);
+#endif
+#elif defined(__APPLE__)
+    int oldp = 0;
+    size_t size = sizeof(oldp);
+    if (sysctlbyname("hw.optional.AdvSIMD", &oldp, &size, NULL, 0) != 0) {
+        oldp = 0;
+    }
+    lm_ggml_arm_arch_features.has_neon = oldp;
+
+    if (sysctlbyname("hw.optional.arm.FEAT_I8MM", &oldp, &size, NULL, 0) != 0) {
+        oldp = 0;
+    }
+    lm_ggml_arm_arch_features.has_i8mm = oldp;
+
+    lm_ggml_arm_arch_features.has_sve = 0;
+    lm_ggml_arm_arch_features.sve_cnt = 0;
+#else
+// Run-time CPU feature detection not implemented for this platform, fallback to compile time
+#if defined(__ARM_NEON)
+    lm_ggml_arm_arch_features.has_neon = 1;
+#else
+    lm_ggml_arm_arch_features.has_neon = 0;
+#endif
+
+#if defined(__ARM_FEATURE_MATMUL_INT8)
+    lm_ggml_arm_arch_features.has_i8mm = 1;
+#else
+    lm_ggml_arm_arch_features.has_i8mm = 0;
+#endif
+
+#if defined(__ARM_FEATURE_SVE)
+    lm_ggml_arm_arch_features.has_sve = 1;
+    lm_ggml_arm_arch_features.sve_cnt = 16;
+#else
+    lm_ggml_arm_arch_features.has_sve = 0;
+    lm_ggml_arm_arch_features.sve_cnt = 0;
+#endif
+#endif
+}
+#endif
+
 struct lm_ggml_context * lm_ggml_init(struct lm_ggml_init_params params) {
     // make this function thread safe
     lm_ggml_critical_section_start();
@@ -3723,6 +3845,10 @@ struct lm_ggml_context * lm_ggml_init(struct lm_ggml_init_params params) {
             LM_GGML_PRINT_DEBUG("%s: g_state initialized in %f ms\n", __func__, (t_end - t_start)/1000.0f);
         }
 
+#if defined(__ARM_ARCH)
+        lm_ggml_init_arm_arch_features();
+#endif
+
         is_first_call = false;
     }
 
@@ -3770,12 +3896,6 @@ struct lm_ggml_context * lm_ggml_init(struct lm_ggml_init_params params) {
     LM_GGML_ASSERT(ctx->mem_buffer != NULL);
 
     LM_GGML_ASSERT_ALIGNED(ctx->mem_buffer);
-
-#if defined(__ARM_FEATURE_SVE)
-    if (!lm_ggml_sve_cnt_b) {
-        lm_ggml_sve_cnt_b = PR_SVE_VL_LEN_MASK & prctl(PR_SVE_GET_VL);
-    }
-#endif
 
     LM_GGML_PRINT_DEBUG("%s: context initialized\n", __func__);
 
@@ -3894,7 +4014,7 @@ static struct lm_ggml_object * lm_ggml_new_object(struct lm_ggml_context * ctx, 
     struct lm_ggml_object * const obj_new = (struct lm_ggml_object *)(mem_buffer + cur_end);
 
     if (cur_end + size_needed + LM_GGML_OBJECT_SIZE > ctx->mem_size) {
-        LM_GGML_PRINT("%s: not enough space in the context's memory pool (needed %zu, available %zu)\n",
+        LM_GGML_LOG_WARN("%s: not enough space in the context's memory pool (needed %zu, available %zu)\n",
                 __func__, cur_end + size_needed + LM_GGML_OBJECT_SIZE, ctx->mem_size);
         assert(false);
         return NULL;
@@ -3958,7 +4078,7 @@ static struct lm_ggml_tensor * lm_ggml_new_tensor_impl(
         if (ctx->scratch.data != NULL) {
             // allocate tensor data in the scratch buffer
             if (ctx->scratch.offs + data_size > ctx->scratch.size) {
-                LM_GGML_PRINT("%s: not enough space in the scratch memory pool (needed %zu, available %zu)\n",
+                LM_GGML_LOG_WARN("%s: not enough space in the scratch memory pool (needed %zu, available %zu)\n",
                         __func__, ctx->scratch.offs + data_size, ctx->scratch.size);
                 assert(false);
                 return NULL;
@@ -4127,9 +4247,13 @@ static void lm_ggml_set_op_params_f32(struct lm_ggml_tensor * tensor, uint32_t i
 }
 
 struct lm_ggml_tensor * lm_ggml_set_zero(struct lm_ggml_tensor * tensor) {
+    if (lm_ggml_is_empty(tensor)) {
+        return tensor;
+    }
     if (tensor->buffer) {
         lm_ggml_backend_tensor_memset(tensor, 0, 0, lm_ggml_nbytes(tensor));
     } else {
+        LM_GGML_ASSERT(tensor->data);
         memset(tensor->data, 0, lm_ggml_nbytes(tensor));
     }
     return tensor;
@@ -4560,7 +4684,7 @@ float * lm_ggml_get_data_f32(const struct lm_ggml_tensor * tensor) {
     return (float *)(tensor->data);
 }
 
-LM_GGML_CALL enum lm_ggml_unary_op lm_ggml_get_unary_op(const struct lm_ggml_tensor * tensor) {
+enum lm_ggml_unary_op lm_ggml_get_unary_op(const struct lm_ggml_tensor * tensor) {
     LM_GGML_ASSERT(tensor->op == LM_GGML_OP_UNARY);
     return (enum lm_ggml_unary_op) lm_ggml_get_op_params_i32(tensor, 0);
 }
@@ -4657,18 +4781,11 @@ struct lm_ggml_tensor * lm_ggml_get_tensor(struct lm_ggml_context * ctx, const c
 
 static struct lm_ggml_tensor * lm_ggml_dup_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
-
+        struct lm_ggml_tensor  * a,
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_DUP;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_DUP;
     result->src[0] = a;
 
     return result;
@@ -4676,13 +4793,13 @@ static struct lm_ggml_tensor * lm_ggml_dup_impl(
 
 struct lm_ggml_tensor * lm_ggml_dup(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a) {
+        struct lm_ggml_tensor  * a) {
     return lm_ggml_dup_impl(ctx, a, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_dup_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a) {
+        struct lm_ggml_tensor  * a) {
     return lm_ggml_dup_impl(ctx, a, true);
 }
 
@@ -4690,21 +4807,14 @@ struct lm_ggml_tensor * lm_ggml_dup_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_add_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        bool inplace) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_can_repeat(b, a));
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_ADD;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ADD;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -4713,15 +4823,15 @@ static struct lm_ggml_tensor * lm_ggml_add_impl(
 
 struct lm_ggml_tensor * lm_ggml_add(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     return lm_ggml_add_impl(ctx, a, b, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_add_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     return lm_ggml_add_impl(ctx, a, b, true);
 }
 
@@ -4729,9 +4839,9 @@ struct lm_ggml_tensor * lm_ggml_add_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_add_cast_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        enum   lm_ggml_type     type) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        enum   lm_ggml_type      type) {
     // TODO: support less-strict constraint
     //       LM_GGML_ASSERT(lm_ggml_can_repeat(b, a));
     LM_GGML_ASSERT(lm_ggml_can_repeat_rows(b, a));
@@ -4741,18 +4851,9 @@ static struct lm_ggml_tensor * lm_ggml_add_cast_impl(
                 a->type == LM_GGML_TYPE_F16 ||
                 a->type == LM_GGML_TYPE_BF16);
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        // TODO: support backward pass for broadcasting
-        LM_GGML_ASSERT(lm_ggml_are_same_shape(a, b));
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, type, LM_GGML_MAX_DIMS, a->ne);
 
-    result->op   = LM_GGML_OP_ADD;
-    result->grad = is_node ? lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, LM_GGML_MAX_DIMS, a->ne) : NULL;
+    result->op     = LM_GGML_OP_ADD;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -4761,9 +4862,9 @@ static struct lm_ggml_tensor * lm_ggml_add_cast_impl(
 
 struct lm_ggml_tensor * lm_ggml_add_cast(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        enum   lm_ggml_type     type) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        enum   lm_ggml_type      type) {
     return lm_ggml_add_cast_impl(ctx, a, b, type);
 }
 
@@ -4771,22 +4872,15 @@ struct lm_ggml_tensor * lm_ggml_add_cast(
 
 static struct lm_ggml_tensor * lm_ggml_add1_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        bool inplace) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_is_scalar(b));
     LM_GGML_ASSERT(lm_ggml_is_padded_1d(a));
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_ADD1;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ADD1;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -4795,15 +4889,15 @@ static struct lm_ggml_tensor * lm_ggml_add1_impl(
 
 struct lm_ggml_tensor * lm_ggml_add1(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     return lm_ggml_add1_impl(ctx, a, b, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_add1_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     return lm_ggml_add1_impl(ctx, a, b, true);
 }
 
@@ -4811,31 +4905,24 @@ struct lm_ggml_tensor * lm_ggml_add1_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_acc_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        size_t               nb1,
-        size_t               nb2,
-        size_t               nb3,
-        size_t               offset,
-        bool inplace) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        size_t                nb1,
+        size_t                nb2,
+        size_t                nb3,
+        size_t                offset,
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_nelements(b) <= lm_ggml_nelements(a));
     LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
     LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32);
     LM_GGML_ASSERT(b->type == LM_GGML_TYPE_F32);
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     int32_t params[] = { nb1, nb2, nb3, offset, inplace ? 1 : 0 };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_ACC;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ACC;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -4844,23 +4931,23 @@ static struct lm_ggml_tensor * lm_ggml_acc_impl(
 
 struct lm_ggml_tensor * lm_ggml_acc(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        size_t               nb1,
-        size_t               nb2,
-        size_t               nb3,
-        size_t               offset) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        size_t                nb1,
+        size_t                nb2,
+        size_t                nb3,
+        size_t                offset) {
     return lm_ggml_acc_impl(ctx, a, b, nb1, nb2, nb3, offset, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_acc_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        size_t               nb1,
-        size_t               nb2,
-        size_t               nb3,
-        size_t               offset) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        size_t                nb1,
+        size_t                nb2,
+        size_t                nb3,
+        size_t                offset) {
     return lm_ggml_acc_impl(ctx, a, b, nb1, nb2, nb3, offset, true);
 }
 
@@ -4868,23 +4955,14 @@ struct lm_ggml_tensor * lm_ggml_acc_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_sub_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        bool inplace) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_can_repeat(b, a));
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        // TODO: support backward pass for broadcasting
-        LM_GGML_ASSERT(lm_ggml_are_same_shape(a, b));
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_SUB;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SUB;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -4893,15 +4971,15 @@ static struct lm_ggml_tensor * lm_ggml_sub_impl(
 
 struct lm_ggml_tensor * lm_ggml_sub(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     return lm_ggml_sub_impl(ctx, a, b, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_sub_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     return lm_ggml_sub_impl(ctx, a, b, true);
 }
 
@@ -4909,27 +4987,14 @@ struct lm_ggml_tensor * lm_ggml_sub_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_mul_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        bool inplace) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_can_repeat(b, a));
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        // TODO: support backward pass for broadcasting
-        LM_GGML_ASSERT(lm_ggml_are_same_shape(a, b));
-        is_node = true;
-    }
-
-    if (inplace) {
-        LM_GGML_ASSERT(!is_node);
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_MUL;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MUL;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -4954,25 +5019,14 @@ struct lm_ggml_tensor * lm_ggml_mul_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_div_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b,
-        bool inplace) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_can_repeat(b, a));
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        is_node = true;
-    }
-
-    if (inplace) {
-        LM_GGML_ASSERT(!is_node);
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_DIV;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_DIV;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -4997,18 +5051,11 @@ struct lm_ggml_tensor * lm_ggml_div_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_sqr_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
-
+        struct lm_ggml_tensor  * a,
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_SQR;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SQR;
     result->src[0] = a;
 
     return result;
@@ -5030,18 +5077,11 @@ struct lm_ggml_tensor * lm_ggml_sqr_inplace(
 
 static struct lm_ggml_tensor * lm_ggml_sqrt_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
-
+        struct lm_ggml_tensor  * a,
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_SQRT;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SQRT;
     result->src[0] = a;
 
     return result;
@@ -5064,17 +5104,10 @@ struct lm_ggml_tensor * lm_ggml_sqrt_inplace(
 static struct lm_ggml_tensor * lm_ggml_log_impl(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
-
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_LOG;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_LOG;
     result->src[0] = a;
 
     return result;
@@ -5097,17 +5130,10 @@ struct lm_ggml_tensor * lm_ggml_log_inplace(
 static struct lm_ggml_tensor * lm_ggml_sin_impl(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
-
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_SIN;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SIN;
     result->src[0] = a;
 
     return result;
@@ -5130,17 +5156,10 @@ struct lm_ggml_tensor * lm_ggml_sin_inplace(
 static struct lm_ggml_tensor * lm_ggml_cos_impl(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
-
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_COS;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_COS;
     result->src[0] = a;
 
     return result;
@@ -5162,17 +5181,10 @@ struct lm_ggml_tensor * lm_ggml_cos_inplace(
 
 struct lm_ggml_tensor * lm_ggml_sum(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a) {
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
+        struct lm_ggml_tensor  * a) {
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, a->type, 1);
 
-    result->op   = LM_GGML_OP_SUM;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SUM;
     result->src[0] = a;
 
     return result;
@@ -5182,13 +5194,7 @@ struct lm_ggml_tensor * lm_ggml_sum(
 
 struct lm_ggml_tensor * lm_ggml_sum_rows(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a) {
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
+        struct lm_ggml_tensor  * a) {
     int64_t ne[LM_GGML_MAX_DIMS] = { 1 };
     for (int i = 1; i < LM_GGML_MAX_DIMS; ++i) {
         ne[i] = a->ne[i];
@@ -5196,8 +5202,7 @@ struct lm_ggml_tensor * lm_ggml_sum_rows(
 
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, a->type, LM_GGML_MAX_DIMS, ne);
 
-    result->op   = LM_GGML_OP_SUM_ROWS;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SUM_ROWS;
     result->src[0] = a;
 
     return result;
@@ -5207,19 +5212,11 @@ struct lm_ggml_tensor * lm_ggml_sum_rows(
 
 struct lm_ggml_tensor * lm_ggml_mean(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a) {
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement
-        is_node = true;
-    }
-
+        struct lm_ggml_tensor  * a) {
     int64_t ne[4] = { 1, a->ne[1], a->ne[2], a->ne[3] };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
 
-    result->op   = LM_GGML_OP_MEAN;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MEAN;
     result->src[0] = a;
 
     return result;
@@ -5229,20 +5226,30 @@ struct lm_ggml_tensor * lm_ggml_mean(
 
 struct lm_ggml_tensor * lm_ggml_argmax(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a) {
+        struct lm_ggml_tensor  * a) {
     LM_GGML_ASSERT(lm_ggml_is_matrix(a));
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error");
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_I32, a->ne[1]);
 
-    result->op   = LM_GGML_OP_ARGMAX;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ARGMAX;
     result->src[0] = a;
+
+    return result;
+}
+
+// lm_ggml_count_equal
+
+struct lm_ggml_tensor * lm_ggml_count_equal(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
+    LM_GGML_ASSERT(lm_ggml_are_same_shape(a, b));
+
+    struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_I64, 1);
+
+    result->op     = LM_GGML_OP_COUNT_EQUAL;
+    result->src[0] = a;
+    result->src[1] = b;
 
     return result;
 }
@@ -5251,20 +5258,13 @@ struct lm_ggml_tensor * lm_ggml_argmax(
 
 struct lm_ggml_tensor * lm_ggml_repeat(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     LM_GGML_ASSERT(lm_ggml_can_repeat(a, b));
-
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, a->type, LM_GGML_MAX_DIMS, b->ne);
 
-    result->op   = LM_GGML_OP_REPEAT;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_REPEAT;
     result->src[0] = a;
 
     return result;
@@ -5274,24 +5274,13 @@ struct lm_ggml_tensor * lm_ggml_repeat(
 
 struct lm_ggml_tensor * lm_ggml_repeat_back(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        struct lm_ggml_tensor * b) {
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     LM_GGML_ASSERT(lm_ggml_can_repeat(b, a));
-
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
-    if (lm_ggml_are_same_shape(a, b) && !is_node) {
-        return a;
-    }
 
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, a->type, LM_GGML_MAX_DIMS, b->ne);
 
-    result->op   = LM_GGML_OP_REPEAT_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_REPEAT_BACK;
     result->src[0] = a;
 
     return result;
@@ -5301,9 +5290,9 @@ struct lm_ggml_tensor * lm_ggml_repeat_back(
 
 struct lm_ggml_tensor * lm_ggml_concat(
     struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    struct lm_ggml_tensor * b,
-    int dim) {
+    struct lm_ggml_tensor  * a,
+    struct lm_ggml_tensor  * b,
+    int                   dim) {
     LM_GGML_ASSERT(dim >= 0 && dim < LM_GGML_MAX_DIMS);
 
     int64_t ne[LM_GGML_MAX_DIMS];
@@ -5316,19 +5305,11 @@ struct lm_ggml_tensor * lm_ggml_concat(
         ne[d] = a->ne[d];
     }
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, a->type, LM_GGML_MAX_DIMS, ne);
 
     lm_ggml_set_op_params_i32(result, 0, dim);
 
-    result->op = LM_GGML_OP_CONCAT;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CONCAT;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -5437,20 +5418,14 @@ struct lm_ggml_tensor * lm_ggml_relu_inplace(
 
 struct lm_ggml_tensor * lm_ggml_leaky_relu(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor  * a, float negative_slope, bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        LM_GGML_ABORT("fatal error"); // TODO: not implemented
-        is_node = true;
-    }
-
+        struct lm_ggml_tensor  * a,
+        float                 negative_slope,
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, &negative_slope, sizeof(negative_slope));
 
-    result->op   = LM_GGML_OP_LEAKY_RELU;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_LEAKY_RELU;
     result->src[0] = a;
 
     return result;
@@ -5518,17 +5493,9 @@ struct lm_ggml_tensor * lm_ggml_silu_back(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
         struct lm_ggml_tensor  * b) {
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        // TODO: implement backward
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_SILU_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SILU_BACK;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -5536,6 +5503,7 @@ struct lm_ggml_tensor * lm_ggml_silu_back(
 }
 
 // ggml hardswish
+
 struct lm_ggml_tensor * lm_ggml_hardswish(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a) {
@@ -5543,6 +5511,7 @@ struct lm_ggml_tensor * lm_ggml_hardswish(
 }
 
 // ggml hardsigmoid
+
 struct lm_ggml_tensor * lm_ggml_hardsigmoid(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a) {
@@ -5550,6 +5519,7 @@ struct lm_ggml_tensor * lm_ggml_hardsigmoid(
 }
 
 // ggml exp
+
 struct lm_ggml_tensor * lm_ggml_exp(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a) {
@@ -5567,21 +5537,13 @@ struct lm_ggml_tensor * lm_ggml_exp_inplace(
 static struct lm_ggml_tensor * lm_ggml_norm_impl(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        float eps,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
+        float                 eps,
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, &eps, sizeof(eps));
 
-    result->op   = LM_GGML_OP_NORM;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_NORM;
     result->src[0] = a;
 
     return result;
@@ -5590,14 +5552,14 @@ static struct lm_ggml_tensor * lm_ggml_norm_impl(
 struct lm_ggml_tensor * lm_ggml_norm(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        float eps) {
+        float                 eps) {
     return lm_ggml_norm_impl(ctx, a, eps, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_norm_inplace(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        float eps) {
+        float                 eps) {
     return lm_ggml_norm_impl(ctx, a, eps, true);
 }
 
@@ -5606,20 +5568,13 @@ struct lm_ggml_tensor * lm_ggml_norm_inplace(
 static struct lm_ggml_tensor * lm_ggml_rms_norm_impl(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        float eps,
-        bool inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
-
+        float                 eps,
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, &eps, sizeof(eps));
 
-    result->op   = LM_GGML_OP_RMS_NORM;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RMS_NORM;
     result->src[0] = a;
 
     return result;
@@ -5628,14 +5583,14 @@ static struct lm_ggml_tensor * lm_ggml_rms_norm_impl(
 struct lm_ggml_tensor * lm_ggml_rms_norm(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        float  eps) {
+        float                 eps) {
     return lm_ggml_rms_norm_impl(ctx, a, eps, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_rms_norm_inplace(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        float eps) {
+        float                 eps) {
     return lm_ggml_rms_norm_impl(ctx, a, eps, true);
 }
 
@@ -5645,20 +5600,12 @@ struct lm_ggml_tensor * lm_ggml_rms_norm_back(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
         struct lm_ggml_tensor  * b,
-        float  eps) {
-    bool is_node = false;
-
-    if (a->grad) {
-        // TODO: implement backward
-        is_node = true;
-    }
-
+        float                 eps) {
     struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, &eps, sizeof(eps));
 
-    result->op   = LM_GGML_OP_RMS_NORM_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RMS_NORM_BACK;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -5668,43 +5615,35 @@ struct lm_ggml_tensor * lm_ggml_rms_norm_back(
 // lm_ggml_group_norm
 
 static struct lm_ggml_tensor * lm_ggml_group_norm_impl(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    int n_groups,
-    float eps,
-    bool inplace) {
-
-    bool is_node = false;
-    if (!inplace && (a->grad)) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   n_groups,
+        float                 eps,
+        bool                  inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params_i32(result, 0, n_groups);
     lm_ggml_set_op_params_f32(result, 1, eps);
 
-    result->op = LM_GGML_OP_GROUP_NORM;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_GROUP_NORM;
     result->src[0] = a;
 
     return result;
 }
 
 struct lm_ggml_tensor * lm_ggml_group_norm(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    int n_groups,
-    float eps) {
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   n_groups,
+        float                 eps) {
     return lm_ggml_group_norm_impl(ctx, a, n_groups, eps, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_group_norm_inplace(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    int n_groups,
-    float eps) {
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   n_groups,
+        float                 eps) {
     return lm_ggml_group_norm_impl(ctx, a, n_groups, eps, true);
 }
 
@@ -5717,17 +5656,10 @@ struct lm_ggml_tensor * lm_ggml_mul_mat(
     LM_GGML_ASSERT(lm_ggml_can_mul_mat(a, b));
     LM_GGML_ASSERT(!lm_ggml_is_transposed(a));
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true;
-    }
-
     const int64_t ne[4] = { a->ne[1], b->ne[1], b->ne[2], b->ne[3] };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
 
-    result->op   = LM_GGML_OP_MUL_MAT;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MUL_MAT;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -5773,17 +5705,10 @@ struct lm_ggml_tensor * lm_ggml_mul_mat_id(
     LM_GGML_ASSERT(as->ne[0] == b->ne[0]); // can_mul_mat
     LM_GGML_ASSERT(ids->ne[0] % b->ne[1] == 0); // can broadcast
 
-    bool is_node = false;
-
-    if (as->grad || b->grad) {
-        is_node = true;
-    }
-
     const int64_t ne[4] = { as->ne[1], ids->ne[0], b->ne[2], 1 };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
 
-    result->op   = LM_GGML_OP_MUL_MAT_ID;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MUL_MAT_ID;
     result->src[0] = as;
     result->src[1] = b;
     result->src[2] = ids;
@@ -5800,18 +5725,11 @@ struct lm_ggml_tensor * lm_ggml_out_prod(
     LM_GGML_ASSERT(lm_ggml_can_out_prod(a, b));
     LM_GGML_ASSERT(!lm_ggml_is_transposed(a));
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true;
-    }
-
     // a is broadcastable to b for ne[2] and ne[3] -> use b->ne[2] and b->ne[3]
     const int64_t ne[4] = { a->ne[0], b->ne[0], b->ne[2], b->ne[3] };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
 
-    result->op   = LM_GGML_OP_OUT_PROD;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_OUT_PROD;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -5824,21 +5742,14 @@ static struct lm_ggml_tensor * lm_ggml_scale_impl(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
         float                 s,
-        bool inplace) {
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_is_padded_1d(a));
-
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, &s, sizeof(s));
 
-    result->op   = LM_GGML_OP_SCALE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SCALE;
     result->src[0] = a;
 
     return result;
@@ -5846,15 +5757,15 @@ static struct lm_ggml_tensor * lm_ggml_scale_impl(
 
 struct lm_ggml_tensor * lm_ggml_scale(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        float                s) {
+        struct lm_ggml_tensor  * a,
+        float                 s) {
     return lm_ggml_scale_impl(ctx, a, s, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_scale_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        float                s) {
+        struct lm_ggml_tensor  * a,
+        float                 s) {
     return lm_ggml_scale_impl(ctx, a, s, true);
 }
 
@@ -5868,14 +5779,8 @@ static struct lm_ggml_tensor * lm_ggml_set_impl(
         size_t                nb2,
         size_t                nb3,
         size_t                offset,
-        bool inplace) {
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_nelements(a) >= lm_ggml_nelements(b));
-
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true;
-    }
 
     // make a view of the destination
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
@@ -5884,8 +5789,7 @@ static struct lm_ggml_tensor * lm_ggml_set_impl(
     int32_t params[] = { nb1, nb2, nb3, offset, inplace ? 1 : 0 };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_SET;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SET;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -5894,8 +5798,8 @@ static struct lm_ggml_tensor * lm_ggml_set_impl(
 
 struct lm_ggml_tensor * lm_ggml_set(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor *  a,
-        struct lm_ggml_tensor *  b,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
         size_t                nb1,
         size_t                nb2,
         size_t                nb3,
@@ -5905,8 +5809,8 @@ struct lm_ggml_tensor * lm_ggml_set(
 
 struct lm_ggml_tensor * lm_ggml_set_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor *  a,
-        struct lm_ggml_tensor *  b,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
         size_t                nb1,
         size_t                nb2,
         size_t                nb3,
@@ -5916,24 +5820,24 @@ struct lm_ggml_tensor * lm_ggml_set_inplace(
 
 struct lm_ggml_tensor * lm_ggml_set_1d(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor *  a,
-        struct lm_ggml_tensor *  b,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
         size_t                offset) {
     return lm_ggml_set_impl(ctx, a, b, a->nb[1], a->nb[2], a->nb[3], offset, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_set_1d_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor *  a,
-        struct lm_ggml_tensor *  b,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
         size_t                offset) {
     return lm_ggml_set_impl(ctx, a, b, a->nb[1], a->nb[2], a->nb[3], offset, true);
 }
 
 struct lm_ggml_tensor * lm_ggml_set_2d(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor *  a,
-        struct lm_ggml_tensor *  b,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
         size_t                nb1,
         size_t                offset) {
     return lm_ggml_set_impl(ctx, a, b, nb1, a->nb[2], a->nb[3], offset, false);
@@ -5941,8 +5845,8 @@ struct lm_ggml_tensor * lm_ggml_set_2d(
 
 struct lm_ggml_tensor * lm_ggml_set_2d_inplace(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor *  a,
-        struct lm_ggml_tensor *  b,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
         size_t                nb1,
         size_t                offset) {
     return lm_ggml_set_impl(ctx, a, b, nb1, a->nb[2], a->nb[3], offset, true);
@@ -5956,13 +5860,6 @@ static struct lm_ggml_tensor * lm_ggml_cpy_impl(
         struct lm_ggml_tensor  * b) {
     LM_GGML_ASSERT(lm_ggml_nelements(a) == lm_ggml_nelements(b));
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        // inplace is false and either one have a grad
-        is_node = true;
-    }
-
     // make a view of the destination
     struct lm_ggml_tensor * result = lm_ggml_view_tensor(ctx, b);
     if (strlen(b->name) > 0) {
@@ -5971,8 +5868,7 @@ static struct lm_ggml_tensor * lm_ggml_cpy_impl(
         lm_ggml_format_name(result, "%s (copy)", a->name);
     }
 
-    result->op   = LM_GGML_OP_CPY;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CPY;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -5990,13 +5886,10 @@ struct lm_ggml_tensor * lm_ggml_cast(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
         enum   lm_ggml_type      type) {
-    bool is_node = false;
-
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, type, LM_GGML_MAX_DIMS, a->ne);
     lm_ggml_format_name(result, "%s (copy)", a->name);
 
-    result->op   = LM_GGML_OP_CPY;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CPY;
     result->src[0] = a;
     result->src[1] = result;
 
@@ -6008,17 +5901,10 @@ struct lm_ggml_tensor * lm_ggml_cast(
 static struct lm_ggml_tensor * lm_ggml_cont_impl(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a) {
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
     lm_ggml_format_name(result, "%s (cont)", a->name);
 
-    result->op   = LM_GGML_OP_CONT;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CONT;
     result->src[0] = a;
 
     return result;
@@ -6064,13 +5950,10 @@ struct lm_ggml_tensor * lm_ggml_cont_4d(
         int64_t               ne3) {
     LM_GGML_ASSERT(lm_ggml_nelements(a) == (ne0*ne1*ne2*ne3));
 
-    bool is_node = false;
-
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_4d(ctx, a->type, ne0, ne1, ne2, ne3);
     lm_ggml_format_name(result, "%s (cont)", a->name);
 
-    result->op   = LM_GGML_OP_CONT;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CONT;
     result->src[0] = a;
 
     return result;
@@ -6086,22 +5969,10 @@ struct lm_ggml_tensor * lm_ggml_reshape(
     // as only the shape of b is relevant, and not its memory layout, b is allowed to be non contiguous.
     LM_GGML_ASSERT(lm_ggml_nelements(a) == lm_ggml_nelements(b));
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
-    if (b->grad) {
-        // gradient propagation is not supported
-        //LM_GGML_ABORT("fatal error");
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_impl(ctx, a->type, LM_GGML_MAX_DIMS, b->ne, a, 0);
     lm_ggml_format_name(result, "%s (reshaped)", a->name);
 
-    result->op   = LM_GGML_OP_RESHAPE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RESHAPE;
     result->src[0] = a;
 
     return result;
@@ -6114,18 +5985,11 @@ struct lm_ggml_tensor * lm_ggml_reshape_1d(
     LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
     LM_GGML_ASSERT(lm_ggml_nelements(a) == ne0);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     const int64_t ne[1] = { ne0 };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_impl(ctx, a->type, 1, ne, a, 0);
     lm_ggml_format_name(result, "%s (reshaped)", a->name);
 
-    result->op   = LM_GGML_OP_RESHAPE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RESHAPE;
     result->src[0] = a;
 
     return result;
@@ -6139,18 +6003,11 @@ struct lm_ggml_tensor * lm_ggml_reshape_2d(
     LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
     LM_GGML_ASSERT(lm_ggml_nelements(a) == ne0*ne1);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     const int64_t ne[2] = { ne0, ne1 };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_impl(ctx, a->type, 2, ne, a, 0);
     lm_ggml_format_name(result, "%s (reshaped)", a->name);
 
-    result->op   = LM_GGML_OP_RESHAPE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RESHAPE;
     result->src[0] = a;
 
     return result;
@@ -6165,18 +6022,11 @@ struct lm_ggml_tensor * lm_ggml_reshape_3d(
     LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
     LM_GGML_ASSERT(lm_ggml_nelements(a) == ne0*ne1*ne2);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     const int64_t ne[3] = { ne0, ne1, ne2 };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_impl(ctx, a->type, 3, ne, a, 0);
     lm_ggml_format_name(result, "%s (reshaped)", a->name);
 
-    result->op   = LM_GGML_OP_RESHAPE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RESHAPE;
     result->src[0] = a;
 
     return result;
@@ -6192,18 +6042,11 @@ struct lm_ggml_tensor * lm_ggml_reshape_4d(
     LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
     LM_GGML_ASSERT(lm_ggml_nelements(a) == ne0*ne1*ne2*ne3);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     const int64_t ne[4] = { ne0, ne1, ne2, ne3 };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_impl(ctx, a->type, 4, ne, a, 0);
     lm_ggml_format_name(result, "%s (reshaped)", a->name);
 
-    result->op   = LM_GGML_OP_RESHAPE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RESHAPE;
     result->src[0] = a;
 
     return result;
@@ -6215,20 +6058,12 @@ static struct lm_ggml_tensor * lm_ggml_view_impl(
         int                   n_dims,
         const int64_t       * ne,
         size_t                offset) {
-
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_impl(ctx, a->type, n_dims, ne, a, offset);
     lm_ggml_format_name(result, "%s (view)", a->name);
 
     lm_ggml_set_op_params(result, &offset, sizeof(offset));
 
-    result->op   = LM_GGML_OP_VIEW;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_VIEW;
     result->src[0] = a;
 
     return result;
@@ -6241,7 +6076,6 @@ struct lm_ggml_tensor * lm_ggml_view_1d(
         struct lm_ggml_tensor  * a,
         int64_t               ne0,
         size_t                offset) {
-
     struct lm_ggml_tensor * result = lm_ggml_view_impl(ctx, a, 1, &ne0, offset);
 
     return result;
@@ -6256,7 +6090,6 @@ struct lm_ggml_tensor * lm_ggml_view_2d(
         int64_t               ne1,
         size_t                nb1,
         size_t                offset) {
-
     const int64_t ne[2] = { ne0, ne1 };
 
     struct lm_ggml_tensor * result = lm_ggml_view_impl(ctx, a, 2, ne, offset);
@@ -6279,7 +6112,6 @@ struct lm_ggml_tensor * lm_ggml_view_3d(
         size_t                nb1,
         size_t                nb2,
         size_t                offset) {
-
     const int64_t ne[3] = { ne0, ne1, ne2 };
 
     struct lm_ggml_tensor * result = lm_ggml_view_impl(ctx, a, 3, ne, offset);
@@ -6304,7 +6136,6 @@ struct lm_ggml_tensor * lm_ggml_view_4d(
         size_t                nb2,
         size_t                nb3,
         size_t                offset) {
-
     const int64_t ne[4] = { ne0, ne1, ne2, ne3 };
 
     struct lm_ggml_tensor * result = lm_ggml_view_impl(ctx, a, 4, ne, offset);
@@ -6337,12 +6168,6 @@ struct lm_ggml_tensor * lm_ggml_permute(
     LM_GGML_ASSERT(axis1 != axis3);
     LM_GGML_ASSERT(axis2 != axis3);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_view_tensor(ctx, a);
     lm_ggml_format_name(result, "%s (permuted)", a->name);
 
@@ -6369,8 +6194,7 @@ struct lm_ggml_tensor * lm_ggml_permute(
     result->nb[2] = nb[2];
     result->nb[3] = nb[3];
 
-    result->op   = LM_GGML_OP_PERMUTE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_PERMUTE;
     result->src[0] = a;
 
     int32_t params[] = { axis0, axis1, axis2, axis3 };
@@ -6384,12 +6208,6 @@ struct lm_ggml_tensor * lm_ggml_permute(
 struct lm_ggml_tensor * lm_ggml_transpose(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a) {
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_view_tensor(ctx, a);
     lm_ggml_format_name(result, "%s (transposed)", a->name);
 
@@ -6399,8 +6217,7 @@ struct lm_ggml_tensor * lm_ggml_transpose(
     result->nb[0] = a->nb[1];
     result->nb[1] = a->nb[0];
 
-    result->op   = LM_GGML_OP_TRANSPOSE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_TRANSPOSE;
     result->src[0] = a;
 
     return result;
@@ -6416,12 +6233,6 @@ struct lm_ggml_tensor * lm_ggml_get_rows(
     LM_GGML_ASSERT(b->ne[3] == 1);
     LM_GGML_ASSERT(b->type == LM_GGML_TYPE_I32);
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true;
-    }
-
     // TODO: implement non F32 return
     enum lm_ggml_type type = LM_GGML_TYPE_F32;
     if (a->type == LM_GGML_TYPE_I32) {
@@ -6429,8 +6240,7 @@ struct lm_ggml_tensor * lm_ggml_get_rows(
     }
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_4d(ctx, type, a->ne[0], b->ne[0], b->ne[1], b->ne[2]);
 
-    result->op   = LM_GGML_OP_GET_ROWS;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_GET_ROWS;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -6447,18 +6257,11 @@ struct lm_ggml_tensor * lm_ggml_get_rows_back(
     LM_GGML_ASSERT(lm_ggml_is_matrix(a) && lm_ggml_is_vector(b) && b->type == LM_GGML_TYPE_I32);
     LM_GGML_ASSERT(lm_ggml_is_matrix(c) && (a->ne[0] == c->ne[0]));
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true;
-    }
-
     // TODO: implement non F32 return
     //struct lm_ggml_tensor * result = lm_ggml_new_tensor_2d(ctx, a->type, a->ne[0], b->ne[0]);
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_2d(ctx, LM_GGML_TYPE_F32, c->ne[0], c->ne[1]);
 
-    result->op   = LM_GGML_OP_GET_ROWS_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_GET_ROWS_BACK;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -6471,17 +6274,11 @@ struct lm_ggml_tensor * lm_ggml_diag(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a) {
     LM_GGML_ASSERT(a->ne[1] == 1);
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
 
     const int64_t ne[4] = { a->ne[0], a->ne[0], a->ne[2], a->ne[3] };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, a->type, 4, ne);
 
-    result->op   = LM_GGML_OP_DIAG;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_DIAG;
     result->src[0] = a;
 
     return result;
@@ -6494,19 +6291,12 @@ static struct lm_ggml_tensor * lm_ggml_diag_mask_inf_impl(
         struct lm_ggml_tensor  * a,
         int                   n_past,
         bool                  inplace) {
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     int32_t params[] = { n_past };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_DIAG_MASK_INF;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_DIAG_MASK_INF;
     result->src[0] = a;
 
     return result;
@@ -6533,19 +6323,12 @@ static struct lm_ggml_tensor * lm_ggml_diag_mask_zero_impl(
         struct lm_ggml_tensor  * a,
         int                   n_past,
         bool                  inplace) {
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     int32_t params[] = { n_past };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_DIAG_MASK_ZERO;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_DIAG_MASK_ZERO;
     result->src[0] = a;
 
     return result;
@@ -6588,19 +6371,12 @@ static struct lm_ggml_tensor * lm_ggml_soft_max_impl(
         LM_GGML_ASSERT(mask);
     }
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     float params[] = { scale, max_bias };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_SOFT_MAX;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SOFT_MAX;
     result->src[0] = a;
     result->src[1] = mask;
 
@@ -6635,16 +6411,9 @@ static struct lm_ggml_tensor * lm_ggml_soft_max_back_impl(
         struct lm_ggml_tensor  * a,
         struct lm_ggml_tensor  * b,
         bool                  inplace) {
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true; // TODO : implement backward pass
-    }
-
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_SOFT_MAX_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SOFT_MAX_BACK;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -6693,12 +6462,6 @@ static struct lm_ggml_tensor * lm_ggml_rope_impl(
         LM_GGML_ASSERT(c->ne[0] >= n_dims / 2);
     }
 
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     int32_t params[11] = { /*n_past*/ 0, n_dims, mode, /*n_ctx*/ 0, n_ctx_orig };
@@ -6710,8 +6473,7 @@ static struct lm_ggml_tensor * lm_ggml_rope_impl(
     memcpy(params + 10, &beta_slow,    sizeof(float));
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_ROPE;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ROPE;
     result->src[0] = a;
     result->src[1] = b;
     result->src[2] = c;
@@ -6839,13 +6601,6 @@ struct lm_ggml_tensor * lm_ggml_rope_back(
     LM_GGML_ASSERT(b->type == LM_GGML_TYPE_I32);
     LM_GGML_ASSERT(a->ne[2] == b->ne[0]);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ASSERT(false && "backwards pass not implemented");
-        is_node = false;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
 
     int32_t params[11] = { /*n_past*/ 0, n_dims, mode, /*n_ctx*/ 0, n_ctx_orig };
@@ -6857,8 +6612,7 @@ struct lm_ggml_tensor * lm_ggml_rope_back(
     memcpy(params + 10, &beta_slow,    sizeof(float));
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_ROPE_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ROPE_BACK;
     result->src[0] = a;
     result->src[1] = b;
     result->src[2] = c;
@@ -6873,21 +6627,13 @@ struct lm_ggml_tensor * lm_ggml_clamp(
         struct lm_ggml_tensor  * a,
         float                 min,
         float                 max) {
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     // TODO: when implement backward, fix this:
     struct lm_ggml_tensor * result = lm_ggml_view_tensor(ctx, a);
 
     float params[] = { min, max };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_CLAMP;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CLAMP;
     result->src[0] = a;
 
     return result;
@@ -6949,13 +6695,6 @@ LM_GGML_API struct lm_ggml_tensor * lm_ggml_conv_transpose_1d(
     LM_GGML_ASSERT(p0 == 0);
     LM_GGML_ASSERT(d0 == 1);
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     const int64_t ne[4] = {
         lm_ggml_calc_conv_transpose_1d_output_size(b->ne[0], a->ne[0], s0, 0 /*p0*/, 1 /*d0*/),
         a->ne[1], b->ne[2], 1,
@@ -6965,8 +6704,7 @@ LM_GGML_API struct lm_ggml_tensor * lm_ggml_conv_transpose_1d(
     int32_t params[] = { s0, p0, d0 };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op = LM_GGML_OP_CONV_TRANSPOSE_1D;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CONV_TRANSPOSE_1D;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -6974,17 +6712,17 @@ LM_GGML_API struct lm_ggml_tensor * lm_ggml_conv_transpose_1d(
 }
 
 // lm_ggml_conv_depthwise
-struct lm_ggml_tensor * lm_ggml_conv_depthwise_2d(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    struct lm_ggml_tensor * b,
-    int                  s0,
-    int                  s1,
-    int                  p0,
-    int                  p1,
-    int                  d0,
-    int                  d1) {
 
+struct lm_ggml_tensor * lm_ggml_conv_depthwise_2d(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        int                   s0,
+        int                   s1,
+        int                   p0,
+        int                   p1,
+        int                   d0,
+        int                   d1) {
     struct lm_ggml_tensor * new_a = lm_ggml_reshape_4d(ctx, a, a->ne[0], a->ne[1], 1, a->ne[2] * a->ne[3]);
     struct lm_ggml_tensor * im2col = lm_ggml_im2col(ctx, new_a,
                                         lm_ggml_reshape_4d(ctx, b, b->ne[0], b->ne[1], 1, b->ne[2] * b->ne[3]),
@@ -7004,28 +6742,22 @@ struct lm_ggml_tensor * lm_ggml_conv_depthwise_2d(
 // b: [N, IC, IH, IW]
 // result: [N, OH, OW, IC*KH*KW]
 struct lm_ggml_tensor * lm_ggml_im2col(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor  * a,
-    struct lm_ggml_tensor  * b,
-    int                  s0,
-    int                  s1,
-    int                  p0,
-    int                  p1,
-    int                  d0,
-    int                  d1,
-    bool                 is_2D,
-    enum lm_ggml_type       dst_type) {
-
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        int                   s0,
+        int                   s1,
+        int                   p0,
+        int                   p1,
+        int                   d0,
+        int                   d1,
+        bool                  is_2D,
+        enum lm_ggml_type        dst_type) {
     if(is_2D) {
         LM_GGML_ASSERT(a->ne[2] == b->ne[2]);
     } else {
         LM_GGML_ASSERT(a->ne[1] == b->ne[1]);
         LM_GGML_ASSERT(b->ne[3] == 1);
-    }
-    bool is_node = false;
-
-    if (/*a->grad ||*/ b->grad) { // a is only used for its shape, not its data
-        is_node = true;
     }
 
     const int64_t OH = is_2D ? lm_ggml_calc_conv_output_size(b->ne[1], a->ne[1], s1, p1, d1) : 0;
@@ -7045,8 +6777,7 @@ struct lm_ggml_tensor * lm_ggml_im2col(
     int32_t params[] = { s0, s1, p0, p1, d0, d1, (is_2D ? 1 : 0) };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op = LM_GGML_OP_IM2COL;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_IM2COL;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -7054,30 +6785,22 @@ struct lm_ggml_tensor * lm_ggml_im2col(
 }
 
 struct lm_ggml_tensor * lm_ggml_im2col_back(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor  * a,
-    struct lm_ggml_tensor  * b,
-    int64_t             * ne,
-    int                   s0,
-    int                   s1,
-    int                   p0,
-    int                   p1,
-    int                   d0,
-    int                   d1,
-    bool                  is_2D) {
-
-    bool is_node = false;
-
-    if (/*a->grad ||*/ b->grad) { // a is only used for its shape, not its data
-        is_node = true;
-    }
-
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        int64_t             * ne,
+        int                   s0,
+        int                   s1,
+        int                   p0,
+        int                   p1,
+        int                   d0,
+        int                   d1,
+        bool                  is_2D) {
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
     int32_t params[] = { s0, s1, p0, p1, d0, d1, (is_2D ? 1 : 0) };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op = LM_GGML_OP_IM2COL_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_IM2COL_BACK;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -7091,12 +6814,12 @@ struct lm_ggml_tensor * lm_ggml_conv_2d(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
         struct lm_ggml_tensor  * b,
-        int                  s0,
-        int                  s1,
-        int                  p0,
-        int                  p1,
-        int                  d0,
-        int                  d1) {
+        int                   s0,
+        int                   s1,
+        int                   p0,
+        int                   p1,
+        int                   d0,
+        int                   d1) {
     struct lm_ggml_tensor * im2col = lm_ggml_im2col(ctx, a, b, s0, s1, p0, p1, d0, d1, true, a->type); // [N, OH, OW, IC * KH * KW]
 
     struct lm_ggml_tensor * result =
@@ -7112,6 +6835,7 @@ struct lm_ggml_tensor * lm_ggml_conv_2d(
 }
 
 // lm_ggml_conv_2d_sk_p0
+
 struct lm_ggml_tensor * lm_ggml_conv_2d_sk_p0(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
@@ -7141,13 +6865,6 @@ struct lm_ggml_tensor * lm_ggml_conv_transpose_2d_p0(
         int                   stride) {
     LM_GGML_ASSERT(a->ne[3] == b->ne[2]);
 
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     const int64_t ne[4] = {
         lm_ggml_calc_conv_transpose_output_size(b->ne[0], a->ne[0], stride, 0 /*p0*/),
         lm_ggml_calc_conv_transpose_output_size(b->ne[1], a->ne[1], stride, 0 /*p1*/),
@@ -7158,8 +6875,7 @@ struct lm_ggml_tensor * lm_ggml_conv_transpose_2d_p0(
 
     lm_ggml_set_op_params_i32(result, 0, stride);
 
-    result->op = LM_GGML_OP_CONV_TRANSPOSE_2D;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CONV_TRANSPOSE_2D;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -7181,14 +6897,6 @@ struct lm_ggml_tensor * lm_ggml_pool_1d(
         int                   k0,
         int                   s0,
         int                   p0) {
-
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     const int64_t ne[4] = {
         lm_ggml_calc_pool_output_size(a->ne[0], k0, s0, p0),
         a->ne[1],
@@ -7200,8 +6908,7 @@ struct lm_ggml_tensor * lm_ggml_pool_1d(
     int32_t params[] = { op, k0, s0, p0 };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op = LM_GGML_OP_POOL_1D;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_POOL_1D;
     result->src[0] = a;
 
     return result;
@@ -7219,13 +6926,6 @@ struct lm_ggml_tensor * lm_ggml_pool_2d(
         int                   s1,
         float                 p0,
         float                 p1) {
-
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result;
     const int64_t ne[4] = {
         lm_ggml_calc_pool_output_size(a->ne[0], k0, s0, p0),
@@ -7238,9 +6938,9 @@ struct lm_ggml_tensor * lm_ggml_pool_2d(
     int32_t params[] = { op, k0, k1, s0, s1, p0, p1 };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op = LM_GGML_OP_POOL_2D;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_POOL_2D;
     result->src[0] = a;
+
     return result;
 }
 
@@ -7255,100 +6955,74 @@ struct lm_ggml_tensor * lm_ggml_pool_2d_back(
         int                   s1,
         float                 p0,
         float                 p1) {
-
-    bool is_node = false;
-
-    if (a->grad) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result;
     result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, af->ne);
 
     int32_t params[] = { op, k0, k1, s0, s1, p0, p1 };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op = LM_GGML_OP_POOL_2D_BACK;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_POOL_2D_BACK;
     result->src[0] = a;
     result->src[1] = af;
+
     return result;
 }
 
 // lm_ggml_upscale
 
 static struct lm_ggml_tensor * lm_ggml_upscale_impl(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    int ne0,
-    int ne1,
-    int ne2,
-    int ne3) {
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   ne0,
+        int                   ne1,
+        int                   ne2,
+        int                   ne3) {
     LM_GGML_ASSERT(a->ne[0] <= ne0);
     LM_GGML_ASSERT(a->ne[1] <= ne1);
     LM_GGML_ASSERT(a->ne[2] <= ne2);
     LM_GGML_ASSERT(a->ne[3] <= ne3);
 
-    struct lm_ggml_tensor * result = lm_ggml_new_tensor_4d(ctx, a->type,
-            ne0,
-            ne1,
-            ne2,
-            ne3
-            );
+    struct lm_ggml_tensor * result = lm_ggml_new_tensor_4d(ctx, a->type, ne0, ne1, ne2, ne3);
 
-    result->op = LM_GGML_OP_UPSCALE;
-
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_UPSCALE;
     result->src[0] = a;
 
     return result;
 }
 
 struct lm_ggml_tensor * lm_ggml_upscale(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    int scale_factor) {
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   scale_factor) {
     return lm_ggml_upscale_impl(ctx, a, a->ne[0] * scale_factor, a->ne[1] * scale_factor, a->ne[2], a->ne[3]);
 }
 
 struct lm_ggml_tensor * lm_ggml_upscale_ext(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor * a,
-    int ne0,
-    int ne1,
-    int ne2,
-    int ne3) {
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   ne0,
+        int                   ne1,
+        int                   ne2,
+        int                   ne3) {
     return lm_ggml_upscale_impl(ctx, a, ne0, ne1, ne2, ne3);
 }
 
 // lm_ggml_pad
 
 struct lm_ggml_tensor * lm_ggml_pad(
-    struct lm_ggml_context * ctx,
-    struct lm_ggml_tensor  * a,
-    int p0, int p1, int p2, int p3) {
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   p0,
+        int                   p1,
+        int                   p2,
+        int                   p3) {
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_4d(ctx, a->type,
             a->ne[0] + p0,
             a->ne[1] + p1,
             a->ne[2] + p2,
             a->ne[3] + p3);
 
-    result->op = LM_GGML_OP_PAD;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_PAD;
     result->src[0] = a;
 
     return result;
@@ -7357,21 +7031,21 @@ struct lm_ggml_tensor * lm_ggml_pad(
 // lm_ggml_arange
 
 struct lm_ggml_tensor * lm_ggml_arange(
-    struct lm_ggml_context * ctx,
-    float start,
-    float stop,
-    float step) {
-
+        struct lm_ggml_context * ctx,
+        float                 start,
+        float                 stop,
+        float                 step) {
     LM_GGML_ASSERT(stop > start);
 
     const int64_t steps = (int64_t) ceilf((stop - start) / step);
 
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_F32, steps);
 
-    result->op = LM_GGML_OP_ARANGE;
     lm_ggml_set_op_params_f32(result, 0, start);
     lm_ggml_set_op_params_f32(result, 1, stop);
     lm_ggml_set_op_params_f32(result, 2, step);
+
+    result->op = LM_GGML_OP_ARANGE;
 
     return result;
 }
@@ -7379,17 +7053,10 @@ struct lm_ggml_tensor * lm_ggml_arange(
 // lm_ggml_timestep_embedding
 
 struct lm_ggml_tensor * lm_ggml_timestep_embedding(
-            struct lm_ggml_context * ctx,
-            struct lm_ggml_tensor  * timesteps,
-            int                   dim,
-            int                   max_period) {
-    bool is_node = false;
-
-    if (timesteps->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * timesteps,
+        int                   dim,
+        int                   max_period) {
     int actual_dim = dim;
     if (dim % 2 != 0) {
         actual_dim = dim + 1;
@@ -7397,11 +7064,10 @@ struct lm_ggml_tensor * lm_ggml_timestep_embedding(
 
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_2d(ctx, LM_GGML_TYPE_F32, actual_dim, timesteps->ne[0]);
 
-    result->op = LM_GGML_OP_TIMESTEP_EMBEDDING;
     lm_ggml_set_op_params_i32(result, 0, dim);
     lm_ggml_set_op_params_i32(result, 1, max_period);
 
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_TIMESTEP_EMBEDDING;
     result->src[0] = timesteps;
 
     return result;
@@ -7410,22 +7076,14 @@ struct lm_ggml_tensor * lm_ggml_timestep_embedding(
 // lm_ggml_argsort
 
 struct lm_ggml_tensor * lm_ggml_argsort(
-        struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor  * a,
-        enum lm_ggml_sort_order  order) {
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: not implemented
-        is_node = true;
-    }
-
+        struct lm_ggml_context  * ctx,
+        struct lm_ggml_tensor   * a,
+        enum lm_ggml_sort_order   order) {
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_I32, LM_GGML_MAX_DIMS, a->ne);
 
     lm_ggml_set_op_params_i32(result, 0, (int32_t) order);
 
-    result->op   = LM_GGML_OP_ARGSORT;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ARGSORT;
     result->src[0] = a;
 
     return result;
@@ -7477,10 +7135,6 @@ struct lm_ggml_tensor * lm_ggml_flash_attn_ext(
     }
 
     bool is_node = false;
-
-    if (q->grad || k->grad || v->grad) {
-        is_node = true;
-    }
 
     // permute(0, 2, 1, 3)
     int64_t ne[4] = { q->ne[0], q->ne[2], q->ne[1], q->ne[3] };
@@ -7608,17 +7262,9 @@ struct lm_ggml_tensor * lm_ggml_ssm_conv(
     LM_GGML_ASSERT(sx->ne[1] == d_inner);
     LM_GGML_ASSERT(n_t >= 0);
 
-    bool is_node = false;
-
-    if (sx->grad || c->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_3d(ctx, LM_GGML_TYPE_F32, d_inner, n_t, n_s);
 
-    result->op   = LM_GGML_OP_SSM_CONV;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_SSM_CONV;
     result->src[0] = sx;
     result->src[1] = c;
 
@@ -7662,18 +7308,10 @@ struct lm_ggml_tensor * lm_ggml_ssm_scan(
         LM_GGML_ASSERT(B->ne[2] == n_seqs);
     }
 
-    bool is_node = false;
-
-    if (s->grad || x->grad || dt->grad || A->grad || B->grad || C->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement
-        is_node = true;
-    }
-
     // concatenated y + ssm_states
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_F32, lm_ggml_nelements(x) + lm_ggml_nelements(s));
 
     result->op   = LM_GGML_OP_SSM_SCAN;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
     result->src[0] = s;
     result->src[1] = x;
     result->src[2] = dt;
@@ -7693,13 +7331,6 @@ struct lm_ggml_tensor * lm_ggml_win_part(
     LM_GGML_ASSERT(a->ne[3] == 1);
     LM_GGML_ASSERT(a->type  == LM_GGML_TYPE_F32);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     // padding
     const int px = (w - a->ne[1]%w)%w;
     const int py = (w - a->ne[2]%w)%w;
@@ -7714,8 +7345,7 @@ struct lm_ggml_tensor * lm_ggml_win_part(
     int32_t params[] = { npx, npy, w };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_WIN_PART;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_WIN_PART;
     result->src[0] = a;
 
     return result;
@@ -7731,21 +7361,13 @@ struct lm_ggml_tensor * lm_ggml_win_unpart(
         int                   w) {
     LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     const int64_t ne[4] = { a->ne[0], w0, h0, 1, };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 3, ne);
 
     int32_t params[] = { w };
     lm_ggml_set_op_params(result, params, sizeof(params));
 
-    result->op   = LM_GGML_OP_WIN_UNPART;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_WIN_UNPART;
     result->src[0] = a;
 
     return result;
@@ -7761,18 +7383,10 @@ struct lm_ggml_tensor * lm_ggml_get_rel_pos(
     LM_GGML_ASSERT(qh == kh);
     LM_GGML_ASSERT(2*MAX(qh, kh) - 1 == a->ne[1]);
 
-    bool is_node = false;
-
-    if (a->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     const int64_t ne[4] = { a->ne[0], kh, qh, 1, };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F16, 3, ne);
 
-    result->op   = LM_GGML_OP_GET_REL_POS;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_GET_REL_POS;
     result->src[0] = a;
 
     return result;
@@ -7796,17 +7410,10 @@ static struct lm_ggml_tensor * lm_ggml_add_rel_pos_impl(
     LM_GGML_ASSERT(pw->ne[0]*pw->ne[0] == a->ne[0]);
     LM_GGML_ASSERT(pw->ne[1]*pw->ne[2] == a->ne[1]);
 
-    bool is_node = false;
-
-    if (!inplace && (a->grad || pw->grad || ph->grad)) {
-        is_node = true;
-    }
-
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
     lm_ggml_set_op_params_i32(result, 0, inplace ? 1 : 0);
 
-    result->op   = LM_GGML_OP_ADD_REL_POS;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_ADD_REL_POS;
     result->src[0] = a;
     result->src[1] = pw;
     result->src[2] = ph;
@@ -7834,12 +7441,12 @@ struct lm_ggml_tensor * lm_ggml_add_rel_pos_inplace(
 
 struct lm_ggml_tensor * lm_ggml_rwkv_wkv(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * k,
-        struct lm_ggml_tensor * v,
-        struct lm_ggml_tensor * r,
-        struct lm_ggml_tensor * tf,
-        struct lm_ggml_tensor * td,
-        struct lm_ggml_tensor * state) {
+        struct lm_ggml_tensor  * k,
+        struct lm_ggml_tensor  * v,
+        struct lm_ggml_tensor  * r,
+        struct lm_ggml_tensor  * tf,
+        struct lm_ggml_tensor  * td,
+        struct lm_ggml_tensor  * state) {
     LM_GGML_ASSERT(lm_ggml_is_contiguous(k));
     LM_GGML_ASSERT(lm_ggml_is_contiguous(v));
     LM_GGML_ASSERT(lm_ggml_is_contiguous(r));
@@ -7860,19 +7467,11 @@ struct lm_ggml_tensor * lm_ggml_rwkv_wkv(
         LM_GGML_ASSERT(lm_ggml_nelements(state) == S * S * H * n_seqs);
     }
 
-    bool is_node = false;
-
-    if (k->grad || v->grad || r->grad || tf->grad || td->grad || state->grad) {
-        LM_GGML_ABORT("fatal error"); // TODO: implement backward
-        is_node = true;
-    }
-
     // concat output and new_state
     const int64_t ne[4] = { S * H, n_tokens + S * n_seqs, 1, 1 };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
 
-    result->op   = LM_GGML_OP_RWKV_WKV;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_RWKV_WKV;
     result->src[0] = k;
     result->src[1] = v;
     result->src[2] = r;
@@ -7887,23 +7486,16 @@ struct lm_ggml_tensor * lm_ggml_rwkv_wkv(
 
 static struct lm_ggml_tensor * lm_ggml_unary_impl(
         struct lm_ggml_context * ctx,
-        struct lm_ggml_tensor * a,
-        enum lm_ggml_unary_op op,
-        bool inplace) {
+        struct lm_ggml_tensor  * a,
+        enum lm_ggml_unary_op    op,
+        bool                  inplace) {
     LM_GGML_ASSERT(lm_ggml_is_contiguous_1(a));
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad)) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params_i32(result, 0, (int32_t) op);
 
-    result->op   = LM_GGML_OP_UNARY;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_UNARY;
     result->src[0] = a;
 
     return result;
@@ -7912,14 +7504,14 @@ static struct lm_ggml_tensor * lm_ggml_unary_impl(
 struct lm_ggml_tensor * lm_ggml_unary(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        enum lm_ggml_unary_op op) {
+        enum lm_ggml_unary_op    op) {
     return lm_ggml_unary_impl(ctx, a, op, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_unary_inplace(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
-        enum lm_ggml_unary_op op) {
+        enum lm_ggml_unary_op    op) {
     return lm_ggml_unary_impl(ctx, a, op, true);
 }
 
@@ -7928,20 +7520,13 @@ struct lm_ggml_tensor * lm_ggml_unary_inplace(
 static struct lm_ggml_tensor * lm_ggml_map_unary_impl_f32(
         struct lm_ggml_context        * ctx,
         struct lm_ggml_tensor         * a,
-        const  lm_ggml_unary_op_f32_t fun,
-        bool   inplace) {
-    bool is_node = false;
-
-    if (!inplace && a->grad) {
-        is_node = true;
-    }
-
+        const  lm_ggml_unary_op_f32_t   fun,
+        bool                         inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, (const void *) &fun, sizeof(fun));
 
-    result->op = LM_GGML_OP_MAP_UNARY;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_UNARY;
     result->src[0] = a;
 
     return result;
@@ -7950,14 +7535,14 @@ static struct lm_ggml_tensor * lm_ggml_map_unary_impl_f32(
 struct lm_ggml_tensor * lm_ggml_map_unary_f32(
         struct lm_ggml_context        * ctx,
         struct lm_ggml_tensor         * a,
-        const  lm_ggml_unary_op_f32_t fun) {
+        const  lm_ggml_unary_op_f32_t   fun) {
     return lm_ggml_map_unary_impl_f32(ctx, a, fun, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_map_unary_inplace_f32(
         struct lm_ggml_context        * ctx,
         struct lm_ggml_tensor         * a,
-        const  lm_ggml_unary_op_f32_t fun) {
+        const  lm_ggml_unary_op_f32_t   fun) {
     return lm_ggml_map_unary_impl_f32(ctx, a, fun, true);
 }
 
@@ -7967,22 +7552,15 @@ static struct lm_ggml_tensor * lm_ggml_map_binary_impl_f32(
         struct lm_ggml_context         * ctx,
         struct lm_ggml_tensor          * a,
         struct lm_ggml_tensor          * b,
-        const  lm_ggml_binary_op_f32_t fun,
-        bool   inplace) {
+        const  lm_ggml_binary_op_f32_t   fun,
+        bool                          inplace) {
     LM_GGML_ASSERT(lm_ggml_are_same_shape(a, b));
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, (const void *) &fun, sizeof(fun));
 
-    result->op = LM_GGML_OP_MAP_BINARY;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_BINARY;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -7993,7 +7571,7 @@ struct lm_ggml_tensor * lm_ggml_map_binary_f32(
         struct lm_ggml_context         * ctx,
         struct lm_ggml_tensor          * a,
         struct lm_ggml_tensor          * b,
-        const  lm_ggml_binary_op_f32_t fun) {
+        const  lm_ggml_binary_op_f32_t   fun) {
     return lm_ggml_map_binary_impl_f32(ctx, a, b, fun, false);
 }
 
@@ -8001,7 +7579,7 @@ struct lm_ggml_tensor * lm_ggml_map_binary_inplace_f32(
         struct lm_ggml_context         * ctx,
         struct lm_ggml_tensor          * a,
         struct lm_ggml_tensor          * b,
-        const  lm_ggml_binary_op_f32_t fun) {
+        const  lm_ggml_binary_op_f32_t   fun) {
     return lm_ggml_map_binary_impl_f32(ctx, a, b, fun, true);
 }
 
@@ -8011,19 +7589,12 @@ static struct lm_ggml_tensor * lm_ggml_map_custom1_impl_f32(
         struct lm_ggml_context          * ctx,
         struct lm_ggml_tensor           * a,
         const  lm_ggml_custom1_op_f32_t   fun,
-        bool   inplace) {
-    bool is_node = false;
-
-    if (!inplace && a->grad) {
-        is_node = true;
-    }
-
+        bool                           inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, (const void *) &fun, sizeof(fun));
 
-    result->op = LM_GGML_OP_MAP_CUSTOM1_F32;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_CUSTOM1_F32;
     result->src[0] = a;
 
     return result;
@@ -8050,19 +7621,12 @@ static struct lm_ggml_tensor * lm_ggml_map_custom2_impl_f32(
         struct lm_ggml_tensor           * a,
         struct lm_ggml_tensor           * b,
         const  lm_ggml_custom2_op_f32_t   fun,
-        bool   inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        is_node = true;
-    }
-
+        bool                           inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, (const void *) &fun, sizeof(fun));
 
-    result->op = LM_GGML_OP_MAP_CUSTOM2_F32;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_CUSTOM2_F32;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -8093,19 +7657,12 @@ static struct lm_ggml_tensor * lm_ggml_map_custom3_impl_f32(
         struct lm_ggml_tensor           * b,
         struct lm_ggml_tensor           * c,
         const  lm_ggml_custom3_op_f32_t   fun,
-        bool   inplace) {
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad || c->grad)) {
-        is_node = true;
-    }
-
+        bool                           inplace) {
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params(result, (const void *) &fun, sizeof(fun));
 
-    result->op = LM_GGML_OP_MAP_CUSTOM3_F32;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_CUSTOM3_F32;
     result->src[0] = a;
     result->src[1] = b;
     result->src[2] = c;
@@ -8133,25 +7690,19 @@ struct lm_ggml_tensor * lm_ggml_map_custom3_inplace_f32(
 
 // lm_ggml_map_custom1
 struct lm_ggml_map_custom1_op_params {
-    lm_ggml_custom1_op_t fun;
-    int n_tasks;
-    void * userdata;
+    lm_ggml_custom1_op_t  fun;
+    int                n_tasks;
+    void             * userdata;
 };
 
 static struct lm_ggml_tensor * lm_ggml_map_custom1_impl(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        const  lm_ggml_custom1_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata,
-        bool                           inplace) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        const  lm_ggml_custom1_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata,
+        bool                       inplace) {
     LM_GGML_ASSERT(n_tasks == LM_GGML_N_TASKS_MAX || n_tasks > 0);
-
-    bool is_node = false;
-
-    if (!inplace && a->grad) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
@@ -8162,54 +7713,47 @@ static struct lm_ggml_tensor * lm_ggml_map_custom1_impl(
     };
     lm_ggml_set_op_params(result, (const void *) &params, sizeof(params));
 
-    result->op = LM_GGML_OP_MAP_CUSTOM1;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_CUSTOM1;
     result->src[0] = a;
 
     return result;
 }
 
 struct lm_ggml_tensor * lm_ggml_map_custom1(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        const  lm_ggml_custom1_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        const  lm_ggml_custom1_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata) {
     return lm_ggml_map_custom1_impl(ctx, a, fun, n_tasks, userdata, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_map_custom1_inplace(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        const  lm_ggml_custom1_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        const  lm_ggml_custom1_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata) {
     return lm_ggml_map_custom1_impl(ctx, a, fun, n_tasks, userdata, true);
 }
 
 // lm_ggml_map_custom2
 
 struct lm_ggml_map_custom2_op_params {
-    lm_ggml_custom2_op_t fun;
-    int n_tasks;
-    void * userdata;
+    lm_ggml_custom2_op_t   fun;
+    int                 n_tasks;
+    void              * userdata;
 };
 
 static struct lm_ggml_tensor * lm_ggml_map_custom2_impl(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        struct lm_ggml_tensor           * b,
-        const  lm_ggml_custom2_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata,
-        bool                           inplace) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        struct lm_ggml_tensor       * b,
+        const  lm_ggml_custom2_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata,
+        bool                       inplace) {
     LM_GGML_ASSERT(n_tasks == LM_GGML_N_TASKS_MAX || n_tasks > 0);
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad)) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
@@ -8220,8 +7764,7 @@ static struct lm_ggml_tensor * lm_ggml_map_custom2_impl(
     };
     lm_ggml_set_op_params(result, (const void *) &params, sizeof(params));
 
-    result->op = LM_GGML_OP_MAP_CUSTOM2;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_CUSTOM2;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -8229,22 +7772,22 @@ static struct lm_ggml_tensor * lm_ggml_map_custom2_impl(
 }
 
 struct lm_ggml_tensor * lm_ggml_map_custom2(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        struct lm_ggml_tensor           * b,
-        const  lm_ggml_custom2_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        struct lm_ggml_tensor       * b,
+        const  lm_ggml_custom2_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata) {
     return lm_ggml_map_custom2_impl(ctx, a, b, fun, n_tasks, userdata, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_map_custom2_inplace(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        struct lm_ggml_tensor           * b,
-        const  lm_ggml_custom2_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        struct lm_ggml_tensor       * b,
+        const  lm_ggml_custom2_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata) {
     return lm_ggml_map_custom2_impl(ctx, a, b, fun, n_tasks, userdata, true);
 }
 
@@ -8257,21 +7800,15 @@ struct lm_ggml_map_custom3_op_params {
 };
 
 static struct lm_ggml_tensor * lm_ggml_map_custom3_impl(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        struct lm_ggml_tensor           * b,
-        struct lm_ggml_tensor           * c,
-        const  lm_ggml_custom3_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata,
-        bool                           inplace) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        struct lm_ggml_tensor       * b,
+        struct lm_ggml_tensor       * c,
+        const  lm_ggml_custom3_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata,
+        bool                       inplace) {
     LM_GGML_ASSERT(n_tasks == LM_GGML_N_TASKS_MAX || n_tasks > 0);
-
-    bool is_node = false;
-
-    if (!inplace && (a->grad || b->grad || c->grad)) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
@@ -8282,8 +7819,7 @@ static struct lm_ggml_tensor * lm_ggml_map_custom3_impl(
     };
     lm_ggml_set_op_params(result, (const void *) &params, sizeof(params));
 
-    result->op = LM_GGML_OP_MAP_CUSTOM3;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_MAP_CUSTOM3;
     result->src[0] = a;
     result->src[1] = b;
     result->src[2] = c;
@@ -8292,44 +7828,38 @@ static struct lm_ggml_tensor * lm_ggml_map_custom3_impl(
 }
 
 struct lm_ggml_tensor * lm_ggml_map_custom3(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        struct lm_ggml_tensor           * b,
-        struct lm_ggml_tensor           * c,
-        const  lm_ggml_custom3_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        struct lm_ggml_tensor       * b,
+        struct lm_ggml_tensor       * c,
+        const  lm_ggml_custom3_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata) {
     return lm_ggml_map_custom3_impl(ctx, a, b, c, fun, n_tasks, userdata, false);
 }
 
 struct lm_ggml_tensor * lm_ggml_map_custom3_inplace(
-        struct lm_ggml_context          * ctx,
-        struct lm_ggml_tensor           * a,
-        struct lm_ggml_tensor           * b,
-        struct lm_ggml_tensor           * c,
-        const  lm_ggml_custom3_op_t       fun,
-        int                            n_tasks,
-        void                         * userdata) {
+        struct lm_ggml_context      * ctx,
+        struct lm_ggml_tensor       * a,
+        struct lm_ggml_tensor       * b,
+        struct lm_ggml_tensor       * c,
+        const  lm_ggml_custom3_op_t   fun,
+        int                        n_tasks,
+        void                     * userdata) {
     return lm_ggml_map_custom3_impl(ctx, a, b, c, fun, n_tasks, userdata, true);
 }
 
 // lm_ggml_cross_entropy_loss
 
 struct lm_ggml_tensor * lm_ggml_cross_entropy_loss(
-        struct lm_ggml_context         * ctx,
-        struct lm_ggml_tensor          * a,
-        struct lm_ggml_tensor          * b) {
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b) {
     LM_GGML_ASSERT(lm_ggml_are_same_shape(a, b));
-    bool is_node = false;
-
-    if (a->grad || b->grad) {
-        is_node = true;
-    }
 
     struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, a->type, 1);
 
-    result->op   = LM_GGML_OP_CROSS_ENTROPY_LOSS;
-    result->grad = is_node ? lm_ggml_dup_tensor(ctx, result) : NULL;
+    result->op     = LM_GGML_OP_CROSS_ENTROPY_LOSS;
     result->src[0] = a;
     result->src[1] = b;
 
@@ -8339,17 +7869,16 @@ struct lm_ggml_tensor * lm_ggml_cross_entropy_loss(
 // lm_ggml_cross_entropy_loss_back
 
 struct lm_ggml_tensor * lm_ggml_cross_entropy_loss_back(
-        struct lm_ggml_context         * ctx,
-        struct lm_ggml_tensor          * a,
-        struct lm_ggml_tensor          * b,
-        struct lm_ggml_tensor          * c) {
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        struct lm_ggml_tensor  * c) {
     LM_GGML_ASSERT(lm_ggml_are_same_shape(a, b));
     LM_GGML_ASSERT(lm_ggml_is_scalar(c));
 
     struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
 
-    result->op   = LM_GGML_OP_CROSS_ENTROPY_LOSS_BACK;
-    result->grad = NULL;
+    result->op     = LM_GGML_OP_CROSS_ENTROPY_LOSS_BACK;
     result->src[0] = a;
     result->src[1] = b;
     result->src[2] = c;
@@ -8362,12 +7891,14 @@ struct lm_ggml_tensor * lm_ggml_cross_entropy_loss_back(
 struct lm_ggml_tensor * lm_ggml_opt_step_adamw(
         struct lm_ggml_context * ctx,
         struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * grad,
         float                 alpha,
         float                 beta1,
         float                 beta2,
         float                 eps,
         float                 wd) {
-    LM_GGML_ASSERT(a->grad);
+    LM_GGML_ASSERT(a->flags & LM_GGML_TENSOR_FLAG_PARAM);
+    LM_GGML_ASSERT(lm_ggml_are_same_shape(a, grad));
     LM_GGML_ASSERT(alpha >  0.0f);
     LM_GGML_ASSERT(beta1 >= 0.0f && beta1 <= 1.0f);
     LM_GGML_ASSERT(beta2 >= 0.0f && beta2 <= 1.0f);
@@ -8375,13 +7906,6 @@ struct lm_ggml_tensor * lm_ggml_opt_step_adamw(
     LM_GGML_ASSERT(wd    >= 0.0f && wd    <= 1.0f);
 
     struct lm_ggml_tensor * result = lm_ggml_view_tensor(ctx, a);
-
-    result->op   = LM_GGML_OP_OPT_STEP_ADAMW;
-    result->grad = NULL;
-    result->src[0] = a;
-    result->src[1] = a->grad;
-    result->src[2] = lm_ggml_dup_tensor(ctx, a->grad);
-    result->src[3] = lm_ggml_dup_tensor(ctx, a->grad);
 
     const int64_t iter = 1;
     memcpy(&result->op_params[0], &iter, sizeof(int64_t));
@@ -8391,25 +7915,16 @@ struct lm_ggml_tensor * lm_ggml_opt_step_adamw(
     lm_ggml_set_op_params_f32(result, 5, eps);
     lm_ggml_set_op_params_f32(result, 6, wd);
 
+    result->op     = LM_GGML_OP_OPT_STEP_ADAMW;
+    result->src[0] = a;
+    result->src[1] = grad;
+    result->src[2] = lm_ggml_dup_tensor(ctx, grad);
+    result->src[3] = lm_ggml_dup_tensor(ctx, grad);
+
     return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-void lm_ggml_set_param(struct lm_ggml_context * ctx, struct lm_ggml_tensor * tensor) {
-    tensor->flags |= LM_GGML_TENSOR_FLAG_PARAM;
-
-    LM_GGML_ASSERT(tensor->grad == NULL);
-    tensor->grad = lm_ggml_dup_tensor(ctx, tensor);
-    lm_ggml_format_name(tensor->grad, "%s (grad)", tensor->name);
-}
-
-void lm_ggml_set_loss(struct lm_ggml_tensor * tensor) {
-    LM_GGML_ASSERT(lm_ggml_is_scalar(tensor));
-    LM_GGML_ASSERT(tensor->type == LM_GGML_TYPE_F32);
-    LM_GGML_ASSERT(tensor->grad);
-    tensor->flags |= LM_GGML_TENSOR_FLAG_LOSS;
-}
 
 // lm_ggml_compute_forward_dup
 
@@ -11326,6 +10841,86 @@ static void lm_ggml_compute_forward_argmax(
     }
 }
 
+// lm_ggml_compute_forward_count_equal
+
+static void lm_ggml_compute_forward_count_equal_i32(
+        const struct lm_ggml_compute_params * params,
+        struct lm_ggml_tensor * dst) {
+
+    const struct lm_ggml_tensor * src0 = dst->src[0];
+    const struct lm_ggml_tensor * src1 = dst->src[1];
+
+    LM_GGML_TENSOR_BINARY_OP_LOCALS;
+
+    LM_GGML_ASSERT(src0->type == LM_GGML_TYPE_I32);
+    LM_GGML_ASSERT(src1->type == LM_GGML_TYPE_I32);
+    LM_GGML_ASSERT(lm_ggml_are_same_shape(src0, src1));
+    LM_GGML_ASSERT(lm_ggml_is_scalar(dst));
+    LM_GGML_ASSERT(dst->type == LM_GGML_TYPE_I64);
+
+    const int64_t nr = lm_ggml_nrows(src0);
+
+    const int ith = params->ith;
+    const int nth = params->nth;
+
+    int64_t * sums = (int64_t *) params->wdata;
+    int64_t sum_thread = 0;
+
+    // rows per thread
+    const int64_t dr = (nr + nth - 1)/nth;
+
+    // row range for this thread
+    const int64_t ir0 = dr*ith;
+    const int64_t ir1 = MIN(ir0 + dr, nr);
+
+    for (int64_t ir = ir0; ir < ir1; ++ir) {
+        const int64_t i03 =  ir                        / (ne02*ne01);
+        const int64_t i02 = (ir - i03*ne03)            /       ne01;
+        const int64_t i01 =  ir - i03*ne03 - i02*ne02;
+
+        const char * data0 = (const char *) src0->data + i03*nb03 + i02*nb02 + i01*nb01;
+        const char * data1 = (const char *) src1->data + i03*nb13 + i02*nb12 + i01*nb11;
+
+        for (int64_t i00 = 0; i00 < ne00; ++i00) {
+            const int32_t val0 = *((const int32_t *) (data0 + i00*nb00));
+            const int32_t val1 = *((const int32_t *) (data1 + i00*nb10));
+
+            sum_thread += val0 == val1;
+        }
+    }
+    if (ith != 0) {
+        sums[ith] = sum_thread;
+    }
+    lm_ggml_barrier(params->threadpool);
+
+    if (ith != 0) {
+        return;
+    }
+
+    for (int ith_other = 1; ith_other < nth; ++ith_other) {
+        sum_thread += sums[ith_other];
+    }
+    *((int64_t *) dst->data) = sum_thread;
+}
+
+static void lm_ggml_compute_forward_count_equal(
+        const struct lm_ggml_compute_params * params,
+        struct lm_ggml_tensor * dst) {
+
+    const struct lm_ggml_tensor * src0 = dst->src[0];
+
+    switch (src0->type) {
+        case LM_GGML_TYPE_I32:
+            {
+                lm_ggml_compute_forward_count_equal_i32(params, dst);
+            } break;
+        default:
+            {
+                LM_GGML_ABORT("fatal error");
+            }
+    }
+}
+
 // lm_ggml_compute_forward_repeat
 
 static void lm_ggml_compute_forward_repeat_f32(
@@ -13289,6 +12884,10 @@ static void lm_ggml_compute_forward_out_prod_f32(
 
     LM_GGML_TENSOR_BINARY_OP_LOCALS
 
+    LM_GGML_ASSERT(dst->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(src0->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(src1->type == LM_GGML_TYPE_F32);
+
     const int ith = params->ith;
     const int nth = params->nth;
 
@@ -14618,7 +14217,7 @@ static void lm_ggml_rope_cache_init(
     }
 }
 
-LM_GGML_CALL void lm_ggml_rope_yarn_corr_dims(
+void lm_ggml_rope_yarn_corr_dims(
     int n_dims, int n_ctx_orig, float freq_base, float beta_fast, float beta_slow, float dims[2]
 ) {
     // start and end correction dims
@@ -17368,41 +16967,40 @@ static void lm_ggml_compute_forward_cross_entropy_loss_f32(
     const struct lm_ggml_tensor * src0 = dst->src[0];
     const struct lm_ggml_tensor * src1 = dst->src[1];
 
-    LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
-    LM_GGML_ASSERT(lm_ggml_is_contiguous(src1));
-    LM_GGML_ASSERT(lm_ggml_is_scalar(dst));
+    LM_GGML_ASSERT(src0->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(src1->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(src0->nb[0] == lm_ggml_type_size(src0->type));
+    LM_GGML_ASSERT(src1->nb[0] == lm_ggml_type_size(src1->type));
     LM_GGML_ASSERT(lm_ggml_are_same_shape(src0, src1));
+    LM_GGML_ASSERT(lm_ggml_is_scalar(dst));
+    LM_GGML_ASSERT(dst->type == LM_GGML_TYPE_F32);
+
+    // TODO: handle transposed/permuted matrices
+    const int64_t nc = src0->ne[0];
+    const int64_t nr = lm_ggml_nrows(src0);
 
     const int ith = params->ith;
     const int nth = params->nth;
 
-    float * sums = (float *) params->wdata;
-
-    // TODO: handle transposed/permuted matrices
-    const int nc = src0->ne[0];
-    const int nr = lm_ggml_nrows(src0);
+    float * sums =  (float *) params->wdata;
+    float * st   = ((float *) params->wdata) + nth + ith*nc;
+    float sum_thread = 0.0f;
 
     LM_GGML_ASSERT(params->wsize >= sizeof(float) * (nth + nth * nc));
 
-    if (ith == 0) {
-        memset(sums, 0, sizeof(float) * (nth + nth * nc));
-    }
-    lm_ggml_barrier(params->threadpool);
-
     // rows per thread
-    const int dr = (nr + nth - 1)/nth;
+    const int64_t dr = (nr + nth - 1)/nth;
 
     // row range for this thread
-    const int ir0 = dr*ith;
-    const int ir1 = MIN(ir0 + dr, nr);
+    const int64_t ir0 = dr*ith;
+    const int64_t ir1 = MIN(ir0 + dr, nr);
 
-    for (int i1 = ir0; i1 < ir1; i1++) {
-        float * s0 = (float *)((char *) src0->data + i1*src0->nb[1]);
-        float * s1 = (float *)((char *) src1->data + i1*src1->nb[1]);
-        float * st = ((float *) params->wdata) + nth + ith*nc;
+    for (int64_t i1 = ir0; i1 < ir1; ++i1) {
+        const float * s0 = (const float *)((const char *) src0->data + i1*src0->nb[1]);
+        const float * s1 = (const float *)((const char *) src1->data + i1*src1->nb[1]);
 
 #ifndef NDEBUG
-        for (int i = 0; i < nc; ++i) {
+        for (int64_t i = 0; i < nc; ++i) {
             //printf("p[%d] = %f\n", i, p[i]);
             assert(!isnan(s0[i]));
             assert(!isnan(s1[i]));
@@ -17411,23 +17009,24 @@ static void lm_ggml_compute_forward_cross_entropy_loss_f32(
 
         float max = -INFINITY;
         lm_ggml_vec_max_f32(nc, &max, s0);
-        lm_ggml_float sum = lm_ggml_vec_log_soft_max_f32(nc, st, s0, max);
-        assert(sum >= 0.0);
+        const lm_ggml_float sum_softmax = lm_ggml_vec_log_soft_max_f32(nc, st, s0, max);
+        assert(sum_softmax >= 0.0);
 
-        lm_ggml_vec_add1_f32(nc, st, st, -sum);
+        lm_ggml_vec_add1_f32(nc, st, st, -sum_softmax);
         lm_ggml_vec_mul_f32(nc, st, st, s1);
 
-        float st_sum = 0.0f;
-        lm_ggml_vec_sum_f32(nc, &st_sum, st);
-        sums[ith] += st_sum;
+        float sum_st = 0.0f;
+        lm_ggml_vec_sum_f32(nc, &sum_st, st);
+        sum_thread += sum_st;
 
 #ifndef NDEBUG
-        for (int i = 0; i < nc; ++i) {
+        for (int64_t i = 0; i < nc; ++i) {
             assert(!isnan(st[i]));
             assert(!isinf(st[i]));
         }
 #endif
     }
+    sums[ith] = sum_thread;
     lm_ggml_barrier(params->threadpool);
 
     if (ith == 0) {
@@ -17493,7 +17092,7 @@ static void lm_ggml_compute_forward_cross_entropy_loss_back_f32(
         float * s1  = (float *)((char *) src1->data + i1*src1->nb[1]);
 
 #ifndef NDEBUG
-        for (int i = 0; i < nc; ++i) {
+        for (int64_t i = 0; i < nc; ++i) {
             //printf("p[%d] = %f\n", i, p[i]);
             assert(!isnan(s0[i]));
             assert(!isnan(s1[i]));
@@ -17512,7 +17111,7 @@ static void lm_ggml_compute_forward_cross_entropy_loss_back_f32(
         lm_ggml_vec_scale_f32(nc, ds0, d_by_nr);
 
 #ifndef NDEBUG
-        for (int i = 0; i < nc; ++i) {
+        for (int64_t i = 0; i < nc; ++i) {
             assert(!isnan(ds0[i]));
             assert(!isinf(ds0[i]));
         }
@@ -17699,6 +17298,10 @@ static void lm_ggml_compute_forward(struct lm_ggml_compute_params * params, stru
         case LM_GGML_OP_ARGMAX:
             {
                 lm_ggml_compute_forward_argmax(params, tensor);
+            } break;
+        case LM_GGML_OP_COUNT_EQUAL:
+            {
+                lm_ggml_compute_forward_count_equal(params, tensor);
             } break;
         case LM_GGML_OP_REPEAT:
             {
@@ -18130,7 +17733,7 @@ void lm_ggml_build_backward_gradient_checkpointing(
         struct lm_ggml_tensor  * * checkpoints,
         int                     n_checkpoints) {
     lm_ggml_graph_cpy(gf, gb_tmp);
-    lm_ggml_build_backward_expand(ctx, gf, gb_tmp, false, true);
+    lm_ggml_build_backward_expand(ctx, gf, gb_tmp, false);
 
     if (n_checkpoints <= 0) {
         lm_ggml_graph_cpy(gb_tmp, gb);
@@ -18450,6 +18053,7 @@ static void lm_ggml_compute_backward(struct lm_ggml_context * ctx, struct lm_ggm
             } break;
         case LM_GGML_OP_MEAN:
         case LM_GGML_OP_ARGMAX:
+        case LM_GGML_OP_COUNT_EQUAL:
             {
                 LM_GGML_ABORT("fatal error"); // TODO: implement
             }
@@ -18782,7 +18386,7 @@ static void lm_ggml_compute_backward(struct lm_ggml_context * ctx, struct lm_ggm
                             lm_ggml_soft_max_back(ctx, tensor->grad, tensor),
                         zero_table, acc_table);
                 }
-
+                LM_GGML_ASSERT((!src1 || !src1->grad) && "backward pass for softmax mask not implemented");
             } break;
         case LM_GGML_OP_SOFT_MAX_BACK:
             {
@@ -18823,6 +18427,7 @@ static void lm_ggml_compute_backward(struct lm_ggml_context * ctx, struct lm_ggm
                                 beta_slow),
                             zero_table, acc_table);
                 }
+                LM_GGML_ASSERT((!src2 || !src2->grad) && "gradients for freq factors not implemented");
             } break;
         case LM_GGML_OP_ROPE_BACK:
             {
@@ -18944,6 +18549,7 @@ static void lm_ggml_compute_backward(struct lm_ggml_context * ctx, struct lm_ggm
             }
         case LM_GGML_OP_FLASH_ATTN_EXT:
             {
+                LM_GGML_ABORT("FA backward pass not adapted after rework");
                 struct lm_ggml_tensor * flash_grad = NULL;
                 if (src0->grad || src1->grad || tensor->src[2]->grad) {
                     int32_t t = lm_ggml_get_op_params_i32(tensor, 0);
@@ -19118,6 +18724,7 @@ static void lm_ggml_compute_backward(struct lm_ggml_context * ctx, struct lm_ggm
                                     tensor->grad),
                                 zero_table, acc_table);
                 }
+                LM_GGML_ASSERT(!src1->grad && "backward pass for labels not implemented");
             } break;
         case LM_GGML_OP_CROSS_ENTROPY_LOSS_BACK:
             {
@@ -19168,7 +18775,7 @@ static void lm_ggml_visit_parents(struct lm_ggml_cgraph * cgraph, struct lm_ggml
         }
     }
 
-    if (node->op == LM_GGML_OP_NONE && node->grad == NULL) {
+    if (node->op == LM_GGML_OP_NONE && !(node->flags & LM_GGML_TENSOR_FLAG_PARAM)) {
         // reached a leaf node, not part of the gradient graph (e.g. a constant)
         LM_GGML_ASSERT(cgraph->n_leafs < cgraph->size);
 
@@ -19186,9 +18793,6 @@ static void lm_ggml_visit_parents(struct lm_ggml_cgraph * cgraph, struct lm_ggml
         }
 
         cgraph->nodes[cgraph->n_nodes] = node;
-        if (cgraph->grads) {
-            cgraph->grads[cgraph->n_nodes] = node->grad;
-        }
         cgraph->n_nodes++;
     }
 }
@@ -19216,20 +18820,62 @@ void lm_ggml_build_forward_expand(struct lm_ggml_cgraph * cgraph, struct lm_ggml
     lm_ggml_build_forward_impl(cgraph, tensor, true);
 }
 
-void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool accumulate, bool keep) {
+void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool accumulate) {
     LM_GGML_ASSERT(gf->n_nodes > 0);
     LM_GGML_ASSERT(gf->grads);
 
-    // if we are keeping the gradient graph, we have to detach the gradient nodes from the original graph
-    if (keep) {
-        for (int i = 0; i < gf->n_nodes; i++) {
-            struct lm_ggml_tensor * node = gf->nodes[i];
+    for (int i = 0; i < gf->n_nodes; ++i) {
+        struct lm_ggml_tensor * node = gf->nodes[i];
 
-            if (node->grad) {
-                node->grad = lm_ggml_dup_tensor(ctx, node);
-                gf->grads[i] = node->grad;
-            }
+        if (node->type == LM_GGML_TYPE_I32) {
+            continue;
         }
+
+        bool needs_grad = node->flags & LM_GGML_TENSOR_FLAG_PARAM;
+        bool ignore_src[LM_GGML_MAX_SRC] = {false};
+        switch (node->op) {
+            // gradients in node->src[0] for one reason or another have no effect on output gradients
+            case LM_GGML_OP_IM2COL:      // only used for its shape
+            case LM_GGML_OP_IM2COL_BACK: // same as IM2COL
+                ignore_src[0] = true;
+                break;
+            case LM_GGML_OP_UNARY: {
+                const enum lm_ggml_unary_op uop = lm_ggml_get_unary_op(node);
+                // SGN and STEP unary ops are piecewise constant
+                if (uop == LM_GGML_UNARY_OP_SGN || uop == LM_GGML_UNARY_OP_STEP) {
+                    ignore_src[0] = true;
+                }
+            } break;
+
+            // gradients in node->src[1] for one reason or another have no effect on output gradients
+            case LM_GGML_OP_CPY:           // gradients in CPY target  are irrelevant
+            case LM_GGML_OP_GET_ROWS:      // row indices not differentiable
+            case LM_GGML_OP_GET_ROWS_BACK: // same as for GET_ROWS
+            case LM_GGML_OP_ROPE:          // positions not differentiable
+                ignore_src[1] = true;
+                break;
+
+            default:
+                break;
+        }
+        for (int j = 0; j < LM_GGML_MAX_SRC; ++j) {
+            if (!node->src[j] || !node->src[j]->grad || ignore_src[j]) {
+                continue;
+            }
+            LM_GGML_ASSERT(node->src[j]->type == LM_GGML_TYPE_F32 || node->src[j]->type == LM_GGML_TYPE_F16);
+            needs_grad = true;
+            break;
+        }
+        if (!needs_grad) {
+            continue;
+        }
+
+        // inplace operations are currently not supported
+        LM_GGML_ASSERT(!node->view_src || node->op == LM_GGML_OP_CPY || node->op == LM_GGML_OP_VIEW ||
+            node->op == LM_GGML_OP_RESHAPE || node->op == LM_GGML_OP_PERMUTE || node->op == LM_GGML_OP_TRANSPOSE);
+
+        // create a new tensor with the same type and shape as the node and set it as grad
+        node->grad = lm_ggml_dup_tensor(ctx, node);
     }
 
     // keep tables of original gradients for replacement/accumulation logic
@@ -19291,7 +18937,7 @@ void lm_ggml_build_opt_adamw(
 
         if (node->flags & LM_GGML_TENSOR_FLAG_PARAM) {
             LM_GGML_PRINT_DEBUG("%s: found root node %p\n", __func__, (void *) node);
-            struct lm_ggml_tensor * opt_step = lm_ggml_opt_step_adamw(ctx, node, alpha, beta1, beta2, eps, wd);
+            struct lm_ggml_tensor * opt_step = lm_ggml_opt_step_adamw(ctx, node, node->grad, alpha, beta1, beta2, eps, wd);
             lm_ggml_build_forward_expand(gb, opt_step);
         }
     }
@@ -19588,6 +19234,13 @@ static int lm_ggml_get_n_tasks(struct lm_ggml_tensor * node, int n_threads) {
         case LM_GGML_OP_SUM_ROWS:
         case LM_GGML_OP_MEAN:
         case LM_GGML_OP_ARGMAX:
+            {
+                n_tasks = 1;
+            } break;
+        case LM_GGML_OP_COUNT_EQUAL:
+            {
+                n_tasks = n_threads;
+            } break;
         case LM_GGML_OP_REPEAT:
         case LM_GGML_OP_REPEAT_BACK:
         case LM_GGML_OP_LEAKY_RELU:
@@ -20086,6 +19739,10 @@ struct lm_ggml_cplan lm_ggml_graph_plan(
                         cur = lm_ggml_type_size(LM_GGML_TYPE_F32) * node->src[1]->ne[0] * n_tasks;
                     }
                 } break;
+            case LM_GGML_OP_COUNT_EQUAL:
+                {
+                    cur = lm_ggml_type_size(node->type)*n_tasks;
+                } break;
             case LM_GGML_OP_MUL_MAT:
                 {
                     const enum lm_ggml_type vec_dot_type = type_traits[node->src[0]->type].vec_dot_type;
@@ -20529,7 +20186,7 @@ enum lm_ggml_status lm_ggml_graph_compute(struct lm_ggml_cgraph * cgraph, struct
     }
 #else
     if (n_threads > threadpool->n_threads_max) {
-        LM_GGML_PRINT("WARNING: cplan requested more threads (%d) than available (%d)\n", n_threads, threadpool->n_threads_max);
+        LM_GGML_LOG_WARN("cplan requested more threads (%d) than available (%d)\n", n_threads, threadpool->n_threads_max);
         n_threads = threadpool->n_threads_max;
     }
 
@@ -21068,30 +20725,30 @@ struct lm_ggml_cgraph * lm_ggml_graph_import(const char * fname, struct lm_ggml_
 }
 
 void lm_ggml_graph_print(const struct lm_ggml_cgraph * cgraph) {
-    LM_GGML_PRINT("=== GRAPH ===\n");
+    LM_GGML_LOG_INFO("=== GRAPH ===\n");
 
-    LM_GGML_PRINT("n_nodes = %d\n", cgraph->n_nodes);
+    LM_GGML_LOG_INFO("n_nodes = %d\n", cgraph->n_nodes);
     for (int i = 0; i < cgraph->n_nodes; i++) {
         struct lm_ggml_tensor * node = cgraph->nodes[i];
 
-        LM_GGML_PRINT(" - %3d: [ %5" PRId64 ", %5" PRId64 ", %5" PRId64 "] %16s %s\n",
+        LM_GGML_LOG_INFO(" - %3d: [ %5" PRId64 ", %5" PRId64 ", %5" PRId64 "] %16s %s\n",
                 i,
                 node->ne[0], node->ne[1], node->ne[2],
                 lm_ggml_op_name(node->op), (node->flags & LM_GGML_TENSOR_FLAG_PARAM) ? "x" : node->grad ? "g" : " ");
     }
 
-    LM_GGML_PRINT("n_leafs = %d\n", cgraph->n_leafs);
+    LM_GGML_LOG_INFO("n_leafs = %d\n", cgraph->n_leafs);
     for (int i = 0; i < cgraph->n_leafs; i++) {
         struct lm_ggml_tensor * node = cgraph->leafs[i];
 
-        LM_GGML_PRINT(" - %3d: [ %5" PRId64 ", %5" PRId64 "] %8s %16s\n",
+        LM_GGML_LOG_INFO(" - %3d: [ %5" PRId64 ", %5" PRId64 "] %8s %16s\n",
                 i,
                 node->ne[0], node->ne[1],
                 lm_ggml_op_name(node->op),
                 lm_ggml_get_name(node));
     }
 
-    LM_GGML_PRINT("========================================\n");
+    LM_GGML_LOG_INFO("========================================\n");
 }
 
 // check if node is part of the graph
@@ -21262,7 +20919,7 @@ void lm_ggml_graph_dump_dot(const struct lm_ggml_cgraph * gb, const struct lm_gg
 
     fclose(fp);
 
-    LM_GGML_PRINT("%s: dot -Tpng %s -o %s.png && open %s.png\n", __func__, filename, filename, filename);
+    LM_GGML_LOG_INFO("%s: dot -Tpng %s -o %s.png && open %s.png\n", __func__, filename, filename, filename);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -22094,8 +21751,6 @@ enum lm_ggml_opt_result lm_ggml_opt(
         struct lm_ggml_context * ctx,
         struct lm_ggml_opt_params params,
         struct lm_ggml_tensor * f) {
-    LM_GGML_ASSERT(f->grad && "lm_ggml_set_param called for at least one parent tensor.");
-
     bool free_ctx = false;
     if (ctx == NULL) {
         struct lm_ggml_init_params params_ctx = {
@@ -22136,7 +21791,7 @@ enum lm_ggml_opt_result lm_ggml_opt_resume(
     lm_ggml_build_forward_expand(gf, f);
 
     struct lm_ggml_cgraph * gb = lm_ggml_graph_dup(ctx, gf);
-    lm_ggml_build_backward_expand(ctx, gf, gb, false, true);
+    lm_ggml_build_backward_expand(ctx, gf, gb, false);
 
     return lm_ggml_opt_resume_g(ctx, opt, f, gf, gb, NULL, NULL);
 }
@@ -22187,6 +21842,17 @@ void lm_ggml_set_input(struct lm_ggml_tensor * tensor) {
 
 void lm_ggml_set_output(struct lm_ggml_tensor * tensor) {
     tensor->flags |= LM_GGML_TENSOR_FLAG_OUTPUT;
+}
+
+void lm_ggml_set_param(struct lm_ggml_context * ctx, struct lm_ggml_tensor * tensor) {
+    LM_GGML_UNUSED(ctx); // TODO: remove this parameter
+    tensor->flags |= LM_GGML_TENSOR_FLAG_PARAM;
+}
+
+void lm_ggml_set_loss(struct lm_ggml_tensor * tensor) {
+    LM_GGML_ASSERT(lm_ggml_is_scalar(tensor));
+    LM_GGML_ASSERT(tensor->type == LM_GGML_TYPE_F32);
+    tensor->flags |= LM_GGML_TENSOR_FLAG_LOSS;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -23578,16 +23244,16 @@ int lm_ggml_cpu_has_fma(void) {
 }
 
 int lm_ggml_cpu_has_neon(void) {
-#if defined(__ARM_NEON)
-    return 1;
+#if defined(__ARM_ARCH)
+    return lm_ggml_arm_arch_features.has_neon;
 #else
     return 0;
 #endif
 }
 
 int lm_ggml_cpu_has_sve(void) {
-#if defined(__ARM_FEATURE_SVE)
-    return 1;
+#if defined(__ARM_ARCH)
+    return lm_ggml_arm_arch_features.has_sve;
 #else
     return 0;
 #endif
@@ -23734,11 +23400,23 @@ int lm_ggml_cpu_has_vsx(void) {
 }
 
 int lm_ggml_cpu_has_matmul_int8(void) {
-#if defined(__ARM_FEATURE_MATMUL_INT8)
-    return 1;
+#if defined(__ARM_ARCH)
+    return lm_ggml_arm_arch_features.has_i8mm;
 #else
     return 0;
 #endif
 }
 
+int lm_ggml_cpu_get_sve_cnt(void) {
+#if defined(__ARM_ARCH)
+    return lm_ggml_arm_arch_features.sve_cnt;
+#else
+    return 0;
+#endif
+}
+
+void lm_ggml_log_set(lm_ggml_log_callback log_callback, void * user_data) {
+    g_logger_state.log_callback = log_callback ? log_callback : lm_ggml_log_callback_default;
+    g_logger_state.log_callback_user_data = user_data;
+}
 ////////////////////////////////////////////////////////////////////////////////

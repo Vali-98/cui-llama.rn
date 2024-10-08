@@ -10,6 +10,8 @@ import com.facebook.react.modules.core.DeviceEventManagerModule;
 
 import android.util.Log;
 import android.os.Build;
+import android.os.ParcelFileDescriptor;
+import android.net.Uri;
 import android.content.res.AssetManager;
 
 import java.lang.StringBuilder;
@@ -17,6 +19,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.FileInputStream;
 
 public class LlamaContext {
@@ -31,11 +34,17 @@ public class LlamaContext {
 
   private byte[] ggufHeader = {0x47, 0x47, 0x55, 0x46};
 
-  private boolean isGGUF(final String filepath) {
+  private boolean isGGUF(final String filepath, final ReactApplicationContext reactContext) {
     byte[] fileHeader = new byte[4];
-    FileInputStream fis = null;
+    InputStream fis = null;
     try {
-      fis = new FileInputStream(filepath);
+      if (filepath.startsWith("content")) {
+        fis = reactContext.getApplicationContext().getContentResolver().openInputStream(Uri.parse(filepath));
+      } else {
+        fis = new FileInputStream(filepath);
+      }
+      
+
       int bytesRead = fis.read(fileHeader);
       if(bytesRead < 4) {
         return false;
@@ -52,7 +61,7 @@ public class LlamaContext {
           try {
               fis.close();
           } catch (Exception e) {
-              Log.d(NAME, "Closing FileInputStream failed.");
+              Log.d(NAME, "Closing InputStream failed.");
           }
       }
     }
@@ -65,16 +74,29 @@ public class LlamaContext {
     if (!params.hasKey("model")) {
       throw new IllegalArgumentException("Missing required parameter: model");
     }
-    // Check if file has GGUF magic numbers
-    if(!isGGUF(params.getString("model"))) {
+
+    String modelName = params.getString("model");
+
+    if(!isGGUF(modelName, reactContext)) {
       throw new IllegalArgumentException("File is not in GGUF format");
     }
 
+    if ( modelName.startsWith("content://")) {
+    Uri uri = Uri.parse(modelName);
+      try {
+        ParcelFileDescriptor pfd = reactContext.getApplicationContext().getContentResolver().openFileDescriptor(uri, "r");
+        modelName = "" + pfd.getFd();
+      } catch (Exception e) {
+        Log.e(NAME, "Failed to convert to FD!");
+      }
+    }
+    
+    // Check if file has GGUF magic numbers
     this.id = id;
     eventEmitter = reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class);
     this.context = initContext(
       // String model,
-      params.getString("model"),
+      modelName,
       // boolean embedding,
       params.hasKey("embedding") ? params.getBoolean("embedding") : false,
       // int n_ctx,

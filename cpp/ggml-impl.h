@@ -33,6 +33,21 @@ extern "C" {
 #endif
 #endif
 
+//
+// logging
+//
+
+LM_GGML_ATTRIBUTE_FORMAT(2, 3)
+void lm_ggml_log_internal        (enum lm_ggml_log_level level, const char * format, ...);
+void lm_ggml_log_callback_default(enum lm_ggml_log_level level, const char * text, void * user_data);
+
+#define LM_GGML_LOG(...)       lm_ggml_log_internal(LM_GGML_LOG_LEVEL_NONE , __VA_ARGS__)
+#define LM_GGML_LOG_INFO(...)  lm_ggml_log_internal(LM_GGML_LOG_LEVEL_INFO , __VA_ARGS__)
+#define LM_GGML_LOG_WARN(...)  lm_ggml_log_internal(LM_GGML_LOG_LEVEL_WARN , __VA_ARGS__)
+#define LM_GGML_LOG_ERROR(...) lm_ggml_log_internal(LM_GGML_LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LM_GGML_LOG_DEBUG(...) lm_ggml_log_internal(LM_GGML_LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LM_GGML_LOG_CONT(...)  lm_ggml_log_internal(LM_GGML_LOG_LEVEL_CONT , __VA_ARGS__)
+
 // bitset
 
 typedef uint32_t lm_ggml_bitset_t;
