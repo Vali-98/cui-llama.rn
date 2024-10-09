@@ -12,6 +12,7 @@ import android.util.Log;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.net.Uri;
+import android.content.Intent;
 import android.content.res.AssetManager;
 
 import java.lang.StringBuilder;
@@ -39,11 +40,12 @@ public class LlamaContext {
     InputStream fis = null;
     try {
       if (filepath.startsWith("content")) {
-        fis = reactContext.getApplicationContext().getContentResolver().openInputStream(Uri.parse(filepath));
+        Uri uri = Uri.parse(filepath);
+        reactContext.getApplicationContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        fis = reactContext.getApplicationContext().getContentResolver().openInputStream(uri);
       } else {
         fis = new FileInputStream(filepath);
       }
-      
 
       int bytesRead = fis.read(fileHeader);
       if(bytesRead < 4) {
@@ -55,6 +57,7 @@ public class LlamaContext {
       }
       return true;
     } catch (Exception e) {
+      Log.e(NAME, "Failed to check GGUF: " + e.getMessage());
       return false;
     }finally {
       if (fis != null) {
