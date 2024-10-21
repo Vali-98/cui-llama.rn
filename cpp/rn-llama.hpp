@@ -414,13 +414,13 @@ struct llama_rn_context
 
             const int32_t n_probs = params.sparams.n_probs;
             
-            
-            if (params.sparams.temp <= 0 && n_probs > 0)
+            // deprecated
+            /*if (params.sparams.temp <= 0 && n_probs > 0)
             {
                 // For llama_sample_token_greedy we need to sort candidates
                 llama_sampler_init_softmax();
 
-            }
+            }*/
             
 
             for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
