@@ -35,10 +35,6 @@
 #include <omp.h>
 #endif
 
-#ifdef LM_GGML_USE_METAL
-#include <unistd.h>
-#endif
-
 #if defined(__ARM_FEATURE_SVE) || defined(__ARM_FEATURE_MATMUL_INT8)
 #undef LM_GGML_USE_LLAMAFILE
 #endif
@@ -189,6 +185,8 @@ typedef pthread_t lm_ggml_thread_t;
 #endif
 
 #if defined(__APPLE__)
+#include <unistd.h>
+#include <mach/mach.h>
 #include <TargetConditionals.h>
 #endif
 
@@ -326,8 +324,9 @@ struct lm_ggml_logger_state {
 static struct lm_ggml_logger_state g_logger_state = {lm_ggml_log_callback_default, NULL};
 
 static void lm_ggml_log_internal_v(enum lm_ggml_log_level level, const char * format, va_list args) {
-    if (format == NULL)
+    if (format == NULL) {
         return;
+    }
     va_list args_copy;
     va_copy(args_copy, args);
     char buffer[128];
@@ -386,22 +385,40 @@ void lm_ggml_log_callback_default(enum lm_ggml_log_level level, const char * tex
 //#define LM_GGML_SOFT_MAX_ACCELERATE
 #endif
 
+
+void * lm_ggml_aligned_malloc(size_t size) {
 #if defined(_MSC_VER) || defined(__MINGW32__)
-#define LM_GGML_ALIGNED_MALLOC(size) _aligned_malloc(size, LM_GGML_MEM_ALIGN)
-#define LM_GGML_ALIGNED_FREE(ptr)    _aligned_free(ptr)
+    return _aligned_malloc(size, TENSOR_ALIGNMENT);
 #else
-inline static void * lm_ggml_aligned_malloc(size_t size) {
     if (size == 0) {
         LM_GGML_LOG_WARN("Behavior may be unexpected when allocating 0 bytes for lm_ggml_aligned_malloc!\n");
         return NULL;
     }
     void * aligned_memory = NULL;
 #ifdef LM_GGML_USE_CPU_HBM
-    int result = hbw_posix_memalign(&aligned_memory, 16, size);
+    int result = hbw_posix_memalign(&aligned_memory, TENSOR_ALIGNMENT, size);
+#elif TARGET_OS_OSX
+    kern_return_t alloc_status = vm_allocate((vm_map_t) mach_task_self(), (vm_address_t *) &aligned_memory, size, VM_FLAGS_ANYWHERE);
+    int result = EFAULT;
+    switch (alloc_status) {
+        case KERN_SUCCESS:
+            result = 0;
+            break;
+        case KERN_INVALID_ADDRESS:
+            result = EINVAL;
+            break;
+        case KERN_NO_SPACE:
+            result = ENOMEM;
+            break;
+        default:
+            result = EFAULT;
+            break;
+    }
 #elif LM_GGML_USE_METAL
-    int result = posix_memalign(&aligned_memory, sysconf(_SC_PAGESIZE), size);
+    const long page_size = sysconf(_SC_PAGESIZE);
+    int result = posix_memalign(&aligned_memory, MAX(TENSOR_ALIGNMENT, page_size), size);
 #else
-    int result = posix_memalign(&aligned_memory, LM_GGML_MEM_ALIGN, size);
+    int result = posix_memalign(&aligned_memory, TENSOR_ALIGNMENT, size);
 #endif
     if (result != 0) {
         // Handle allocation failure
@@ -419,14 +436,26 @@ inline static void * lm_ggml_aligned_malloc(size_t size) {
         return NULL;
     }
     return aligned_memory;
+#endif
 }
-#define LM_GGML_ALIGNED_MALLOC(size) lm_ggml_aligned_malloc(size)
-#ifdef LM_GGML_USE_CPU_HBM
-#define LM_GGML_ALIGNED_FREE(ptr)    if(NULL != ptr) hbw_free(ptr)
+
+void lm_ggml_aligned_free(void * ptr, size_t size) {
+    LM_GGML_UNUSED(size);
+#if defined(_MSC_VER) || defined(__MINGW32__)
+    _aligned_free(ptr);
+#elif LM_GGML_USE_CPU_HBM
+    if (ptr != NULL) {
+        hbw_free(ptr);
+    }
+#elif TARGET_OS_OSX
+    if (ptr != NULL) {
+        vm_deallocate((vm_map_t)mach_task_self(), (vm_address_t)ptr, size);
+    }
 #else
-#define LM_GGML_ALIGNED_FREE(ptr)    free(ptr)
+    free(ptr);
 #endif
-#endif
+}
+
 
 inline static void * lm_ggml_malloc(size_t size) {
     if (size == 0) {
@@ -3882,7 +3911,7 @@ struct lm_ggml_context * lm_ggml_init(struct lm_ggml_init_params params) {
 
     *ctx = (struct lm_ggml_context) {
         /*.mem_size           =*/ mem_size,
-        /*.mem_buffer         =*/ params.mem_buffer ? params.mem_buffer : LM_GGML_ALIGNED_MALLOC(mem_size),
+        /*.mem_buffer         =*/ params.mem_buffer ? params.mem_buffer : lm_ggml_aligned_malloc(mem_size),
         /*.mem_buffer_owned   =*/ params.mem_buffer ? false : true,
         /*.no_alloc           =*/ params.no_alloc,
         /*.no_alloc_save      =*/ params.no_alloc,
@@ -3922,7 +3951,7 @@ void lm_ggml_free(struct lm_ggml_context * ctx) {
                     __func__, i, lm_ggml_used_mem(ctx));
 
             if (ctx->mem_buffer_owned) {
-                LM_GGML_ALIGNED_FREE(ctx->mem_buffer);
+                lm_ggml_aligned_free(ctx->mem_buffer, ctx->mem_size);
             }
 
             found = true;
@@ -15708,6 +15737,9 @@ static void lm_ggml_compute_forward_flash_attn_ext_f16(
     lm_ggml_vec_dot_t    const kq_vec_dot     = type_traits[k->type].vec_dot;
     lm_ggml_to_float_t   const v_to_float     = type_traits[v->type].to_float;
 
+    LM_GGML_ASSERT(q_to_vec_dot && "fattn: unsupported K-type");
+    LM_GGML_ASSERT(v_to_float   && "fattn: unsupported V-type");
+
     // loop over n_batch and n_head
     for (int ir = ir0; ir < ir1; ++ir) {
         // q indices
@@ -19621,9 +19653,10 @@ static void lm_ggml_thread_cpumask_next(const bool * global_mask, bool * local_m
 void lm_ggml_threadpool_free(struct lm_ggml_threadpool* threadpool) {
     if (!threadpool) return;
 
+    const int n_threads = threadpool->n_threads_max;
+
 #ifndef LM_GGML_USE_OPENMP
     struct lm_ggml_compute_state* workers = threadpool->workers;
-    const int n_threads = threadpool->n_threads_max;
 
     lm_ggml_mutex_lock(&threadpool->mutex);
 
@@ -19643,8 +19676,9 @@ void lm_ggml_threadpool_free(struct lm_ggml_threadpool* threadpool) {
     lm_ggml_cond_destroy(&threadpool->cond);
 #endif // LM_GGML_USE_OPENMP
 
-    LM_GGML_ALIGNED_FREE(threadpool->workers);
-    LM_GGML_ALIGNED_FREE(threadpool);
+    const size_t workers_size = sizeof(struct lm_ggml_compute_state) * n_threads;
+    lm_ggml_aligned_free(threadpool->workers, workers_size);
+    lm_ggml_aligned_free(threadpool, sizeof(struct lm_ggml_threadpool));
 }
 
 #ifndef LM_GGML_USE_OPENMP
@@ -20076,7 +20110,7 @@ static struct lm_ggml_threadpool * lm_ggml_threadpool_new_impl(
                 struct lm_ggml_cplan * cplan) {
 
     struct lm_ggml_threadpool * threadpool =
-        LM_GGML_ALIGNED_MALLOC(sizeof(struct lm_ggml_threadpool));
+        lm_ggml_aligned_malloc(sizeof(struct lm_ggml_threadpool));
     {
         threadpool->cgraph           = cgraph;
         threadpool->cplan            = cplan;
@@ -20097,7 +20131,7 @@ static struct lm_ggml_threadpool * lm_ggml_threadpool_new_impl(
 
     // Allocate and init workers state
     const size_t workers_size = sizeof(struct lm_ggml_compute_state) * tpp->n_threads;
-    struct lm_ggml_compute_state * workers = LM_GGML_ALIGNED_MALLOC(workers_size);
+    struct lm_ggml_compute_state * workers = lm_ggml_aligned_malloc(workers_size);
 
     memset(workers, 0, workers_size);
     for (int j = 0; j < tpp->n_threads; j++) {
@@ -23229,6 +23263,14 @@ int lm_ggml_cpu_has_avx512_vnni(void) {
 
 int lm_ggml_cpu_has_avx512_bf16(void) {
 #if defined(__AVX512BF16__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_amx_int8(void) {
+#if defined(__AMX_INT8__)
     return 1;
 #else
     return 0;

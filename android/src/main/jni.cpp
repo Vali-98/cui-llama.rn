@@ -156,7 +156,7 @@ Java_com_rnllama_LlamaContext_initContext(
 ) {
     UNUSED(thiz);
 
-    gpt_params defaultParams;
+    common_params defaultParams;
 
     defaultParams.vocab_only = vocab_only;
     if(vocab_only) {
@@ -268,7 +268,7 @@ Java_com_rnllama_LlamaContext_getFormattedChat(
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
 
-    std::vector<llama_chat_msg> chat;
+    std::vector<common_chat_msg> chat;
 
     int messages_len = env->GetArrayLength(messages);
     for (int i = 0; i < messages_len; i++) {
@@ -292,7 +292,7 @@ Java_com_rnllama_LlamaContext_getFormattedChat(
     }
 
     const char *tmpl_chars = env->GetStringUTFChars(chat_template, nullptr);
-    std::string formatted_chat = llama_chat_apply_template(llama->model, tmpl_chars, chat, true);
+    std::string formatted_chat = common_chat_apply_template(llama->model, tmpl_chars, chat, true);
 
     return env->NewStringUTF(formatted_chat.c_str());
 }
@@ -497,7 +497,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
         if (token_with_probs.tok == -1 || llama->incomplete) {
             continue;
         }
-        const std::string token_text = llama_token_to_piece(llama->ctx, token_with_probs.tok);
+        const std::string token_text = common_token_to_piece(llama->ctx, token_with_probs.tok);
 
         size_t pos = std::min(sent_count, llama->generated_text.size());
 
@@ -532,7 +532,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
             putString(env, tokenResult, "token", to_send.c_str());
 
             if (llama->params.sparams.n_probs > 0) {
-              const std::vector<llama_token> to_send_toks = llama_tokenize(llama->ctx, to_send, false);
+              const std::vector<llama_token> to_send_toks = common_tokenize(llama->ctx, to_send, false);
               size_t probs_pos = std::min(sent_token_probs_index, llama->generated_token_probs.size());
               size_t probs_stop_pos = std::min(sent_token_probs_index + to_send_toks.size(), llama->generated_token_probs.size());
               if (probs_pos < probs_stop_pos) {
@@ -607,7 +607,7 @@ Java_com_rnllama_LlamaContext_tokenize(
 
     const char *text_chars = env->GetStringUTFChars(text, nullptr);
 
-    const std::vector<llama_token> toks = llama_tokenize(
+    const std::vector<llama_token> toks = common_tokenize(
         llama->ctx,
         text_chars,
         false
@@ -719,7 +719,7 @@ Java_com_rnllama_LlamaContext_freeContext(
     }
     if (llama->ctx_sampling != nullptr)
     {
-        gpt_sampler_free(llama->ctx_sampling);
+        common_sampler_free(llama->ctx_sampling);
     }
     context_map.erase((long) llama->ctx);
 }

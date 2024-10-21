@@ -2489,6 +2489,7 @@ extern "C" {
     LM_GGML_API int lm_ggml_cpu_has_avx512_vbmi(void);
     LM_GGML_API int lm_ggml_cpu_has_avx512_vnni(void);
     LM_GGML_API int lm_ggml_cpu_has_avx512_bf16(void);
+    LM_GGML_API int lm_ggml_cpu_has_amx_int8   (void);
     LM_GGML_API int lm_ggml_cpu_has_fma        (void);
     LM_GGML_API int lm_ggml_cpu_has_neon       (void);
     LM_GGML_API int lm_ggml_cpu_has_sve        (void);
