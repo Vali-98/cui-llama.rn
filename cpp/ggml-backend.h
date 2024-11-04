@@ -114,11 +114,12 @@ extern "C" {
     //
 
     enum lm_ggml_backend_dev_type {
+        // CPU device using system memory
         LM_GGML_BACKEND_DEVICE_TYPE_CPU,
+        // GPU device using dedicated memory
         LM_GGML_BACKEND_DEVICE_TYPE_GPU,
-        // devices with full capabilities (excludes backends such as BLAS that only support matrix multiplication)
-        LM_GGML_BACKEND_DEVICE_TYPE_CPU_FULL,
-        LM_GGML_BACKEND_DEVICE_TYPE_GPU_FULL
+        // accelerator devices intended to be used together with the CPU backend (e.g. BLAS or AMX)
+        LM_GGML_BACKEND_DEVICE_TYPE_ACCEL
     };
 
     // functionality supported by the device
@@ -167,10 +168,14 @@ extern "C" {
     LM_GGML_API lm_ggml_backend_dev_t lm_ggml_backend_reg_dev_get(lm_ggml_backend_reg_t reg, size_t index);
     LM_GGML_API void *             lm_ggml_backend_reg_get_proc_address(lm_ggml_backend_reg_t reg, const char * name);
 
+    // Common functions that may be obtained using lm_ggml_backend_reg_get_proc_address
 
-    // Functions that may be obtained using lm_ggml_backend_reg_get_proc_address
-    typedef lm_ggml_backend_buffer_type_t (*lm_ggml_backend_split_buffer_type_t)(const float *);
-    typedef void (*lm_ggml_backend_set_n_threads_t)(lm_ggml_backend_t, int);
+    // Split buffer type for tensor parallelism
+    typedef lm_ggml_backend_buffer_type_t   (*lm_ggml_backend_split_buffer_type_t)(int main_device, const float * tensor_split);
+    // Set the number of threads for the backend
+    typedef void                         (*lm_ggml_backend_set_n_threads_t)(lm_ggml_backend_t backend, int n_threads);
+    // Get additional buffer types provided by the device (returns a NULL-terminated array)
+    typedef lm_ggml_backend_buffer_type_t * (*lm_ggml_backend_dev_get_extra_bufts_t)(lm_ggml_backend_dev_t device);
 
     //
     // Backend registry
@@ -192,7 +197,7 @@ extern "C" {
     LM_GGML_API lm_ggml_backend_t lm_ggml_backend_init_by_name(const char * name, const char * params);
     // = lm_ggml_backend_dev_init(lm_ggml_backend_dev_by_type(type), params)
     LM_GGML_API lm_ggml_backend_t lm_ggml_backend_init_by_type(enum lm_ggml_backend_dev_type type, const char * params);
-    // = lm_ggml_backend_dev_init(lm_ggml_backend_dev_by_type(GPU_FULL) OR lm_ggml_backend_dev_by_type(CPU_FULL), NULL)
+    // = lm_ggml_backend_dev_init(lm_ggml_backend_dev_by_type(GPU) OR lm_ggml_backend_dev_by_type(CPU), NULL)
     LM_GGML_API lm_ggml_backend_t lm_ggml_backend_init_best(void);
 
     //
@@ -300,26 +305,9 @@ extern "C" {
     LM_GGML_API void lm_ggml_backend_tensor_alloc(lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor, void * addr);
     LM_GGML_API void lm_ggml_backend_view_init(struct lm_ggml_tensor * tensor);
 
-    //
-    // CPU backend
-    //
-
-    LM_GGML_API lm_ggml_backend_t lm_ggml_backend_cpu_init(void);
-
-    LM_GGML_API bool lm_ggml_backend_is_cpu                (lm_ggml_backend_t backend);
-    LM_GGML_API void lm_ggml_backend_cpu_set_n_threads     (lm_ggml_backend_t backend_cpu, int n_threads);
-    LM_GGML_API void lm_ggml_backend_cpu_set_threadpool    (lm_ggml_backend_t backend_cpu, lm_ggml_threadpool_t threadpool);
-    LM_GGML_API void lm_ggml_backend_cpu_set_abort_callback(lm_ggml_backend_t backend_cpu, lm_ggml_abort_callback abort_callback, void * abort_callback_data);
-
-    // Create a backend buffer from an existing pointer
+    // CPU buffer types are always available
     LM_GGML_API lm_ggml_backend_buffer_t      lm_ggml_backend_cpu_buffer_from_ptr(void * ptr, size_t size);
     LM_GGML_API lm_ggml_backend_buffer_type_t lm_ggml_backend_cpu_buffer_type(void);
-
-    LM_GGML_API lm_ggml_backend_reg_t lm_ggml_backend_cpu_reg(void);
-
-#ifdef LM_GGML_USE_CPU_HBM
-    LM_GGML_API lm_ggml_backend_buffer_type_t lm_ggml_backend_cpu_hbm_buffer_type(void);
-#endif
 
 #ifdef  __cplusplus
 }

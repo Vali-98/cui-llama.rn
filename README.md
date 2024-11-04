@@ -11,8 +11,6 @@ The following features have been added for Android:
 - `vocab_only` mode: utilize the llama.cpp tokenizer
 - tokenizeSync: non-blocking, synchronous tokenizer function
 - Context Shift taken from [kobold.cpp](https://github.com/LostRuins/koboldcpp)
-- XTC sampling
-- Progress callback
 - Retrieving CPU Features to check for i8mm and dotprod flags
 
 Original repo README.md below.

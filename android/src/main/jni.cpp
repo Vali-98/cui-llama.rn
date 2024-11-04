@@ -399,7 +399,6 @@ Java_com_rnllama_LlamaContext_doCompletion(
     jfloat min_p,
     jfloat xtc_t,
     jfloat xtc_p,
-    jfloat tfs_z,
     jfloat typical_p,
     jint seed,
     jobjectArray stop,
@@ -438,12 +437,11 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.top_k = top_k;
     sparams.top_p = top_p;
     sparams.min_p = min_p;
-    sparams.tfs_z = tfs_z;
     sparams.typ_p = typical_p;
     sparams.n_probs = n_probs;
     sparams.grammar = env->GetStringUTFChars(grammar, nullptr);
-    sparams.xtc_t = xtc_t;
-    sparams.xtc_p = xtc_p;
+    sparams.xtc_threshold = xtc_t;
+    sparams.xtc_probability = xtc_p;
 
     sparams.logit_bias.clear();
     if (ignore_eos) {

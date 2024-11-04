@@ -8,11 +8,14 @@ git submodule update --recursive --remote
 cp ./llama.cpp/include/llama.h ./cpp/llama.h
 
 cp ./llama.cpp/ggml/include/ggml.h ./cpp/ggml.h
+cp ./llama.cpp/ggml/include/ggml-cpu.h ./cpp/ggml-cpu.h
+cp ./llama.cpp/ggml/include/ggml-cpp.h ./cpp/ggml-cpp.h
 cp ./llama.cpp/ggml/include/ggml-alloc.h ./cpp/ggml-alloc.h
 cp ./llama.cpp/ggml/include/ggml-backend.h ./cpp/ggml-backend.h
 cp ./llama.cpp/ggml/include/ggml-metal.h ./cpp/ggml-metal.h
 
 cp ./llama.cpp/ggml/src/ggml.c ./cpp/ggml.c
+cp ./llama.cpp/ggml/src/ggml-cpu.c ./cpp/ggml-cpu.c
 cp ./llama.cpp/ggml/src/ggml-metal.m ./cpp/ggml-metal.m
 cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
 cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
@@ -66,6 +69,9 @@ files=(
   "./cpp/log.cpp"
   "./cpp/ggml.h"
   "./cpp/ggml.c"
+  "./cpp/ggml-cpu.h"
+  "./cpp/ggml-cpu.c"
+  "./cpp/ggml-cpp.h"
   "./cpp/common.h"
   "./cpp/common.cpp"
   "./cpp/ggml-metal.h"
