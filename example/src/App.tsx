@@ -7,13 +7,13 @@ import type { DocumentPickerResponse } from 'react-native-document-picker'
 import { Chat, darkTheme } from '@flyerhq/react-native-chat-ui'
 import type { MessageType } from '@flyerhq/react-native-chat-ui'
 import ReactNativeBlobUtil from 'react-native-blob-util'
-import type { LlamaContext } from 'llama.rn'
+import type { LlamaContext } from 'cui-llama.rn'
 import {
   initLlama,
   loadLlamaModelInfo,
   convertJsonSchemaToGrammar,
   // eslint-disable-next-line import/no-unresolved
-} from 'llama.rn'
+} from 'cui-llama.rn'
 import { Bubble } from './Bubble'
 
 const { dirs } = ReactNativeBlobUtil.fs
@@ -330,6 +330,28 @@ export default function App() {
     }
 
     inputMessages.push(systemMessage)
+
+    const msgs = [
+      systemMessage,
+      ...[...messages]
+        .reverse()
+        .map((msg) => {
+          if (
+            !msg.metadata?.system &&
+            msg.metadata?.conversationId === conversationIdRef.current &&
+            msg.metadata?.contextId === context?.id &&
+            msg.type === 'text'
+          ) {
+            return {
+              role: msg.author.id === systemId ? 'assistant' : 'user',
+              content: msg.text,
+            }
+          }
+          return { role: '', content: '' }
+        })
+        .filter((msg) => msg.role),
+      { role: 'user', content: message.text },
+    ]
 
     addMessage(textMessage)
     setInferencing(true)

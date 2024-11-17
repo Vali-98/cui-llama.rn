@@ -18,7 +18,6 @@ cp ./llama.cpp/ggml/src/ggml.c ./cpp/ggml.c
 cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
 cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
 cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
-cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
 cp ./llama.cpp/ggml/src/ggml-backend-impl.h ./cpp/ggml-backend-impl.h
 cp ./llama.cpp/ggml/src/ggml-backend-reg.cpp ./cpp/ggml-backend-reg.cpp
 cp ./llama.cpp/ggml/src/ggml-common.h ./cpp/ggml-common.h
@@ -107,7 +106,6 @@ files_add_lm_prefix=(
   "./cpp/ggml-alloc.c"
   "./cpp/ggml-backend.h"
   "./cpp/ggml-backend.cpp"
-  "./cpp/ggml-backend.cpp"
   "./cpp/ggml-backend-impl.h"
   "./cpp/ggml-backend-reg.cpp"
   "./cpp/ggml-cpu-impl.h"
@@ -186,7 +184,9 @@ yarn example
 # patch -p0 -d ./cpp < ./scripts/llama.cpp.patch
 # patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
 # patch -p0 -d ./cpp < ./scripts/ggml.c.patch
-
+patch -p0 -d ./cpp < ./scripts/ggml-cpu-aarch64.c.patch
+patch -p0 -d ./cpp < ./scripts/ggml-quants.c.patch
+patch -p0 -d ./cpp < ./scripts/sgemm.cpp.patch
 
 if [ "$OS" = "Darwin" ]; then
   # Build metallib (~1.4MB)

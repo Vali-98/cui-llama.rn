@@ -625,18 +625,7 @@ struct llama_rn_context
         if (!data) {
             return std::vector<float>(n_embd, 0.0f);
         }
-        float *data;
-        
-        if(params.pooling_type == 0){
-            data = llama_get_embeddings(ctx);
-        }
-        else {
-            data = llama_get_embeddings_seq(ctx, 0);
-        }
-        
-        if(!data) {
-            return std::vector<float>(n_embd, 0.0f);
-        }
+
         std::vector<float> embedding(data, data + n_embd), out(data, data + n_embd);
         common_embd_normalize(embedding.data(), out.data(), n_embd, params.embd_normalize);
         return out;
