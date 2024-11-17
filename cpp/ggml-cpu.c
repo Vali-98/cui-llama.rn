@@ -1,13 +1,15 @@
 #define _CRT_SECURE_NO_DEPRECATE // Disables "unsafe" warnings on Windows
 #define _USE_MATH_DEFINES // For M_PI on MSVC
 
-#include "ggml-aarch64.h"
 #include "ggml-backend-impl.h"
 #include "ggml-backend.h"
+#include "ggml-cpu-aarch64.h"
 #include "ggml-cpu-impl.h"
 #include "ggml-cpu.h"
 #include "ggml-impl.h"
 #include "ggml-quants.h"
+#include "ggml-cpu-quants.h"
+#include "ggml-threading.h"
 #include "ggml.h"
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
@@ -42,7 +44,7 @@
 #endif
 
 #ifdef LM_GGML_USE_LLAMAFILE
-#include <llamafile/sgemm.h>
+#include "llamafile/sgemm.h"
 #endif
 
 #if defined(_MSC_VER)
@@ -103,9 +105,6 @@ static lm_ggml_fp16_t lm_ggml_table_gelu_f16[1 << 16];
 
 // precomputed quick gelu table for f16 (128 KB)
 static lm_ggml_fp16_t lm_ggml_table_gelu_quick_f16[1 << 16];
-
-// precomputed f32 table for f16 (256 KB) (ggml-impl.h)
-float lm_ggml_table_f32_f16[1 << 16];
 
 #if defined(__ARM_ARCH)
 struct lm_ggml_arm_arch_features_type {
@@ -261,11 +260,13 @@ static const struct lm_ggml_type_traits_cpu type_traits_cpu[LM_GGML_TYPE_COUNT] 
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_F16] = {
+        .from_float               = (lm_ggml_from_float_t) lm_ggml_fp32_to_fp16_row,
         .vec_dot                  = (lm_ggml_vec_dot_t) lm_ggml_vec_dot_f16,
         .vec_dot_type             = LM_GGML_TYPE_F16,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q4_0] = {
+        .from_float               = quantize_row_q4_0,
         .vec_dot                  = lm_ggml_vec_dot_q4_0_q8_0,
         .vec_dot_type             = LM_GGML_TYPE_Q8_0,
 #if defined (__ARM_FEATURE_MATMUL_INT8)
@@ -275,6 +276,7 @@ static const struct lm_ggml_type_traits_cpu type_traits_cpu[LM_GGML_TYPE_COUNT] 
 #endif
     },
     [LM_GGML_TYPE_Q4_1] = {
+        .from_float               = quantize_row_q4_1,
         .vec_dot                  = lm_ggml_vec_dot_q4_1_q8_1,
         .vec_dot_type             = LM_GGML_TYPE_Q8_1,
 #if defined (__ARM_FEATURE_MATMUL_INT8)
@@ -283,27 +285,20 @@ static const struct lm_ggml_type_traits_cpu type_traits_cpu[LM_GGML_TYPE_COUNT] 
         .nrows                    = 1,
 #endif
     },
-    [4] = { // LM_GGML_TYPE_Q4_2
-        .vec_dot                  = NULL,
-        .vec_dot_type             = LM_GGML_TYPE_COUNT,
-        .nrows                    = 1,
-    },
-    [5] = { // LM_GGML_TYPE_Q4_3
-        .vec_dot                  = NULL,
-        .vec_dot_type             = LM_GGML_TYPE_COUNT,
-        .nrows                    = 1,
-    },
     [LM_GGML_TYPE_Q5_0] = {
+        .from_float               = quantize_row_q5_0,
         .vec_dot                  = lm_ggml_vec_dot_q5_0_q8_0,
         .vec_dot_type             = LM_GGML_TYPE_Q8_0,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q5_1] = {
+        .from_float               = quantize_row_q5_1,
         .vec_dot                  = lm_ggml_vec_dot_q5_1_q8_1,
         .vec_dot_type             = LM_GGML_TYPE_Q8_1,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q8_0] = {
+        .from_float               = quantize_row_q8_0,
         .from_float_to_mat        = quantize_mat_q8_0,
         .vec_dot                  = lm_ggml_vec_dot_q8_0_q8_0,
         .vec_dot_type             = LM_GGML_TYPE_Q8_0,
@@ -314,85 +309,106 @@ static const struct lm_ggml_type_traits_cpu type_traits_cpu[LM_GGML_TYPE_COUNT] 
 #endif
     },
     [LM_GGML_TYPE_Q8_1] = {
+        .from_float               = quantize_row_q8_1,
         .vec_dot_type             = LM_GGML_TYPE_Q8_1,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q2_K] = {
+        .from_float               = quantize_row_q2_K,
         .vec_dot                  = lm_ggml_vec_dot_q2_K_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q3_K] = {
+        .from_float               = quantize_row_q3_K,
         .vec_dot                  = lm_ggml_vec_dot_q3_K_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q4_K] = {
+        .from_float               = quantize_row_q4_K,
         .vec_dot                  = lm_ggml_vec_dot_q4_K_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q5_K] = {
+        .from_float               = quantize_row_q5_K,
         .vec_dot                  = lm_ggml_vec_dot_q5_K_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q6_K] = {
+        .from_float               = quantize_row_q6_K,
         .vec_dot                  = lm_ggml_vec_dot_q6_K_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ2_XXS] = {
+        .from_float               = NULL,
         .vec_dot                  = lm_ggml_vec_dot_iq2_xxs_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ2_XS] = {
+        .from_float               = NULL,
         .vec_dot                  = lm_ggml_vec_dot_iq2_xs_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ3_XXS] = {
+        // NOTE: from_float for iq3 and iq2_s was removed because these quants require initialization in lm_ggml_quantize_init
+        //.from_float               = quantize_row_iq3_xxs,
         .vec_dot                  = lm_ggml_vec_dot_iq3_xxs_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ3_S] = {
+        //.from_float               = quantize_row_iq3_s,
         .vec_dot                  = lm_ggml_vec_dot_iq3_s_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ2_S] = {
+        //.from_float               = quantize_row_iq2_s,
         .vec_dot                  = lm_ggml_vec_dot_iq2_s_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ1_S] = {
+        .from_float               = NULL,
         .vec_dot                  = lm_ggml_vec_dot_iq1_s_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ1_M] = {
+        .from_float               = NULL,
         .vec_dot                  = lm_ggml_vec_dot_iq1_m_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ4_NL] = {
+        .from_float               = quantize_row_iq4_nl,
         .vec_dot                  = lm_ggml_vec_dot_iq4_nl_q8_0,
         .vec_dot_type             = LM_GGML_TYPE_Q8_0,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_IQ4_XS] = {
+        .from_float               = quantize_row_iq4_xs,
         .vec_dot                  = lm_ggml_vec_dot_iq4_xs_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
+    [LM_GGML_TYPE_Q8_K] = {
+        .from_float               = quantize_row_q8_K,
+    },
     [LM_GGML_TYPE_BF16] = {
+        .from_float               = (lm_ggml_from_float_t) lm_ggml_fp32_to_bf16_row,
         .vec_dot                  = (lm_ggml_vec_dot_t) lm_ggml_vec_dot_bf16,
         .vec_dot_type             = LM_GGML_TYPE_BF16,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_Q4_0_4_4] = {
+        .from_float               = NULL,
         .vec_dot                  = NULL,
         .vec_dot_type             = LM_GGML_TYPE_Q8_0,
         .nrows                    = 1,
@@ -401,6 +417,7 @@ static const struct lm_ggml_type_traits_cpu type_traits_cpu[LM_GGML_TYPE_COUNT] 
         .gemm                     = lm_ggml_gemm_q4_0_4x4_q8_0,
     },
     [LM_GGML_TYPE_Q4_0_4_8] = {
+        .from_float               = NULL,
         .vec_dot                  = NULL,
         .vec_dot_type             = LM_GGML_TYPE_Q8_0,
         .nrows                    = 1,
@@ -409,17 +426,22 @@ static const struct lm_ggml_type_traits_cpu type_traits_cpu[LM_GGML_TYPE_COUNT] 
         .gemm                     = lm_ggml_gemm_q4_0_4x8_q8_0,
     },
     [LM_GGML_TYPE_Q4_0_8_8] = {
+        .from_float               = NULL,
+        .vec_dot                  = NULL,
+        .vec_dot_type             = LM_GGML_TYPE_Q8_0,
         .nrows                    = 1,
         .ncols                    = 8,
         .gemv                     = lm_ggml_gemv_q4_0_8x8_q8_0,
         .gemm                     = lm_ggml_gemm_q4_0_8x8_q8_0,
     },
     [LM_GGML_TYPE_TQ1_0] = {
+        .from_float               = quantize_row_tq1_0,
         .vec_dot                  = lm_ggml_vec_dot_tq1_0_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [LM_GGML_TYPE_TQ2_0] = {
+        .from_float               = quantize_row_tq2_0,
         .vec_dot                  = lm_ggml_vec_dot_tq2_0_q8_K,
         .vec_dot_type             = LM_GGML_TYPE_Q8_K,
         .nrows                    = 1,
@@ -1447,8 +1469,12 @@ static void lm_ggml_vec_dot_bf16(int n, float * restrict s, size_t bs, lm_ggml_b
     sumf += (lm_ggml_float)_mm512_reduce_add_ps(c2);
 
 #undef LOAD
-#elif defined(__AVX2__)
+#elif defined(__AVX2__) || defined(__AVX__)
+#if defined(__AVX2__)
 #define LOAD(p) _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(_mm_loadu_si128((const __m128i *)(p))), 16))
+#else
+#define LOAD(p) _mm256_castsi256_ps(_mm256_insertf128_si256(_mm256_castsi128_si256(_mm_slli_epi32(_mm_cvtepu16_epi32(_mm_loadu_si128((const __m128i *)(p))), 16)), (_mm_slli_epi32(_mm_cvtepu16_epi32(_mm_bsrli_si128(_mm_loadu_si128((const __m128i *)(p)), 8)), 16)), 1))
+#endif
     __m256 c1 = _mm256_setzero_ps();
     __m256 c2 = _mm256_setzero_ps();
     __m256 c3 = _mm256_setzero_ps();
@@ -2248,22 +2274,7 @@ struct lm_ggml_state {
     struct lm_ggml_numa_nodes numa;
 };
 
-// global state
 static struct lm_ggml_state g_state = {0};
-static atomic_flag g_state_critical = ATOMIC_FLAG_INIT;
-
-// TODO: move to threading file
-// critical section via spin lock
-void lm_ggml_critical_section_start(void) {
-    while (atomic_flag_test_and_set(&g_state_critical)) {
-        // spin
-        sched_yield();
-    }
-}
-
-void lm_ggml_critical_section_end(void) {
-    atomic_flag_clear(&g_state_critical);
-}
 
 static void lm_ggml_barrier(struct lm_ggml_threadpool * tp) {
     int n_threads = atomic_load_explicit(&tp->n_threads_cur, memory_order_relaxed);
@@ -2995,8 +3006,8 @@ static void lm_ggml_compute_forward_dup_f16(
                         id += ne00 * (ne01 - ir1);
                     }
                 }
-            } else if (lm_ggml_get_type_traits(dst->type)->from_float) {
-                lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits(dst->type)->from_float;
+            } else if (lm_ggml_get_type_traits_cpu(dst->type)->from_float) {
+                lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits_cpu(dst->type)->from_float;
                 float * src0_f32 = (float *) params->wdata + (ne00 + CACHE_LINE_SIZE_F32) * ith;
 
                 size_t id = 0;
@@ -3276,8 +3287,8 @@ static void lm_ggml_compute_forward_dup_bf16(
                         id += ne00 * (ne01 - ir1);
                     }
                 }
-            } else if (lm_ggml_get_type_traits(dst->type)->from_float) {
-                lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits(dst->type)->from_float;
+            } else if (lm_ggml_get_type_traits_cpu(dst->type)->from_float) {
+                lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits_cpu(dst->type)->from_float;
                 float * src0_f32 = (float *) params->wdata + (ne00 + CACHE_LINE_SIZE_F32) * ith;
 
                 size_t id = 0;
@@ -3592,8 +3603,8 @@ static void lm_ggml_compute_forward_dup_f32(
                         id += rs * (ne01 - ir1);
                     }
                 }
-            } else if (lm_ggml_get_type_traits(dst->type)->from_float) {
-                lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits(dst->type)->from_float;
+            } else if (lm_ggml_get_type_traits_cpu(dst->type)->from_float) {
+                lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits_cpu(dst->type)->from_float;
 
                 size_t id = 0;
                 size_t rs = nb0 * (ne00 / lm_ggml_blck_size(dst->type));
@@ -4375,7 +4386,7 @@ static void lm_ggml_compute_forward_add_q_f32(
     const enum lm_ggml_type type = src0->type;
     const enum lm_ggml_type dtype = dst->type;
     lm_ggml_to_float_t const dequantize_row_q = lm_ggml_get_type_traits(type)->to_float;
-    lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits(dtype)->from_float;
+    lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits_cpu(dtype)->from_float;
 
     // we don't support permuted src0 or src1
     LM_GGML_ASSERT(nb00 == lm_ggml_type_size(type));
@@ -4677,7 +4688,7 @@ static void lm_ggml_compute_forward_add1_q_f32(
 
     const enum lm_ggml_type type = src0->type;
     lm_ggml_to_float_t const dequantize_row_q = lm_ggml_get_type_traits(type)->to_float;
-    lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits(type)->from_float;
+    lm_ggml_from_float_t const quantize_row_q = lm_ggml_get_type_traits_cpu(type)->from_float;
 
     // we don't support permuted src0
     LM_GGML_ASSERT(nb00 == lm_ggml_type_size(type));
@@ -7323,6 +7334,7 @@ static void lm_ggml_compute_forward_group_norm(
 static void lm_ggml_compute_forward_mul_mat_one_chunk(
     const struct lm_ggml_compute_params * params,
     struct lm_ggml_tensor * dst,
+    const enum lm_ggml_type type,
     const int64_t num_rows_per_vec_dot,
     const int64_t ir0_start,
     const int64_t ir0_end,
@@ -7333,8 +7345,6 @@ static void lm_ggml_compute_forward_mul_mat_one_chunk(
     const struct lm_ggml_tensor * src1 = dst->src[1];
 
     LM_GGML_TENSOR_BINARY_OP_LOCALS
-
-    const enum lm_ggml_type type = src0->type;
 
     const bool src1_cont = lm_ggml_is_contiguous(src1);
 
@@ -7423,10 +7433,14 @@ static void lm_ggml_compute_forward_mul_mat(
     const int ith = params->ith;
     const int nth = params->nth;
 
-    const enum lm_ggml_type type = src0->type;
+    enum lm_ggml_type type = src0->type;
+
+    if (src0->buffer && lm_ggml_backend_cpu_buft_is_aarch64(src0->buffer->buft)) {
+        type = (enum lm_ggml_type)(intptr_t)src0->extra;
+    }
 
     enum lm_ggml_type           const vec_dot_type         = type_traits_cpu[type].vec_dot_type;
-    lm_ggml_from_float_t        const from_float           = lm_ggml_get_type_traits(vec_dot_type)->from_float;
+    lm_ggml_from_float_t        const from_float           = type_traits_cpu[vec_dot_type].from_float;
     lm_ggml_from_float_to_mat_t const from_float_to_mat    = type_traits_cpu[vec_dot_type].from_float_to_mat;
     int64_t                  const vec_dot_num_rows     = type_traits_cpu[type].nrows;
     int64_t                  const matmul_num_cols      = type_traits_cpu[type].ncols;
@@ -7462,15 +7476,15 @@ static void lm_ggml_compute_forward_mul_mat(
     if (src1_cont) {
         for (int64_t i13 = 0; i13 < ne13; i13++)
             for (int64_t i12 = 0; i12 < ne12; i12++)
-                if (!llamafile_sgemm(ne01, ne11, ne00/lm_ggml_blck_size(src0->type),
+                if (!llamafile_sgemm(ne01, ne11, ne00/lm_ggml_blck_size(type),
                                      (const char *)src0->data + i12/r2*nb02 + i13/r3*nb03,
-                                     nb01/lm_ggml_type_size(src0->type),
+                                     nb01/lm_ggml_type_size(type),
                                      (const char *)src1->data + i12*nb12 + i13*nb13,
                                      nb11/lm_ggml_type_size(src1->type),
                                      (char *)dst->data + i12*nb2 + i13*nb3,
                                      nb1/lm_ggml_type_size(dst->type),
                                      ith, nth,
-                                     src0->type,
+                                     type,
                                      src1->type,
                                      dst->type))
                     goto UseGgmlGemm1;
@@ -7523,15 +7537,15 @@ UseGgmlGemm1:;
 
         for (int64_t i13 = 0; i13 < ne13; i13++)
             for (int64_t i12 = 0; i12 < ne12; i12++)
-                if (!llamafile_sgemm(ne01, ne11, ne00/lm_ggml_blck_size(src0->type),
+                if (!llamafile_sgemm(ne01, ne11, ne00/lm_ggml_blck_size(type),
                                      (const char *)src0->data + i12/r2*nb02 + i13/r3*nb03,
-                                     nb01/lm_ggml_type_size(src0->type),
+                                     nb01/lm_ggml_type_size(type),
                                      (const char *)wdata + (i12*ne11 + i13*ne12*ne11)*row_size,
                                      row_size/lm_ggml_type_size(vec_dot_type),
                                      (char *)dst->data + i12*nb2 + i13*nb3,
                                      nb1/lm_ggml_type_size(dst->type),
                                      ith, nth,
-                                     src0->type,
+                                     type,
                                      vec_dot_type,
                                      dst->type))
                     goto UseGgmlGemm2;
@@ -7616,7 +7630,7 @@ UseGgmlGemm2:;
         const int64_t ir1_start = dr1 * ith1;
         const int64_t ir1_end = MIN(ir1_start + dr1, nr1);
 
-        lm_ggml_compute_forward_mul_mat_one_chunk(params, dst, num_rows_per_vec_dot, ir0_start, ir0_end, ir1_start, ir1_end);
+        lm_ggml_compute_forward_mul_mat_one_chunk(params, dst, type, num_rows_per_vec_dot, ir0_start, ir0_end, ir1_start, ir1_end);
 
         if (nth >= nchunk0 * nchunk1) {
             break;
@@ -7647,7 +7661,7 @@ static void lm_ggml_compute_forward_mul_mat_id(
 
     lm_ggml_vec_dot_t    const vec_dot         = type_traits_cpu[type].vec_dot;
     enum lm_ggml_type    const vec_dot_type    = type_traits_cpu[type].vec_dot_type;
-    lm_ggml_from_float_t const from_float      = lm_ggml_get_type_traits(vec_dot_type)->from_float;
+    lm_ggml_from_float_t const from_float      = type_traits_cpu[vec_dot_type].from_float;
     int64_t           const matmul_num_cols = type_traits_cpu[type].ncols;
     lm_ggml_gemv_t       const gemv            = type_traits_cpu[type].gemv;
 
@@ -9157,12 +9171,6 @@ static void rope_yarn(
     *sin_theta = sinf(theta) * mscale;
 }
 
-// Apparently solving `n_rot = 2pi * x * base^((2 * max_pos_emb) / n_dims)` for x, we get
-// `corr_dim(n_rot) = n_dims * log(max_pos_emb / (n_rot * 2pi)) / (2 * log(base))`
-static float lm_ggml_rope_yarn_corr_dim(int n_dims, int n_ctx_orig, float n_rot, float base) {
-    return n_dims * logf(n_ctx_orig / (n_rot * 2 * (float)M_PI)) / (2 * logf(base));
-}
-
 static void lm_ggml_rope_cache_init(
      float theta_base, float freq_scale, const float * freq_factors, float corr_dims[2], int64_t ne0, float ext_factor, float mscale,
      float * cache, float sin_sign, float theta_scale) {
@@ -9177,16 +9185,6 @@ static void lm_ggml_rope_cache_init(
 
         theta *= theta_scale;
     }
-}
-
-void lm_ggml_rope_yarn_corr_dims(
-    int n_dims, int n_ctx_orig, float freq_base, float beta_fast, float beta_slow, float dims[2]
-) {
-    // start and end correction dims
-    float start = floorf(lm_ggml_rope_yarn_corr_dim(n_dims, n_ctx_orig, beta_fast, freq_base));
-    float end   =  ceilf(lm_ggml_rope_yarn_corr_dim(n_dims, n_ctx_orig, beta_slow, freq_base));
-    dims[0] = MAX(0, start);
-    dims[1] = MIN(n_dims - 1, end);
 }
 
 static void lm_ggml_compute_forward_rope_f32(
@@ -10666,7 +10664,7 @@ static void lm_ggml_compute_forward_flash_attn_ext_f16(
     const float m1 = powf(2.0f, -(max_bias / 2.0f) / n_head_log2);
 
     enum lm_ggml_type    const k_vec_dot_type = type_traits_cpu[k->type].vec_dot_type;
-    lm_ggml_from_float_t const q_to_vec_dot   = lm_ggml_get_type_traits(k_vec_dot_type)->from_float;
+    lm_ggml_from_float_t const q_to_vec_dot   = type_traits_cpu[k_vec_dot_type].from_float;
     lm_ggml_vec_dot_t    const kq_vec_dot     = type_traits_cpu[k->type].vec_dot;
     lm_ggml_to_float_t   const v_to_float     = lm_ggml_get_type_traits(v->type)->to_float;
 
@@ -11642,24 +11640,30 @@ static void lm_ggml_compute_forward_add_rel_pos(
     }
 }
 
-// lm_ggml_compute_forward_rwkv_wkv
+// lm_ggml_compute_forward_rwkv_wkv6
 
-static void lm_ggml_compute_forward_rwkv_wkv_f32(
+static void lm_ggml_compute_forward_rwkv_wkv6_f32(
         const struct lm_ggml_compute_params * params,
         struct lm_ggml_tensor * dst) {
-    const size_t T = dst->src[1]->ne[3];
-    const size_t C = dst->ne[0];
-    const size_t H = dst->src[1]->ne[2];
-    const size_t n_seqs = dst->src[5]->ne[1];
+    const int64_t T = dst->src[1]->ne[3];
+    const int64_t C = dst->ne[0];
+    const int64_t HEADS = dst->src[1]->ne[2];
+    const int64_t n_seqs = dst->src[5]->ne[1];
+    const int64_t head_size = C / HEADS;
 
     float * dst_data = (float *) dst->data;
     float * state = ((float *) dst->data) + C * T;
 
-    if (params->ith != 0) {
+    const int ith = params->ith;
+    const int nth = params->nth;
+
+    if (ith >= HEADS) {
         return;
     }
 
-    memset(dst_data, 0, T * C * sizeof(float));
+    const int h_start = (HEADS * ith) / nth;
+    const int h_end = ((HEADS * (ith + 1)) / nth < HEADS) ?
+                (HEADS * (ith + 1)) / nth : HEADS;
 
     float * k =          (float *) dst->src[0]->data;
     float * v =          (float *) dst->src[1]->data;
@@ -11667,54 +11671,160 @@ static void lm_ggml_compute_forward_rwkv_wkv_f32(
     float * time_faaaa = (float *) dst->src[3]->data;
     float * time_decay = (float *) dst->src[4]->data;
 
-    size_t t_stride = H * (C / H);
+    size_t t_stride = HEADS * head_size; // Same to C
 
-    size_t h_stride = C / H;
-    size_t h_stride_2d = (C / H) * (C / H);
+    size_t h_stride = C / HEADS;
+    LM_GGML_ASSERT(C % HEADS == 0); // C must be divisible by HEADS
+    size_t h_stride_2d = head_size * head_size;
 
-    // basically fused operations:
-    // dst = r @ (time_faaaa * (k @ v) + state),
-    // state = time_decay * state + (k @ v),
-    // recursive through each token
-    for (size_t t = 0; t < T; t++) {
-        size_t t_offset = t * t_stride;
-        size_t state_offset = (C / H) * C * (t / (T / n_seqs));
-        float * state_cur = state + state_offset;
-        float * state_prev = t % (T / n_seqs) ? state_cur : (float*)dst->src[5]->data + state_offset;
+    if (ith == 0) {
+        memset(dst_data, 0, T * C * sizeof(float));
+    }
+    lm_ggml_barrier(params->threadpool);
 
-        for (size_t h = 0; h < H; h++) {
-            size_t h_offset = h * h_stride;
-            size_t t_h_offset = t_offset + h_offset;
-            size_t h_2d_offset = h * h_stride_2d;
 
-            for (size_t i = 0; i < C / H; i++) {
-                size_t t_h_i_offset = t_h_offset + i;
-                size_t h_i_offset = h_offset + i;
-                size_t h_2d_i_offset = h_2d_offset + i * h_stride;
+    #if defined(__AVX__) && !defined(__AVX512F__)
+        #define LM_GGML_F32X LM_GGML_F32x8
+        #define LM_GGML_F32X_SET1 LM_GGML_F32x8_SET1
+        #define LM_GGML_F32X_LOAD LM_GGML_F32x8_LOAD
+        #define LM_GGML_F32X_STORE LM_GGML_F32x8_STORE
+        #define LM_GGML_F32X_MUL LM_GGML_F32x8_MUL
+        #define LM_GGML_F32X_FMA LM_GGML_F32x8_FMA
+        #define WKV_VECTOR_SIZE 8
+    #elif defined(__AVX512F__)
+        #define LM_GGML_F32X LM_GGML_F32x16
+        #define LM_GGML_F32X_SET1 LM_GGML_F32x16_SET1
+        #define LM_GGML_F32X_LOAD LM_GGML_F32x16_LOAD
+        #define LM_GGML_F32X_STORE LM_GGML_F32x16_STORE
+        #define LM_GGML_F32X_MUL LM_GGML_F32x16_MUL
+        #define LM_GGML_F32X_FMA LM_GGML_F32x16_FMA
+        #define WKV_VECTOR_SIZE 16
+    #elif defined(__ARM_NEON) && defined(__aarch64__)
+        #define LM_GGML_F32X LM_GGML_F32x4
+        #define LM_GGML_F32X_SET1 LM_GGML_F32x4_SET1
+        #define LM_GGML_F32X_LOAD LM_GGML_F32x4_LOAD
+        #define LM_GGML_F32X_STORE LM_GGML_F32x4_STORE
+        #define LM_GGML_F32X_MUL LM_GGML_F32x4_MUL
+        #define LM_GGML_F32X_FMA LM_GGML_F32x4_FMA
+        #define WKV_VECTOR_SIZE 4
+    #endif
 
-                float k_val = k[t_h_i_offset];
-                float r_val = r[t_h_i_offset];
-                float time_faaaa_val = time_faaaa[h_i_offset];
-                // RWKV v6: different time_decay for each token.
-                float time_decay_val = time_decay[t_h_i_offset];
+    #ifdef WKV_VECTOR_SIZE
+        const int64_t vec_count = head_size / WKV_VECTOR_SIZE;
 
-                for (size_t j = 0; j < C / H; j ++) {
-                    size_t t_h_j_offset = t_h_offset + j;
-                    size_t h_2d_i_j_offset = h_2d_i_offset + j;
+        for (int64_t t = 0; t < T; t++) {
+            size_t t_offset = t * t_stride;
+            size_t state_offset = head_size * C * (t / (T / n_seqs));
+            float * state_cur = state + state_offset;
+            float * state_prev = t % (T / n_seqs) ? state_cur : (float*)dst->src[5]->data + state_offset;
 
-                    float v_val = v[t_h_j_offset];
-                    float kv_val = v_val * k_val;
-                    float prev_state_val = state_prev[h_2d_i_j_offset];
-                    float temp_val = kv_val * time_faaaa_val + prev_state_val;
-                    dst_data[t_h_j_offset] += temp_val * r_val;
-                    state_cur[h_2d_i_j_offset] = prev_state_val * time_decay_val + kv_val;
+            for (int64_t h = h_start; h < h_end; h++) {
+                size_t h_offset = h * h_stride;
+                size_t t_h_offset = t_offset + h_offset;
+                size_t h_2d_offset = h * h_stride_2d;
+
+                for (int64_t i = 0; i < head_size; i++) {
+                    size_t t_h_i_offset = t_h_offset + i;
+                    size_t h_i_offset = h_offset + i;
+                    size_t h_2d_i_offset = h_2d_offset + i * h_stride;
+
+                    float k_val = k[t_h_i_offset];
+                    float r_val = r[t_h_i_offset];
+                    float time_faaaa_val = time_faaaa[h_i_offset];
+                    float time_decay_val = time_decay[t_h_i_offset];
+
+                    // Broadcast scalar values to vectors
+                    LM_GGML_F32X k_vec = LM_GGML_F32X_SET1(k_val);
+                    LM_GGML_F32X r_vec = LM_GGML_F32X_SET1(r_val);
+                    LM_GGML_F32X time_faaaa_vec = LM_GGML_F32X_SET1(time_faaaa_val);
+                    LM_GGML_F32X time_decay_vec = LM_GGML_F32X_SET1(time_decay_val);
+
+                    for (int64_t j = 0; j < vec_count; j++) {
+                        size_t base_j = j * WKV_VECTOR_SIZE;
+                        size_t t_h_j_offset = t_h_offset + base_j;
+                        size_t h_2d_i_j_offset = h_2d_i_offset + base_j;
+
+                        // Load x elements at once
+                        LM_GGML_F32X v_vec = LM_GGML_F32X_LOAD(&v[t_h_j_offset]);
+                        LM_GGML_F32X prev_state_vec = LM_GGML_F32X_LOAD(&state_prev[h_2d_i_j_offset]);
+                        LM_GGML_F32X dst_vec = LM_GGML_F32X_LOAD(&dst_data[t_h_j_offset]);
+
+                        // Compute kv = v * k
+                        LM_GGML_F32X kv_vec = LM_GGML_F32X_MUL(v_vec, k_vec);
+
+                        // Compute temp = kv * time_faaaa + prev_state
+                        LM_GGML_F32X temp_vec = LM_GGML_F32X_FMA(prev_state_vec, kv_vec, time_faaaa_vec);
+
+                        // Update dst: dst += temp * r
+                        dst_vec = LM_GGML_F32X_FMA(dst_vec, temp_vec, r_vec);
+                        LM_GGML_F32X_STORE(&dst_data[t_h_j_offset], dst_vec);
+
+                        // Update state: state = prev_state * time_decay + kv
+                        LM_GGML_F32X new_state_vec = LM_GGML_F32X_FMA(kv_vec, prev_state_vec, time_decay_vec);
+                        LM_GGML_F32X_STORE(&state_cur[h_2d_i_j_offset], new_state_vec);
+                    }
+
+                    // Handle remaining elements, this will not be used.
+                    for (int64_t j = vec_count * WKV_VECTOR_SIZE; j < head_size; j++) {
+                        size_t t_h_j_offset = t_h_offset + j;
+                        size_t h_2d_i_j_offset = h_2d_i_offset + j;
+                        float v_val = v[t_h_j_offset];
+                        float kv_val = v_val * k_val;
+                        float prev_state_val = state_prev[h_2d_i_j_offset];
+                        float temp_val = kv_val * time_faaaa_val + prev_state_val;
+                        dst_data[t_h_j_offset] += temp_val * r_val;
+                        state_cur[h_2d_i_j_offset] = prev_state_val * time_decay_val + kv_val;
+                    }
                 }
             }
         }
-    }
+
+    #else
+        // basically fused operations:
+        // dst = r @ (time_faaaa * (k @ v) + state),
+        // state = time_decay * state + (k @ v),
+        // recursive through each token
+        for (int64_t t = 0; t < T; t++) {
+            size_t t_offset = t * t_stride;
+            size_t state_offset = head_size * C * (t / (T / n_seqs));
+            float * state_cur = state + state_offset;
+            float * state_prev = t % (T / n_seqs) ? state_cur : (float*)dst->src[5]->data + state_offset;
+
+            for (int64_t h = h_start; h < h_end; h++) {
+                size_t h_offset = h * h_stride;
+                size_t t_h_offset = t_offset + h_offset;
+                size_t h_2d_offset = h * h_stride_2d;
+
+                for (int64_t i = 0; i < head_size; i++) {
+                    size_t t_h_i_offset = t_h_offset + i;
+                    size_t h_i_offset = h_offset + i;
+                    size_t h_2d_i_offset = h_2d_offset + i * h_stride;
+
+                    float k_val = k[t_h_i_offset];
+                    float r_val = r[t_h_i_offset];
+                    float time_faaaa_val = time_faaaa[h_i_offset];
+                    // RWKV v6: different time_decay for each token.
+                    float time_decay_val = time_decay[t_h_i_offset];
+
+                    for (int64_t j = 0; j < head_size; j++) {
+                        size_t t_h_j_offset = t_h_offset + j;
+                        size_t h_2d_i_j_offset = h_2d_i_offset + j;
+
+                        float v_val = v[t_h_j_offset];
+                        float kv_val = v_val * k_val;
+                        float prev_state_val = state_prev[h_2d_i_j_offset];
+                        float temp_val = kv_val * time_faaaa_val + prev_state_val;
+                        dst_data[t_h_j_offset] += temp_val * r_val;
+                        state_cur[h_2d_i_j_offset] = prev_state_val * time_decay_val + kv_val;
+                    }
+                }
+            }
+        }
+    #endif
 }
 
-static void lm_ggml_compute_forward_rwkv_wkv(
+
+static void lm_ggml_compute_forward_rwkv_wkv6(
         const struct lm_ggml_compute_params * params,
         struct lm_ggml_tensor * dst) {
 
@@ -11723,7 +11833,7 @@ static void lm_ggml_compute_forward_rwkv_wkv(
     switch (src0->type) {
         case LM_GGML_TYPE_F32:
             {
-                lm_ggml_compute_forward_rwkv_wkv_f32(params, dst);
+                lm_ggml_compute_forward_rwkv_wkv6_f32(params, dst);
             } break;
         default:
             {
@@ -12475,9 +12585,9 @@ static void lm_ggml_compute_forward(struct lm_ggml_compute_params * params, stru
             {
                 lm_ggml_compute_forward_add_rel_pos(params, tensor);
             } break;
-        case LM_GGML_OP_RWKV_WKV:
+        case LM_GGML_OP_RWKV_WKV6:
             {
-                lm_ggml_compute_forward_rwkv_wkv(params, tensor);
+                lm_ggml_compute_forward_rwkv_wkv6(params, tensor);
             } break;
         case LM_GGML_OP_MAP_UNARY:
             {
@@ -12775,7 +12885,7 @@ static int lm_ggml_get_n_tasks(struct lm_ggml_tensor * node, int n_threads) {
         case LM_GGML_OP_WIN_PART:
         case LM_GGML_OP_WIN_UNPART:
         case LM_GGML_OP_GET_REL_POS:
-        case LM_GGML_OP_RWKV_WKV:
+        case LM_GGML_OP_RWKV_WKV6:
         case LM_GGML_OP_MAP_UNARY:
         case LM_GGML_OP_MAP_BINARY:
         case LM_GGML_OP_MAP_CUSTOM1_F32:
@@ -13643,6 +13753,151 @@ enum lm_ggml_status lm_ggml_graph_compute_with_ctx(struct lm_ggml_context * ctx,
     cplan.work_data = (uint8_t *)lm_ggml_new_buffer(ctx, cplan.work_size);
 
     return lm_ggml_graph_compute(cgraph, &cplan);
+}
+
+
+int lm_ggml_cpu_has_avx(void) {
+#if defined(__AVX__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_avx_vnni(void) {
+#if defined(__AVXVNNI__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_avx2(void) {
+#if defined(__AVX2__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_avx512(void) {
+#if defined(__AVX512F__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_avx512_vbmi(void) {
+#if defined(__AVX512VBMI__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_avx512_vnni(void) {
+#if defined(__AVX512VNNI__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_avx512_bf16(void) {
+#if defined(__AVX512BF16__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_amx_int8(void) {
+#if defined(__AMX_INT8__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_fma(void) {
+#if defined(__FMA__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_arm_fma(void) {
+#if defined(__ARM_FEATURE_FMA)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_riscv_v(void) {
+#if defined(__riscv_v_intrinsic)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_f16c(void) {
+#if defined(__F16C__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_fp16_va(void) {
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_wasm_simd(void) {
+#if defined(__wasm_simd128__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_llamafile(void) {
+#if defined(LM_GGML_USE_LLAMAFILE)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_sse3(void) {
+#if defined(__SSE3__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_ssse3(void) {
+#if defined(__SSSE3__)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+int lm_ggml_cpu_has_vsx(void) {
+#if defined(__POWER9_VECTOR__)
+    return 1;
+#else
+    return 0;
+#endif
 }
 
 int lm_ggml_cpu_has_neon(void) {
