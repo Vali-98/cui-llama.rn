@@ -4,10 +4,66 @@
 #include <sstream>
 #include <iostream>
 #include "common.h"
+#include "ggml.h"
 #include "llama.h"
+#include "llama-impl.h"
 #include "sampling.h"
 
 namespace rnllama {
+
+static std::string lm_gguf_data_to_str(enum lm_gguf_type type, const void * data, int i) {
+    switch (type) {
+        case LM_GGUF_TYPE_UINT8:   return std::to_string(((const uint8_t  *)data)[i]);
+        case LM_GGUF_TYPE_INT8:    return std::to_string(((const int8_t   *)data)[i]);
+        case LM_GGUF_TYPE_UINT16:  return std::to_string(((const uint16_t *)data)[i]);
+        case LM_GGUF_TYPE_INT16:   return std::to_string(((const int16_t  *)data)[i]);
+        case LM_GGUF_TYPE_UINT32:  return std::to_string(((const uint32_t *)data)[i]);
+        case LM_GGUF_TYPE_INT32:   return std::to_string(((const int32_t  *)data)[i]);
+        case LM_GGUF_TYPE_UINT64:  return std::to_string(((const uint64_t *)data)[i]);
+        case LM_GGUF_TYPE_INT64:   return std::to_string(((const int64_t  *)data)[i]);
+        case LM_GGUF_TYPE_FLOAT32: return std::to_string(((const float    *)data)[i]);
+        case LM_GGUF_TYPE_FLOAT64: return std::to_string(((const double   *)data)[i]);
+        case LM_GGUF_TYPE_BOOL:    return ((const bool *)data)[i] ? "true" : "false";
+        default:                   return "unknown type: " + std::to_string(type);
+    }
+}
+
+static std::string lm_gguf_kv_to_str(const struct lm_gguf_context * ctx_gguf, int i) {
+    const enum lm_gguf_type type = lm_gguf_get_kv_type(ctx_gguf, i);
+
+    switch (type) {
+        case LM_GGUF_TYPE_STRING:
+            return lm_gguf_get_val_str(ctx_gguf, i);
+        case LM_GGUF_TYPE_ARRAY:
+            {
+                const enum lm_gguf_type arr_type = lm_gguf_get_arr_type(ctx_gguf, i);
+                int arr_n = lm_gguf_get_arr_n(ctx_gguf, i);
+                const void * data = lm_gguf_get_arr_data(ctx_gguf, i);
+                std::stringstream ss;
+                ss << "[";
+                for (int j = 0; j < arr_n; j++) {
+                    if (arr_type == LM_GGUF_TYPE_STRING) {
+                        std::string val = lm_gguf_get_arr_str(ctx_gguf, i, j);
+                        // escape quotes
+                        replace_all(val, "\\", "\\\\");
+                        replace_all(val, "\"", "\\\"");
+                        ss << '"' << val << '"';
+                    } else if (arr_type == LM_GGUF_TYPE_ARRAY) {
+                        ss << "???";
+                    } else {
+                        ss << lm_gguf_data_to_str(arr_type, data, j);
+                    }
+                    if (j < arr_n - 1) {
+                        ss << ", ";
+                    }
+                }
+                ss << "]";
+                return ss.str();
+            }
+        default:
+            return lm_gguf_data_to_str(type, lm_gguf_get_val_data(ctx_gguf, i), 0);
+    }
+}
 
 static void llama_batch_clear(llama_batch *batch) {
     batch->n_tokens = 0;
@@ -160,9 +216,12 @@ struct llama_rn_context
     common_params params;
 
     llama_model *model = nullptr;
+    float loading_progress = 0;
+    bool is_load_interrupted = false;
+
     llama_context *ctx = nullptr;
     common_sampler *ctx_sampling = nullptr;
-  
+
     int n_ctx;
 
     bool truncated = false;
@@ -235,13 +294,16 @@ struct llama_rn_context
     }
 
     bool validateModelChatTemplate() const {
-        llama_chat_message chat[] = {{"user", "test"}};
-
         std::vector<char> model_template(2048, 0); // longest known template is about 1200 bytes
         std::string template_key = "tokenizer.chat_template";
         int32_t res = llama_model_meta_val_str(model, template_key.c_str(), model_template.data(), model_template.size());
-
-        return res >= 0;
+        if (res >= 0) {
+            llama_chat_message chat[] = {{"user", "test"}};
+            std::string tmpl = std::string(model_template.data(), model_template.size());
+            int32_t chat_res = llama_chat_apply_template(model, tmpl.c_str(), chat, 1, true, nullptr, 0);
+            return chat_res > 0;
+        }
+        return res > 0;
     }
 
     void truncatePrompt(std::vector<llama_token> &prompt_tokens) {
@@ -376,7 +438,7 @@ struct llama_rn_context
                 n_eval = params.n_batch;
             }
             if (llama_decode(ctx, llama_batch_get_one(&embd[n_past], n_eval)))
-            {   
+            {
                 LOG_ERROR("failed to eval, n_eval: %d, n_past: %d, n_threads: %d, embd: %s",
                     n_eval,
                     n_past,
@@ -387,7 +449,7 @@ struct llama_rn_context
                 return result;
             }
             n_past += n_eval;
-            
+
             if(is_interrupted) {
                 LOG_INFO("Decoding Interrupted");
                 embd.resize(n_past);
@@ -409,11 +471,11 @@ struct llama_rn_context
             candidates.reserve(llama_n_vocab(model));
 
             result.tok = common_sampler_sample(ctx_sampling, ctx, -1);
-            
+
             llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling);
 
             const int32_t n_probs = params.sparams.n_probs;
-            
+
             // deprecated
             /*if (params.sparams.temp <= 0 && n_probs > 0)
             {
@@ -421,7 +483,7 @@ struct llama_rn_context
                 llama_sampler_init_softmax();
 
             }*/
-            
+
 
             for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
             {
@@ -542,12 +604,25 @@ struct llama_rn_context
         return token_with_probs;
     }
 
-    std::vector<float> getEmbedding()
+    std::vector<float> getEmbedding(common_params &embd_params)
     {
         static const int n_embd = llama_n_embd(llama_get_model(ctx));
-        if (!params.embedding)
+        if (!embd_params.embedding)
         {
-            LOG_WARNING("embedding disabled, embedding: %s", params.embedding);
+            LOG_WARNING("embedding disabled, embedding: %s", embd_params.embedding);
+            return std::vector<float>(n_embd, 0.0f);
+        }
+        float *data;
+
+        const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
+        printf("pooling_type: %d\n", pooling_type);
+        if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
+            data = llama_get_embeddings(ctx);
+        } else {
+            data = llama_get_embeddings_seq(ctx, 0);
+        }
+
+        if (!data) {
             return std::vector<float>(n_embd, 0.0f);
         }
         float *data;

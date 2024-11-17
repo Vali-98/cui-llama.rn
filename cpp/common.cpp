@@ -985,10 +985,6 @@ struct llama_model_params common_model_params_to_llama(const common_params & par
     if (params.n_gpu_layers != -1) {
         mparams.n_gpu_layers = params.n_gpu_layers;
     }
-    
-    mparams.progress_callback_user_data = params.progress_callback_user_data;
-    mparams.progress_callback = params.progress_callback;
-    mparams.vocab_only      = params.vocab_only;
     mparams.rpc_servers     = params.rpc_servers.c_str();
     mparams.main_gpu        = params.main_gpu;
     mparams.split_mode      = params.split_mode;
@@ -1002,6 +998,9 @@ struct llama_model_params common_model_params_to_llama(const common_params & par
         LM_GGML_ASSERT(params.kv_overrides.back().key[0] == 0 && "KV overrides not terminated with empty key");
         mparams.kv_overrides = params.kv_overrides.data();
     }
+
+    mparams.progress_callback = params.progress_callback;
+    mparams.progress_callback_user_data = params.progress_callback_user_data;
 
     return mparams;
 }
@@ -1961,9 +1960,7 @@ void yaml_dump_string_multiline(FILE * stream, const char * prop_name, const cha
 
 void yaml_dump_non_result_info(FILE * stream, const common_params & params, const llama_context * lctx,
                                const std::string & timestamp, const std::vector<int> & prompt_tokens, const char * model_desc) {
-    lm_ggml_cpu_init(); // some ARM features are detected at runtime
-
-    const auto & sparams = params.sparams;
+    const llama_sampling_params & sparams = params.sparams;
 
     fprintf(stream, "build_commit: %s\n",        LLAMA_COMMIT);
     fprintf(stream, "build_number: %d\n",        LLAMA_BUILD_NUMBER);

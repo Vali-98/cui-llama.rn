@@ -19,8 +19,10 @@ cp ./llama.cpp/ggml/src/ggml-cpu.c ./cpp/ggml-cpu.c
 cp ./llama.cpp/ggml/src/ggml-metal.m ./cpp/ggml-metal.m
 cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
 cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
+cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
 cp ./llama.cpp/ggml/src/ggml-backend-impl.h ./cpp/ggml-backend-impl.h
 cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
+cp ./llama.cpp/ggml/src/ggml-cpu-impl.h ./cpp/ggml-cpu-impl.h
 cp ./llama.cpp/ggml/src/ggml-cpu-impl.h ./cpp/ggml-cpu-impl.h
 cp ./llama.cpp/ggml/src/ggml-common.h ./cpp/ggml-common.h
 cp ./llama.cpp/ggml/src/ggml-quants.h ./cpp/ggml-quants.h
@@ -28,10 +30,17 @@ cp ./llama.cpp/ggml/src/ggml-quants.c ./cpp/ggml-quants.c
 cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
 cp ./llama.cpp/ggml/src/ggml-aarch64.h ./cpp/ggml-aarch64.h
 
+cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
+cp ./llama.cpp/ggml/src/ggml-aarch64.h ./cpp/ggml-aarch64.h
+
 cp ./llama.cpp/ggml/src/llamafile/sgemm.h ./cpp/sgemm.h
 cp ./llama.cpp/ggml/src/llamafile/sgemm.cpp ./cpp/sgemm.cpp
 
+
 cp ./llama.cpp/src/llama.cpp ./cpp/llama.cpp
+cp ./llama.cpp/src/llama-impl.h ./cpp/llama-impl.h
+
+cp ./llama.cpp/src/llama-vocab.h ./cpp/llama-vocab.h
 cp ./llama.cpp/src/llama-impl.h ./cpp/llama-impl.h
 
 cp ./llama.cpp/src/llama-vocab.h ./cpp/llama-vocab.h
@@ -39,14 +48,20 @@ cp ./llama.cpp/src/llama-vocab.cpp ./cpp/llama-vocab.cpp
 cp ./llama.cpp/src/llama-grammar.h ./cpp/llama-grammar.h
 cp ./llama.cpp/src/llama-grammar.cpp ./cpp/llama-grammar.cpp
 cp ./llama.cpp/src/llama-sampling.h ./cpp/llama-sampling.h
+cp ./llama.cpp/src/llama-grammar.h ./cpp/llama-grammar.h
+cp ./llama.cpp/src/llama-grammar.cpp ./cpp/llama-grammar.cpp
+cp ./llama.cpp/src/llama-sampling.h ./cpp/llama-sampling.h
 cp ./llama.cpp/src/llama-sampling.cpp ./cpp/llama-sampling.cpp
+
 
 cp ./llama.cpp/src/unicode.h ./cpp/unicode.h
 cp ./llama.cpp/src/unicode.cpp ./cpp/unicode.cpp
 cp ./llama.cpp/src/unicode-data.h ./cpp/unicode-data.h
 cp ./llama.cpp/src/unicode-data.cpp ./cpp/unicode-data.cpp
 
+
 cp ./llama.cpp/common/log.h ./cpp/log.h
+cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/common.h ./cpp/common.h
 cp ./llama.cpp/common/common.cpp ./cpp/common.cpp
@@ -74,6 +89,7 @@ files=(
   "./cpp/ggml-cpp.h"
   "./cpp/common.h"
   "./cpp/common.cpp"
+  "./cpp/ggml-cpp.h"
   "./cpp/ggml-metal.h"
   "./cpp/ggml-metal.m"
   "./cpp/llama.h"
@@ -85,10 +101,13 @@ files=(
   "./cpp/ggml-alloc.c"
   "./cpp/ggml-backend.h"
   "./cpp/ggml-backend.cpp"
+  "./cpp/ggml-backend.cpp"
   "./cpp/ggml-backend-impl.h"
   "./cpp/ggml-impl.h"
   "./cpp/ggml-cpu-impl.h"
+  "./cpp/ggml-cpu-impl.h"
   "./cpp/ggml-common.h"
+  "./cpp/sgemm.h"
   "./cpp/sgemm.h"
   "./cpp/sgemm.cpp"
   "./cpp/json-schema-to-grammar.h"
@@ -98,7 +117,7 @@ files=(
 
 # Loop through each file and run the sed commands
 OS=$(uname)
-for file in "${files[@]}"; do
+for file in "${files_add_lm_prefix[@]}"; do
   # Add prefix to avoid redefinition with other libraries using ggml like whisper.rn
   if [ "$OS" = "Darwin" ]; then
     sed -i '' 's/GGML_/LM_GGML_/g' $file
@@ -112,6 +131,27 @@ for file in "${files[@]}"; do
     sed -i 's/GGUF_/LM_GGUF_/g' $file
     sed -i 's/gguf_/lm_gguf_/g' $file
     sed -i 's/GGMLMetalClass/LMGGMLMetalClass/g' $file
+  fi
+done
+
+files_iq_add_lm_prefix=(
+  "./cpp/ggml-quants.h"
+  "./cpp/ggml-quants.c"
+  "./cpp/ggml.c"
+)
+
+for file in "${files_iq_add_lm_prefix[@]}"; do
+  # Add prefix to avoid redefinition with other libraries using ggml like whisper.rn
+  if [ "$OS" = "Darwin" ]; then
+    sed -i '' 's/iq2xs_init_impl/lm_iq2xs_init_impl/g' $file
+    sed -i '' 's/iq2xs_free_impl/lm_iq2xs_free_impl/g' $file
+    sed -i '' 's/iq3xs_init_impl/lm_iq3xs_init_impl/g' $file
+    sed -i '' 's/iq3xs_free_impl/lm_iq3xs_free_impl/g' $file
+  else
+    sed -i 's/iq2xs_init_impl/lm_iq2xs_init_impl/g' $file
+    sed -i 's/iq2xs_free_impl/lm_iq2xs_free_impl/g' $file
+    sed -i 's/iq3xs_init_impl/lm_iq3xs_init_impl/g' $file
+    sed -i 's/iq3xs_free_impl/lm_iq3xs_free_impl/g' $file
   fi
 done
 

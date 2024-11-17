@@ -372,7 +372,6 @@ void llama_sampler_chain_add(struct llama_sampler * chain, struct llama_sampler 
     p->samplers.push_back(smpl);
 }
 
-
 struct llama_sampler * llama_sampler_chain_get(const struct llama_sampler * chain, int32_t i) {
     const auto * p = (const llama_sampler_chain *) chain->ctx;
 

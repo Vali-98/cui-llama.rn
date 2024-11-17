@@ -574,13 +574,6 @@ extern "C" {
         LM_GGML_TENSOR_FLAG_LOSS   =  8, // ...defines loss for numerical optimization (multiple loss tensors add up)
     };
 
-    struct lm_ggml_init_params {
-        // memory pool
-        size_t mem_size;   // bytes
-        void * mem_buffer; // if NULL, memory will be allocated internally
-        bool   no_alloc;   // don't allocate memory for the tensor data
-    };
-
     // n-dimensional tensor
     struct lm_ggml_tensor {
         enum lm_ggml_type type;
@@ -626,6 +619,59 @@ extern "C" {
     // If it returns true, the computation is aborted
     typedef bool (*lm_ggml_abort_callback)(void * data);
 
+    // Scheduling priorities
+    enum lm_ggml_sched_priority {
+        LM_GGML_SCHED_PRIO_NORMAL,
+        LM_GGML_SCHED_PRIO_MEDIUM,
+        LM_GGML_SCHED_PRIO_HIGH,
+        LM_GGML_SCHED_PRIO_REALTIME
+    };
+
+    // Threadpool params
+    // Use lm_ggml_threadpool_params_default() or lm_ggml_threadpool_params_init() to populate the defaults
+    struct lm_ggml_threadpool_params {
+        bool                cpumask[LM_GGML_MAX_N_THREADS]; // mask of cpu cores (all-zeros means use default affinity settings)
+        int                 n_threads;                   // number of threads
+        enum lm_ggml_sched_priority prio;                   // thread priority
+        uint32_t            poll;                        // polling level (0 - no polling, 100 - aggressive polling)
+        bool                strict_cpu;                  // strict cpu placement
+        bool                paused;                      // start in paused state
+    };
+
+    struct lm_ggml_threadpool;     // forward declaration, see ggml.c
+
+    typedef struct lm_ggml_threadpool * lm_ggml_threadpool_t;
+
+    // the compute plan that needs to be prepared for lm_ggml_graph_compute()
+    // since https://github.com/ggerganov/ggml/issues/287
+    struct lm_ggml_cplan {
+        size_t    work_size; // size of work buffer, calculated by `lm_ggml_graph_plan()`
+        uint8_t * work_data; // work buffer, to be allocated by caller before calling to `lm_ggml_graph_compute()`
+
+        int n_threads;
+        struct lm_ggml_threadpool * threadpool;
+
+        // abort lm_ggml_graph_compute when true
+        lm_ggml_abort_callback abort_callback;
+        void *              abort_callback_data;
+    };
+
+    struct lm_ggml_init_params {
+        // memory pool
+        size_t mem_size;   // bytes
+        void * mem_buffer; // if NULL, memory will be allocated internally
+        bool   no_alloc;   // don't allocate memory for the tensor data
+    };
+
+    // numa strategies
+    enum lm_ggml_numa_strategy {
+        LM_GGML_NUMA_STRATEGY_DISABLED   = 0,
+        LM_GGML_NUMA_STRATEGY_DISTRIBUTE = 1,
+        LM_GGML_NUMA_STRATEGY_ISOLATE    = 2,
+        LM_GGML_NUMA_STRATEGY_NUMACTL    = 3,
+        LM_GGML_NUMA_STRATEGY_MIRROR     = 4,
+        LM_GGML_NUMA_STRATEGY_COUNT
+    };
 
     //
     // GUID
@@ -766,6 +812,8 @@ extern "C" {
 
     LM_GGML_API void *  lm_ggml_get_data    (const struct lm_ggml_tensor * tensor);
     LM_GGML_API float * lm_ggml_get_data_f32(const struct lm_ggml_tensor * tensor);
+
+    LM_GGML_API enum lm_ggml_unary_op lm_ggml_get_unary_op(const struct lm_ggml_tensor * tensor);
 
     LM_GGML_API const char *         lm_ggml_get_name   (const struct lm_ggml_tensor * tensor);
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_set_name   (      struct lm_ggml_tensor * tensor, const char * name);
@@ -1993,6 +2041,9 @@ extern "C" {
     // automatic differentiation
     //
 
+    LM_GGML_API void lm_ggml_set_param(struct lm_ggml_context * ctx, struct lm_ggml_tensor * tensor);
+    LM_GGML_API void lm_ggml_set_loss(struct lm_ggml_tensor * tensor);
+
     LM_GGML_API void lm_ggml_build_forward_expand (struct lm_ggml_cgraph * cgraph, struct lm_ggml_tensor * tensor);
     LM_GGML_API void lm_ggml_build_backward_expand(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * gf, struct lm_ggml_cgraph * gb, bool accumulate);
 
@@ -2023,6 +2074,27 @@ extern "C" {
 
     LM_GGML_API size_t lm_ggml_graph_overhead(void);
     LM_GGML_API size_t lm_ggml_graph_overhead_custom(size_t size, bool grads);
+
+    LM_GGML_API struct lm_ggml_threadpool_params lm_ggml_threadpool_params_default(int n_threads);
+    LM_GGML_API void                          lm_ggml_threadpool_params_init   (struct lm_ggml_threadpool_params * p, int n_threads);
+    LM_GGML_API bool                          lm_ggml_threadpool_params_match  (const struct lm_ggml_threadpool_params * p0, const struct lm_ggml_threadpool_params * p1);
+    LM_GGML_API struct lm_ggml_threadpool *      lm_ggml_threadpool_new          (struct lm_ggml_threadpool_params  * params);
+    LM_GGML_API void                          lm_ggml_threadpool_free         (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_API int                           lm_ggml_threadpool_get_n_threads(struct lm_ggml_threadpool * threadpool);
+    LM_GGML_API void                          lm_ggml_threadpool_pause        (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_API void                          lm_ggml_threadpool_resume       (struct lm_ggml_threadpool * threadpool);
+
+    // lm_ggml_graph_plan() has to be called before lm_ggml_graph_compute()
+    // when plan.work_size > 0, caller must allocate memory for plan.work_data
+    LM_GGML_API struct lm_ggml_cplan lm_ggml_graph_plan(
+                  const struct lm_ggml_cgraph * cgraph,
+                                       int   n_threads, /* = LM_GGML_DEFAULT_N_THREADS */
+                    struct lm_ggml_threadpool * threadpool /* = NULL */ );
+    LM_GGML_API enum lm_ggml_status  lm_ggml_graph_compute(struct lm_ggml_cgraph * cgraph, struct lm_ggml_cplan * cplan);
+
+    // same as lm_ggml_graph_compute() but the work data is allocated as a part of the context
+    // note: the drawback of this API is that you must have ensured that the context has enough memory for the work data
+    LM_GGML_API enum lm_ggml_status  lm_ggml_graph_compute_with_ctx(struct lm_ggml_context * ctx, struct lm_ggml_cgraph * cgraph, int n_threads);
 
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_graph_get_tensor(struct lm_ggml_cgraph * cgraph, const char * name);
 
@@ -2414,6 +2486,13 @@ extern "C" {
     LM_GGML_API int lm_ggml_cpu_has_cann       (void);
     LM_GGML_API int lm_ggml_cpu_has_llamafile  (void);
 
+    // get the sve vector length in bytes
+    LM_GGML_API int lm_ggml_cpu_get_sve_cnt(void);
+
+    //
+    // Internal types and functions exposed for tests and benchmarks
+    //
+
 #ifdef  __cplusplus
 // restrict not standard in C++
 #define LM_GGML_RESTRICT
@@ -2432,6 +2511,13 @@ extern "C" {
         lm_ggml_to_float_t          to_float;
         lm_ggml_from_float_t        from_float;
         lm_ggml_from_float_t        from_float_ref;
+        lm_ggml_from_float_to_mat_t from_float_to_mat;
+        lm_ggml_vec_dot_t           vec_dot;
+        enum lm_ggml_type           vec_dot_type;
+        int64_t                  nrows; // number of rows to process simultaneously
+        int64_t                  ncols; // number of columns to process simultaneously
+        lm_ggml_gemv_t              gemv;
+        lm_ggml_gemm_t              gemm;
     };
 
     LM_GGML_API const struct lm_ggml_type_traits * lm_ggml_get_type_traits(enum lm_ggml_type type);

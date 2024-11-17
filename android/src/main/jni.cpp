@@ -4,13 +4,15 @@
 #include <android/log.h>
 #include <cstdlib>
 #include <ctime>
+#include <ctime>
 #include <sys/sysinfo.h>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include "llama.h"
-#include "rn-llama.hpp"
+#include "llama-impl.h"
 #include "ggml.h"
+#include "rn-llama.hpp"
 
 #define UNUSED(x) (void)(x)
 #define TAG "RNLLAMA_ANDROID_JNI"
@@ -20,6 +22,13 @@
 
 static inline int min(int a, int b) {
     return (a < b) ? a : b;
+}
+
+static void log_callback(lm_ggml_log_level level, const char * fmt, void * data) {
+    if (level == LM_GGML_LOG_LEVEL_ERROR)     __android_log_print(ANDROID_LOG_ERROR, TAG, fmt, data);
+    else if (level == LM_GGML_LOG_LEVEL_INFO) __android_log_print(ANDROID_LOG_INFO, TAG, fmt, data);
+    else if (level == LM_GGML_LOG_LEVEL_WARN) __android_log_print(ANDROID_LOG_WARN, TAG, fmt, data);
+    else __android_log_print(ANDROID_LOG_DEFAULT, TAG, fmt, data);
 }
 
 extern "C" {
@@ -107,6 +116,15 @@ static inline void pushDouble(JNIEnv *env, jobject arr, double value) {
     env->CallVoidMethod(arr, pushDoubleMethod, value);
 }
 
+// Method to push string into WritableArray
+static inline void pushString(JNIEnv *env, jobject arr, const char *value) {
+    jclass mapClass = env->FindClass("com/facebook/react/bridge/WritableArray");
+    jmethodID pushStringMethod = env->GetMethodID(mapClass, "pushString", "(Ljava/lang/String;)V");
+
+    jstring jValue = env->NewStringUTF(value);
+    env->CallVoidMethod(arr, pushStringMethod, jValue);
+}
+
 // Method to push WritableMap into WritableArray
 static inline void pushMap(JNIEnv *env, jobject arr, jobject value) {
     jclass mapClass = env->FindClass("com/facebook/react/bridge/WritableArray");
@@ -125,6 +143,77 @@ static inline void putArray(JNIEnv *env, jobject map, const char *key, jobject v
     env->CallVoidMethod(map, putArrayMethod, jKey, value);
 }
 
+JNIEXPORT jobject JNICALL
+Java_com_rnllama_LlamaContext_modelInfo(
+    JNIEnv *env,
+    jobject thiz,
+    jstring model_path_str,
+    jobjectArray skip
+) {
+    UNUSED(thiz);
+
+    const char *model_path_chars = env->GetStringUTFChars(model_path_str, nullptr);
+
+    std::vector<std::string> skip_vec;
+    int skip_len = env->GetArrayLength(skip);
+    for (int i = 0; i < skip_len; i++) {
+        jstring skip_str = (jstring) env->GetObjectArrayElement(skip, i);
+        const char *skip_chars = env->GetStringUTFChars(skip_str, nullptr);
+        skip_vec.push_back(skip_chars);
+        env->ReleaseStringUTFChars(skip_str, skip_chars);
+    }
+
+    struct lm_gguf_init_params params = {
+        /*.no_alloc = */ false,
+        /*.ctx      = */ NULL,
+    };
+    struct lm_gguf_context * ctx = lm_gguf_init_from_file(model_path_chars, params);
+
+    if (!ctx) {
+        LOGI("%s: failed to load '%s'\n", __func__, model_path_chars);
+        return nullptr;
+    }
+
+    auto info = createWriteableMap(env);
+    putInt(env, info, "version", lm_gguf_get_version(ctx));
+    putInt(env, info, "alignment", lm_gguf_get_alignment(ctx));
+    putInt(env, info, "data_offset", lm_gguf_get_data_offset(ctx));
+    {
+        const int n_kv = lm_gguf_get_n_kv(ctx);
+
+        for (int i = 0; i < n_kv; ++i) {
+            const char * key = lm_gguf_get_key(ctx, i);
+
+            bool skipped = false;
+            if (skip_len > 0) {
+                for (int j = 0; j < skip_len; j++) {
+                    if (skip_vec[j] == key) {
+                        skipped = true;
+                        break;
+                    }
+                }
+            }
+
+            if (skipped) {
+                continue;
+            }
+
+            const std::string value = rnllama::lm_gguf_kv_to_str(ctx, i);
+            putString(env, info, key, value.c_str());
+        }
+    }
+
+    env->ReleaseStringUTFChars(model_path_str, model_path_chars);
+    lm_gguf_free(ctx);
+
+    return reinterpret_cast<jobject>(info);
+}
+
+struct callback_context {
+    JNIEnv *env;
+    rnllama::llama_rn_context *llama;
+    jobject callback;
+};
 
 std::unordered_map<long, rnllama::llama_rn_context *> context_map;
 
@@ -141,10 +230,14 @@ Java_com_rnllama_LlamaContext_initContext(
     jobject thiz,
     jstring model_path_str,
     jboolean embedding,
+    jint embd_normalize,
     jint n_ctx,
     jint n_batch,
     jint n_threads,
     jint n_gpu_layers, // TODO: Support this
+    jboolean flash_attn,
+    jstring cache_type_k,
+    jstring cache_type_v,
     jboolean use_mlock,
     jboolean use_mmap,
     jboolean vocab_only,
@@ -152,7 +245,8 @@ Java_com_rnllama_LlamaContext_initContext(
     jfloat lora_scaled,
     jfloat rope_freq_base,
     jfloat rope_freq_scale,
-    jobject javaLlamaContext
+    jint pooling_type,
+    jobject load_progress_callback
 ) {
     UNUSED(thiz);
 
@@ -166,10 +260,21 @@ Java_com_rnllama_LlamaContext_initContext(
     const char *model_path_chars = env->GetStringUTFChars(model_path_str, nullptr);
     defaultParams.model = model_path_chars;
 
-    defaultParams.embedding = embedding;
-
     defaultParams.n_ctx = n_ctx;
     defaultParams.n_batch = n_batch;
+
+    if (pooling_type != -1) {
+        defaultParams.pooling_type = static_cast<enum llama_pooling_type>(pooling_type);
+    }
+
+    defaultParams.embedding = embedding;
+    if (embd_normalize != -1) {
+        defaultParams.embd_normalize = embd_normalize;
+    }
+    if (embedding) {
+        // For non-causal models, batch size must be equal to ubatch size
+        defaultParams.n_ubatch = defaultParams.n_batch;
+    }
 
     int max_threads = std::thread::hardware_concurrency();
     // Use 2 threads by default on 4-core devices, 4 threads on more cores
@@ -177,51 +282,85 @@ Java_com_rnllama_LlamaContext_initContext(
     defaultParams.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
     defaultParams.n_gpu_layers = n_gpu_layers;
-    
+    defaultParams.flash_attn = flash_attn;
+
+    const char *cache_type_k_chars = env->GetStringUTFChars(cache_type_k, nullptr);
+    const char *cache_type_v_chars = env->GetStringUTFChars(cache_type_v, nullptr);
+    defaultParams.cache_type_k = cache_type_k_chars;
+    defaultParams.cache_type_v = cache_type_v_chars;
+
     defaultParams.use_mlock = use_mlock;
     defaultParams.use_mmap = use_mmap;
 
     const char *lora_chars = env->GetStringUTFChars(lora_str, nullptr);
     if (lora_chars != nullptr && lora_chars[0] != '\0') {
         defaultParams.lora_adapters.push_back({lora_chars, lora_scaled});
-        defaultParams.use_mmap = false;
     }
 
     defaultParams.rope_freq_base = rope_freq_base;
     defaultParams.rope_freq_scale = rope_freq_scale;
 
-    // progress callback when loading
-    jclass llamaContextClass = env->GetObjectClass(javaLlamaContext);
-    jmethodID sendProgressMethod = env->GetMethodID(llamaContextClass, "emitModelProgressUpdate", "(I)V");
-
-    CallbackContext callbackctx = {env, javaLlamaContext, sendProgressMethod, 0};
-
-    defaultParams.progress_callback_user_data = &callbackctx;
-    defaultParams.progress_callback = [](float progress, void * ctx) {
-        unsigned percentage = (unsigned) (100 * progress);
-        CallbackContext * cbctx = static_cast<CallbackContext*>(ctx);
-        // reduce call frequency by only calling method when value changes
-        if (percentage <= cbctx->current) return true; 
-        cbctx->current = percentage;
-        cbctx->env->CallVoidMethod(cbctx->thiz, cbctx->sendProgressMethod, percentage);
-        return true;
-    };
-    
-
     auto llama = new rnllama::llama_rn_context();
+    llama->is_load_interrupted = false;
+    llama->loading_progress = 0;
+
+    if (load_progress_callback != nullptr) {
+        defaultParams.progress_callback = [](float progress, void * user_data) {
+            callback_context *cb_ctx = (callback_context *)user_data;
+            JNIEnv *env = cb_ctx->env;
+            auto llama = cb_ctx->llama;
+            jobject callback = cb_ctx->callback;
+            int percentage = (int) (100 * progress);
+            if (percentage > llama->loading_progress) {
+                llama->loading_progress = percentage;
+                jclass callback_class = env->GetObjectClass(callback);
+                jmethodID onLoadProgress = env->GetMethodID(callback_class, "onLoadProgress", "(I)V");
+                env->CallVoidMethod(callback, onLoadProgress, percentage);
+            }
+            return !llama->is_load_interrupted;
+        };
+
+        callback_context *cb_ctx = new callback_context;
+        cb_ctx->env = env;
+        cb_ctx->llama = llama;
+        cb_ctx->callback = env->NewGlobalRef(load_progress_callback);
+        defaultParams.progress_callback_user_data = cb_ctx;
+    }
+
     bool is_model_loaded = llama->loadModel(defaultParams);
+
+    env->ReleaseStringUTFChars(model_path_str, model_path_chars);
+    env->ReleaseStringUTFChars(lora_str, lora_chars);
+    env->ReleaseStringUTFChars(cache_type_k, cache_type_k_chars);
+    env->ReleaseStringUTFChars(cache_type_v, cache_type_v_chars);
 
     LOGI("[RNLlama] is_model_loaded %s", (is_model_loaded ? "true" : "false"));
     if (is_model_loaded) {
+      if (embedding && llama_model_has_encoder(llama->model) && llama_model_has_decoder(llama->model)) {
+        LOGI("[RNLlama] computing embeddings in encoder-decoder models is not supported");
+        llama_free(llama->ctx);
+        return -1;
+      }
       context_map[(long) llama->ctx] = llama;
     } else {
       llama_free(llama->ctx);
     }
 
-    env->ReleaseStringUTFChars(model_path_str, model_path_chars);
-    env->ReleaseStringUTFChars(lora_str, lora_chars);
-
     return reinterpret_cast<jlong>(llama->ctx);
+}
+
+
+JNIEXPORT void JNICALL
+Java_com_rnllama_LlamaContext_interruptLoad(
+    JNIEnv *env,
+    jobject thiz,
+    jlong context_ptr
+) {
+    UNUSED(thiz);
+    auto llama = context_map[(long) context_ptr];
+    if (llama) {
+        llama->is_load_interrupted = true;
+    }
 }
 
 JNIEXPORT jobject JNICALL
@@ -397,8 +536,8 @@ Java_com_rnllama_LlamaContext_doCompletion(
     jint top_k,
     jfloat top_p,
     jfloat min_p,
-    jfloat xtc_t,
-    jfloat xtc_p,
+    jfloat xtc_threshold,
+    jfloat xtc_probability,
     jfloat typical_p,
     jint seed,
     jobjectArray stop,
@@ -440,8 +579,8 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.typ_p = typical_p;
     sparams.n_probs = n_probs;
     sparams.grammar = env->GetStringUTFChars(grammar, nullptr);
-    sparams.xtc_threshold = xtc_t;
-    sparams.xtc_probability = xtc_p;
+    sparams.xtc_threshold = xtc_threshold;
+    sparams.xtc_probability = xtc_probability;
 
     sparams.logit_bias.clear();
     if (ignore_eos) {
@@ -651,16 +790,27 @@ Java_com_rnllama_LlamaContext_isEmbeddingEnabled(
 
 JNIEXPORT jobject JNICALL
 Java_com_rnllama_LlamaContext_embedding(
-        JNIEnv *env, jobject thiz, jlong context_ptr, jstring text) {
+        JNIEnv *env, jobject thiz,
+        jlong context_ptr,
+        jstring text,
+        jint embd_normalize
+) {
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
+
+    common_params embdParams;
+    embdParams.embedding = true;
+    embdParams.embd_normalize = llama->params.embd_normalize;
+    if (embd_normalize != -1) {
+      embdParams.embd_normalize = embd_normalize;
+    }
 
     const char *text_chars = env->GetStringUTFChars(text, nullptr);
 
     llama->rewind();
 
     llama_perf_context_reset(llama->ctx);
-    
+
     llama->params.prompt = text_chars;
 
     llama->params.n_predict = 0;
@@ -675,13 +825,19 @@ Java_com_rnllama_LlamaContext_embedding(
     llama->loadPrompt();
     llama->doCompletion();
 
-    std::vector<float> embedding = llama->getEmbedding();
+    std::vector<float> embedding = llama->getEmbedding(embdParams);
 
     auto embeddings = createWritableArray(env);
     for (const auto &val : embedding) {
       pushDouble(env, embeddings, (double) val);
     }
     putArray(env, result, "embedding", embeddings);
+
+    auto promptTokens = createWritableArray(env);
+    for (const auto &tok : llama->embd) {
+      pushString(env, promptTokens, common_token_to_piece(llama->ctx, tok).c_str());
+    }
+    putArray(env, result, "prompt_tokens", promptTokens);
 
     env->ReleaseStringUTFChars(text, text_chars);
     return result;
@@ -720,6 +876,13 @@ Java_com_rnllama_LlamaContext_freeContext(
         common_sampler_free(llama->ctx_sampling);
     }
     context_map.erase((long) llama->ctx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_rnllama_LlamaContext_logToAndroid(JNIEnv *env, jobject thiz) {
+    UNUSED(env);
+    UNUSED(thiz);
+    llama_log_set(log_callback, NULL);
 }
 
 } // extern "C"

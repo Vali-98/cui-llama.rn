@@ -7,7 +7,6 @@
 
 #include "ggml-quants.h"
 #include "ggml-impl.h"
-#include "ggml-cpu.h"
 #include "ggml-cpu-impl.h"
 
 #include <math.h>

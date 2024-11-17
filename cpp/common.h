@@ -165,9 +165,6 @@ struct common_sampler_params {
 };
 
 struct common_params {
-
-    void * progress_callback_user_data        = nullptr;
-    llama_progress_callback progress_callback = nullptr;
     bool vocab_only               = false;
     int32_t n_predict             =    -1; // new tokens to predict
     int32_t n_ctx                 =  4096; // context size
@@ -285,6 +282,9 @@ struct common_params {
     bool no_kv_offload     = false; // disable KV offloading
     bool warmup            = true;  // warmup run
     bool check_tensors     = false; // validate tensor data
+
+    llama_progress_callback progress_callback;
+    void * progress_callback_user_data;
 
     std::string cache_type_k = "f16"; // KV cache data type for the K
     std::string cache_type_v = "f16"; // KV cache data type for the V
