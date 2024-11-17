@@ -22,8 +22,6 @@ export { SchemaGrammarConverter, convertJsonSchemaToGrammar }
 const EVENT_ON_INIT_CONTEXT_PROGRESS = '@RNLlama_onInitContextProgress'
 const EVENT_ON_TOKEN = '@RNLlama_onToken'
 
-const EVENT_ON_MODEL_PROGRESS = '@RNLlama_onModelProgress'
-
 let EventEmitter: NativeEventEmitter | DeviceEventEmitterStatic
 if (Platform.OS === 'ios') {
   // @ts-ignore
