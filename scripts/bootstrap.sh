@@ -72,9 +72,6 @@ cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/common.h ./cpp/common.h
 cp ./llama.cpp/common/common.cpp ./cpp/common.cpp
-cp ./llama.cpp/common/json.hpp ./cpp/json.hpp
-cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
-cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp
 cp ./llama.cpp/common/sampling.h ./cpp/sampling.h
 cp ./llama.cpp/common/sampling.cpp ./cpp/sampling.cpp
 
@@ -122,7 +119,6 @@ files_add_lm_prefix=(
   "./cpp/sgemm.h"
   "./cpp/sgemm.h"
   "./cpp/sgemm.cpp"
-  "./cpp/json-schema-to-grammar.h"
   "./cpp/ggml-aarch64.h"
   "./cpp/ggml-aarch64.c"
 )
