@@ -69,12 +69,41 @@ void common_log_set_timestamps(struct common_log * log,       bool   timestamps)
 // this will avoid calling expensive_function() if LOG_DEFAULT_DEBUG > common_log_verbosity_thold
 //
 
+
+
+#if defined(__ANDROID__)
+#include <android/log.h>
+#define LLAMA_ANDROID_LOG_TAG "RNLLAMA_LOG_ANDROID"
+
+#if defined(RNLLAMA_ANDROID_ENABLE_LOGGING)
+#define RNLLAMA_LOG_LEVEL 1
+#else
+#define RNLLAMA_LOG_LEVEL 0
+#endif
+
+#define LOG_TMPL(level, verbosity, ...) \
+    do { \
+        if ((verbosity) <= RNLLAMA_LOG_LEVEL) { \
+            int android_log_level = ANDROID_LOG_DEFAULT; \
+            switch (level) { \
+                case LM_GGML_LOG_LEVEL_INFO:  android_log_level = ANDROID_LOG_INFO; break; \
+                case LM_GGML_LOG_LEVEL_WARN:  android_log_level = ANDROID_LOG_WARN; break; \
+                case LM_GGML_LOG_LEVEL_ERROR: android_log_level = ANDROID_LOG_ERROR; break; \
+                default:             android_log_level = ANDROID_LOG_DEFAULT; \
+            } \
+            __android_log_print(android_log_level, LLAMA_ANDROID_LOG_TAG, __VA_ARGS__); \
+        } \
+    } while(0)
+#else
+
 #define LOG_TMPL(level, verbosity, ...) \
     do { \
         if ((verbosity) <= common_log_verbosity_thold) { \
             common_log_add(common_log_main(), (level), __VA_ARGS__); \
         } \
     } while (0)
+
+#endif
 
 #define LOG(...)             LOG_TMPL(LM_GGML_LOG_LEVEL_NONE, 0,         __VA_ARGS__)
 #define LOGV(verbosity, ...) LOG_TMPL(LM_GGML_LOG_LEVEL_NONE, verbosity, __VA_ARGS__)

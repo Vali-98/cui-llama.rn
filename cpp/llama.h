@@ -798,7 +798,7 @@ extern "C" {
     // Processes a batch of tokens with the ecoder part of the encoder-decoder model.
     // Stores the encoder output internally for later use by the decoder cross-attention layers.
     //   0 - success
-    // < 0 - error
+    // < 0 - error. the KV cache state is restored to the state before this call
     LLAMA_API int32_t llama_encode(
             struct llama_context * ctx,
               struct llama_batch   batch);
@@ -806,7 +806,7 @@ extern "C" {
     // Positive return values does not mean a fatal error, but rather a warning.
     //   0 - success
     //   1 - could not find a KV slot for the batch (try reducing the size of the batch or increase the context)
-    // < 0 - error
+    // < 0 - error. the KV cache state is restored to the state before this call
     LLAMA_API int32_t llama_decode(
             struct llama_context * ctx,
               struct llama_batch   batch);
@@ -1245,10 +1245,9 @@ extern "C" {
     LLAMA_API void                           llama_perf_sampler_print(const struct llama_sampler * chain);
     LLAMA_API void                           llama_perf_sampler_reset(      struct llama_sampler * chain);
 
-    LLAMA_API void llama_perf_dump_yaml(FILE * stream, const struct llama_context * ctx);
-
 #ifdef __cplusplus
 }
 #endif
+
 
 #endif // LLAMA_H

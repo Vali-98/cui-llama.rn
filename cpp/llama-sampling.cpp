@@ -372,6 +372,7 @@ void llama_sampler_chain_add(struct llama_sampler * chain, struct llama_sampler 
     p->samplers.push_back(smpl);
 }
 
+
 struct llama_sampler * llama_sampler_chain_get(const struct llama_sampler * chain, int32_t i) {
     const auto * p = (const llama_sampler_chain *) chain->ctx;
 
@@ -1876,8 +1877,11 @@ static void llama_sampler_dry_reset(struct llama_sampler * smpl) {
 static struct llama_sampler * llama_sampler_dry_clone(const struct llama_sampler * smpl) {
     const auto * ctx = (llama_sampler_dry *) smpl->ctx;
 
-    // nullptr is passed as vocab because it is only needed for raw sequence breaker processing, which we have already done and will be copying
-    auto * result = llama_sampler_init_dry(nullptr, ctx->dry_multiplier, ctx->dry_base, ctx->dry_allowed_length, ctx->dry_penalty_last_n, NULL, 0);
+    llama_vocab dummy_vocab;
+
+    // dummy vocab is passed because it is only needed for raw sequence breaker processing, which we have already done and will simply be copying
+    auto * result = llama_sampler_init_dry_impl(dummy_vocab, ctx->total_context_size, ctx->dry_multiplier, ctx->dry_base, ctx->dry_allowed_length, ctx->dry_penalty_last_n, NULL, 0);
+
     // Copy the state, including the processed breakers
     {
         auto * result_ctx = (llama_sampler_dry *) result->ctx;
