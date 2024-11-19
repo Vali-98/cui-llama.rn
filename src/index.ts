@@ -12,10 +12,31 @@ import type {
   NativeSessionLoadResult,
   NativeCPUFeatures,
   NativeEmbeddingParams,
+  NativeCompletionTokenProbItem,
+  NativeCompletionResultTimings,
 } from './NativeRNLlama'
+import type { SchemaGrammarConverterPropOrder, SchemaGrammarConverterBuiltinRule } from './grammar'
 import { SchemaGrammarConverter, convertJsonSchemaToGrammar } from './grammar'
-import type { RNLlamaOAICompatibleMessage } from './chat'
+import type { RNLlamaMessagePart, RNLlamaOAICompatibleMessage } from './chat'
 import { formatChat } from './chat'
+
+export type {
+  NativeContextParams,
+  NativeLlamaContext,
+  NativeCompletionParams,
+  NativeCompletionTokenProb,
+  NativeCompletionResult,
+  NativeTokenizeResult,
+  NativeEmbeddingResult,
+  NativeSessionLoadResult,
+  NativeEmbeddingParams,
+  NativeCompletionTokenProbItem,
+  NativeCompletionResultTimings,
+  RNLlamaMessagePart,
+  RNLlamaOAICompatibleMessage,
+  SchemaGrammarConverterPropOrder,
+  SchemaGrammarConverterBuiltinRule,
+}
 
 export { SchemaGrammarConverter, convertJsonSchemaToGrammar }
 
