@@ -4,6 +4,10 @@
 
 #include "common.h"
 #include "log.h"
+// Change JSON_ASSERT from assert() to LM_GGML_ASSERT:
+#define JSON_ASSERT LM_GGML_ASSERT
+#include "json.hpp"
+#include "json-schema-to-grammar.h"
 #include "llama.h"
 
 #include <algorithm>
@@ -70,6 +74,8 @@ char const *LLAMA_BUILD_TARGET = "unknown";
 #endif
 #define LLAMA_CURL_MAX_URL_LENGTH 2084 // Maximum URL Length in Chrome: 2083
 #endif // LLAMA_USE_CURL
+
+using json = nlohmann::ordered_json;
 
 //
 // CPU utils
@@ -536,12 +542,12 @@ std::string string_from(const struct llama_context * ctx, const struct llama_bat
                     [](const unsigned char c) { return !std::isprint(c); }),
                 detokenized.end());
 
-        buf << "\n" << std::to_string(i)
-            << ":token '" << detokenized << "'"
-            << ":pos " << std::to_string(batch.pos[i])
-            << ":n_seq_id  " << std::to_string(batch.n_seq_id[i])
-            << ":seq_id " << std::to_string(batch.seq_id[i][0])
-            << ":logits " << std::to_string(batch.logits[i]);
+        buf << "\n"          << std::to_string(i)
+            << ", token '"   << detokenized << "'"
+            << ", pos "      << std::to_string(batch.pos[i])
+            << ", n_seq_id " << std::to_string(batch.n_seq_id[i])
+            << ", seq_id "   << std::to_string(batch.seq_id[i][0])
+            << ", logits "   << std::to_string(batch.logits[i]);
     }
 
     buf << " ]";
@@ -875,6 +881,12 @@ struct common_init_result common_init_from_params(common_params & params) {
         return iparams;
     }
 
+    if (params.ctx_shift && !llama_kv_cache_can_shift(lctx)) {
+        LOG_ERR("%s: KV cache shifting is not supported for this model (--no-context-shift to disable)'\n", __func__);
+        llama_free_model(model);
+        return iparams;
+    }
+
     if (!params.control_vectors.empty()) {
         if (params.control_vector_layer_start <= 0) params.control_vector_layer_start = 1;
         if (params.control_vector_layer_end   <= 0) params.control_vector_layer_end   = llama_n_layer(model);
@@ -919,9 +931,9 @@ struct common_init_result common_init_from_params(common_params & params) {
         common_lora_adapters_apply(lctx, iparams.lora_adapters);
     }
 
-    if (params.sparams.ignore_eos && llama_token_eos(model) == LLAMA_TOKEN_NULL) {
+    if (params.sampling.ignore_eos && llama_token_eos(model) == LLAMA_TOKEN_NULL) {
         LOG_WRN("%s: warning: model does not have an EOS token, ignoring --ignore-eos\n", __func__);
-        params.sparams.ignore_eos = false;
+        params.sampling.ignore_eos = false;
     }
 
     if (params.warmup) {
@@ -973,9 +985,12 @@ void common_lora_adapters_apply(struct llama_context * ctx, std::vector<common_l
     }
 }
 
-struct llama_model_params common_model_params_to_llama(const common_params & params) {
+struct llama_model_params common_model_params_to_llama(common_params & params) {
     auto mparams = llama_model_default_params();
 
+    if (!params.devices.empty()) {
+        mparams.devices = params.devices.data();
+    }
     if (params.n_gpu_layers != -1) {
         mparams.n_gpu_layers = params.n_gpu_layers;
     }
@@ -1120,6 +1135,220 @@ static bool curl_perform_with_retry(const std::string& url, CURL* curl, int max_
     LOG_ERR("%s: curl_easy_perform() failed after %d attempts\n", __func__, max_attempts);
 
     return false;
+}
+
+static bool common_download_file(const std::string & url, const std::string & path, const std::string & hf_token) {
+
+    // Initialize libcurl
+    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), &curl_easy_cleanup);
+    if (!curl) {
+        LOG_ERR("%s: error initializing libcurl\n", __func__);
+        return false;
+    }
+
+    bool force_download = false;
+
+    // Set the URL, allow to follow http redirection
+    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);
+
+    // Check if hf-token or bearer-token was specified
+    if (!hf_token.empty()) {
+      std::string auth_header = "Authorization: Bearer ";
+      auth_header += hf_token.c_str();
+      struct curl_slist *http_headers = NULL;
+      http_headers = curl_slist_append(http_headers, auth_header.c_str());
+      curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, http_headers);
+    }
+
+#if defined(_WIN32)
+    // CURLSSLOPT_NATIVE_CA tells libcurl to use standard certificate store of
+    //   operating system. Currently implemented under MS-Windows.
+    curl_easy_setopt(curl.get(), CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
+#endif
+
+    // Check if the file already exists locally
+    struct stat model_file_info;
+    auto file_exists = (stat(path.c_str(), &model_file_info) == 0);
+
+    // If the file exists, check its JSON metadata companion file.
+    std::string metadata_path = path + ".json";
+    nlohmann::json metadata;
+    std::string etag;
+    std::string last_modified;
+
+    if (file_exists) {
+        // Try and read the JSON metadata file (note: stream autoclosed upon exiting this block).
+        std::ifstream metadata_in(metadata_path);
+        if (metadata_in.good()) {
+            try {
+                metadata_in >> metadata;
+                LOG_INF("%s: previous metadata file found %s: %s\n", __func__, metadata_path.c_str(), metadata.dump().c_str());
+                if (metadata.contains("url") && metadata.at("url").is_string()) {
+                    auto previous_url = metadata.at("url").get<std::string>();
+                    if (previous_url != url) {
+                        LOG_ERR("%s: Model URL mismatch: %s != %s\n", __func__, url.c_str(), previous_url.c_str());
+                        return false;
+                    }
+                }
+                if (metadata.contains("etag") && metadata.at("etag").is_string()) {
+                    etag = metadata.at("etag");
+                }
+                if (metadata.contains("lastModified") && metadata.at("lastModified").is_string()) {
+                    last_modified = metadata.at("lastModified");
+                }
+            } catch (const nlohmann::json::exception & e) {
+            LOG_ERR("%s: error reading metadata file %s: %s\n", __func__, metadata_path.c_str(), e.what());
+                return false;
+            }
+        }
+    } else {
+        LOG_INF("%s: no previous model file found %s\n", __func__, path.c_str());
+    }
+
+    // Send a HEAD request to retrieve the etag and last-modified headers
+    struct common_load_model_from_url_headers {
+        std::string etag;
+        std::string last_modified;
+    };
+    common_load_model_from_url_headers headers;
+    {
+        typedef size_t(*CURLOPT_HEADERFUNCTION_PTR)(char *, size_t, size_t, void *);
+        auto header_callback = [](char * buffer, size_t /*size*/, size_t n_items, void * userdata) -> size_t {
+            common_load_model_from_url_headers *headers = (common_load_model_from_url_headers *) userdata;
+
+            static std::regex header_regex("([^:]+): (.*)\r\n");
+            static std::regex etag_regex("ETag", std::regex_constants::icase);
+            static std::regex last_modified_regex("Last-Modified", std::regex_constants::icase);
+
+            std::string header(buffer, n_items);
+            std::smatch match;
+            if (std::regex_match(header, match, header_regex)) {
+                const std::string & key = match[1];
+                const std::string & value = match[2];
+                if (std::regex_match(key, match, etag_regex)) {
+                    headers->etag = value;
+                } else if (std::regex_match(key, match, last_modified_regex)) {
+                    headers->last_modified = value;
+                }
+            }
+            return n_items;
+        };
+
+        curl_easy_setopt(curl.get(), CURLOPT_NOBODY, 1L); // will trigger the HEAD verb
+        curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 1L); // hide head request progress
+        curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION, static_cast<CURLOPT_HEADERFUNCTION_PTR>(header_callback));
+        curl_easy_setopt(curl.get(), CURLOPT_HEADERDATA, &headers);
+
+        bool was_perform_successful = curl_perform_with_retry(url, curl.get(), CURL_MAX_RETRY, CURL_RETRY_DELAY_SECONDS);
+        if (!was_perform_successful) {
+            return false;
+        }
+
+        long http_code = 0;
+        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code != 200) {
+            // HEAD not supported, we don't know if the file has changed
+            // force trigger downloading
+            force_download = true;
+            LOG_ERR("%s: HEAD invalid http status code received: %ld\n", __func__, http_code);
+        }
+    }
+
+    bool should_download = !file_exists || force_download;
+    if (!should_download) {
+        if (!etag.empty() && etag != headers.etag) {
+            LOG_WRN("%s: ETag header is different (%s != %s): triggering a new download\n", __func__, etag.c_str(), headers.etag.c_str());
+            should_download = true;
+        } else if (!last_modified.empty() && last_modified != headers.last_modified) {
+            LOG_WRN("%s: Last-Modified header is different (%s != %s): triggering a new download\n", __func__, last_modified.c_str(), headers.last_modified.c_str());
+            should_download = true;
+        }
+    }
+    if (should_download) {
+        std::string path_temporary = path + ".downloadInProgress";
+        if (file_exists) {
+            LOG_WRN("%s: deleting previous downloaded file: %s\n", __func__, path.c_str());
+            if (remove(path.c_str()) != 0) {
+                LOG_ERR("%s: unable to delete file: %s\n", __func__, path.c_str());
+                return false;
+            }
+        }
+
+        // Set the output file
+
+        struct FILE_deleter {
+            void operator()(FILE * f) const {
+                fclose(f);
+            }
+        };
+
+        std::unique_ptr<FILE, FILE_deleter> outfile(fopen(path_temporary.c_str(), "wb"));
+        if (!outfile) {
+            LOG_ERR("%s: error opening local file for writing: %s\n", __func__, path.c_str());
+            return false;
+        }
+
+        typedef size_t(*CURLOPT_WRITEFUNCTION_PTR)(void * data, size_t size, size_t nmemb, void * fd);
+        auto write_callback = [](void * data, size_t size, size_t nmemb, void * fd) -> size_t {
+            return fwrite(data, size, nmemb, (FILE *)fd);
+        };
+        curl_easy_setopt(curl.get(), CURLOPT_NOBODY, 0L);
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, static_cast<CURLOPT_WRITEFUNCTION_PTR>(write_callback));
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, outfile.get());
+
+        //  display download progress
+        curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
+
+        // helper function to hide password in URL
+        auto llama_download_hide_password_in_url = [](const std::string & url) -> std::string {
+            std::size_t protocol_pos = url.find("://");
+            if (protocol_pos == std::string::npos) {
+                return url;  // Malformed URL
+            }
+
+            std::size_t at_pos = url.find('@', protocol_pos + 3);
+            if (at_pos == std::string::npos) {
+                return url;  // No password in URL
+            }
+
+            return url.substr(0, protocol_pos + 3) + "********" + url.substr(at_pos);
+        };
+
+        // start the download
+        LOG_INF("%s: trying to download model from %s to %s (server_etag:%s, server_last_modified:%s)...\n", __func__,
+            llama_download_hide_password_in_url(url).c_str(), path.c_str(), headers.etag.c_str(), headers.last_modified.c_str());
+        bool was_perform_successful = curl_perform_with_retry(url, curl.get(), CURL_MAX_RETRY, CURL_RETRY_DELAY_SECONDS);
+        if (!was_perform_successful) {
+            return false;
+        }
+
+        long http_code = 0;
+        curl_easy_getinfo (curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code < 200 || http_code >= 400) {
+            LOG_ERR("%s: invalid http status code received: %ld\n", __func__, http_code);
+            return false;
+        }
+
+        // Causes file to be closed explicitly here before we rename it.
+        outfile.reset();
+
+        // Write the updated JSON metadata file.
+        metadata.update({
+            {"url", url},
+            {"etag", headers.etag},
+            {"lastModified", headers.last_modified}
+        });
+        std::ofstream(metadata_path) << metadata.dump(4);
+        LOG_INF("%s: file metadata saved: %s\n", __func__, metadata_path.c_str());
+
+        if (rename(path_temporary.c_str(), path.c_str()) != 0) {
+            LOG_ERR("%s: unable to rename file: %s to %s\n", __func__, path_temporary.c_str(), path.c_str());
+            return false;
+        }
+    }
+
+    return true;
 }
 
 struct llama_model * common_load_model_from_url(
@@ -1272,6 +1501,66 @@ void common_batch_add(
     batch.logits  [batch.n_tokens] = logits;
 
     batch.n_tokens++;
+}
+
+//
+// Token utils
+//
+
+size_t common_lcp(const llama_tokens & a, const llama_tokens & b) {
+    size_t i;
+    for (i = 0; i < a.size() && i < b.size() && a[i] == b[i]; i++) {}
+
+    return i;
+}
+
+size_t common_lcs(const llama_tokens & a, const llama_tokens & b) {
+    // check for empty sequences
+    if (a.empty() || b.empty()) {
+        return 0;
+    }
+
+    // get the lengths of the input sequences
+    size_t a_len = a.size();
+    size_t b_len = b.size();
+
+    // initialize the maximum length of the longest common subsequence (LCS)
+    size_t max_length = 0;
+
+    // use two rows instead of a 2D matrix to optimize space
+    std::vector<size_t> prev_row(b_len + 1, 0);
+    std::vector<size_t> curr_row(b_len + 1, 0);
+
+    // iterate through the elements of a
+    for (size_t i = 1; i <= a_len; i++) {
+        // iterate through the elements of b
+        for (size_t j = 1; j <= b_len; j++) {
+            // if elements at the current positions match
+            if (a[i - 1] == b[j - 1]) {
+                // if it's the first element of either sequences, set LCS length to 1
+                if (i == 1 || j == 1) {
+                    curr_row[j] = 1;
+                } else {
+                    // increment LCS length by 1 compared to the previous element
+                    curr_row[j] = prev_row[j - 1] + 1;
+                }
+
+                // update max_length if necessary
+                if (curr_row[j] > max_length) {
+                    max_length = curr_row[j];
+                }
+            } else {
+                // reset LCS length if elements don't match
+                curr_row[j] = 0;
+            }
+        }
+
+        // update the previous row for the next iteration
+        prev_row = curr_row;
+    }
+
+    // return the maximum length of the LCS
+    return max_length;
 }
 
 //

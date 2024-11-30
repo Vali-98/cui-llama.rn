@@ -1,11 +1,29 @@
 #include "ggml-backend-impl.h"
 #include "ggml-backend.h"
-#include "ggml-cpu.h"
 #include "ggml-impl.h"
+#include <algorithm>
 #include <cstring>
+#include <string>
 #include <vector>
 
+#ifdef _WIN32
+#    define WIN32_LEAN_AND_MEAN
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
+#    include <windows.h>
+#elif defined(__APPLE__)
+#    include <mach-o/dyld.h>
+#    include <dlfcn.h>
+#else
+#    include <dlfcn.h>
+#    include <unistd.h>
+#endif
+
 // Backend registry
+#ifdef LM_GGML_USE_CPU
+#include "ggml-cpu.h"
+#endif
 
 #ifdef LM_GGML_USE_CUDA
 #include "ggml-cuda.h"
@@ -43,8 +61,13 @@
 #include "ggml-kompute.h"
 #endif
 
+struct lm_ggml_backend_reg_entry {
+    lm_ggml_backend_reg_t reg;
+    void * handle;
+};
+
 struct lm_ggml_backend_registry {
-    std::vector<lm_ggml_backend_reg_t> backends;
+    std::vector<lm_ggml_backend_reg_entry> backends;
     std::vector<lm_ggml_backend_dev_t> devices;
 
     lm_ggml_backend_registry() {
@@ -75,11 +98,19 @@ struct lm_ggml_backend_registry {
 #ifdef LM_GGML_USE_KOMPUTE
         register_backend(lm_ggml_backend_kompute_reg());
 #endif
-
+#ifdef LM_GGML_USE_CPU
         register_backend(lm_ggml_backend_cpu_reg());
+#endif
     }
 
-    void register_backend(lm_ggml_backend_reg_t reg) {
+    ~lm_ggml_backend_registry() {
+        while (!backends.empty()) {
+            // use silent since the log system may have been destroyed at this point
+            unload_backend(backends.back().reg, true);
+        }
+    }
+
+    void register_backend(lm_ggml_backend_reg_t reg, void * handle = nullptr) {
         if (!reg) {
             return;
         }
@@ -88,7 +119,7 @@ struct lm_ggml_backend_registry {
         LM_GGML_LOG_DEBUG("%s: registered backend %s (%zu devices)\n",
             __func__, lm_ggml_backend_reg_name(reg), lm_ggml_backend_reg_dev_count(reg));
 #endif
-        backends.push_back(reg);
+        backends.push_back({ reg, handle });
         for (size_t i = 0; i < lm_ggml_backend_reg_dev_count(reg); i++) {
             register_device(lm_ggml_backend_reg_dev_get(reg, i));
         }
@@ -99,6 +130,111 @@ struct lm_ggml_backend_registry {
         LM_GGML_LOG_DEBUG("%s: registered device %s (%s)\n", __func__, lm_ggml_backend_dev_name(device), lm_ggml_backend_dev_description(device));
 #endif
         devices.push_back(device);
+    }
+
+    lm_ggml_backend_reg_t load_backend(const char * path, bool silent) {
+#ifdef _WIN32
+        // suppress error dialogs for missing DLLs
+        DWORD old_mode = SetErrorMode(SEM_FAILCRITICALERRORS);
+        SetErrorMode(old_mode | SEM_FAILCRITICALERRORS);
+
+        HMODULE handle = LoadLibraryA(path);
+
+        if (!handle) {
+            if (!silent) {
+                LM_GGML_LOG_ERROR("%s: failed to load %s: %lu\n", __func__, path, GetLastError());
+            }
+            SetErrorMode(old_mode);
+            return nullptr;
+        }
+
+        lm_ggml_backend_init_t backend_init = (lm_ggml_backend_init_t) GetProcAddress(handle, "lm_ggml_backend_init");
+
+        SetErrorMode(old_mode);
+
+        if (!backend_init) {
+            if (!silent) {
+                LM_GGML_LOG_ERROR("%s: failed to find lm_ggml_backend_init in %s: %lu\n", __func__, path, GetLastError());
+            }
+            FreeLibrary(handle);
+            return nullptr;
+        }
+#else
+        void * handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+
+        if (!handle) {
+            if (!silent) {
+                LM_GGML_LOG_ERROR("%s: failed to load %s: %s\n", __func__, path, dlerror());
+            }
+            return nullptr;
+        }
+
+        auto * backend_init = (lm_ggml_backend_init_t) dlsym(handle, "lm_ggml_backend_init");
+
+        if (!backend_init) {
+            if (!silent) {
+                LM_GGML_LOG_ERROR("%s: failed to find lm_ggml_backend_init in %s: %s\n", __func__, path, dlerror());
+            }
+            dlclose(handle);
+            return nullptr;
+        }
+#endif
+        lm_ggml_backend_reg_t reg = backend_init();
+
+        if (!reg || reg->api_version != LM_GGML_BACKEND_API_VERSION) {
+            if (!silent) {
+                if (!reg) {
+                    LM_GGML_LOG_ERROR("%s: failed to initialize backend from %s: lm_ggml_backend_init returned NULL\n", __func__, path);
+                } else {
+                    LM_GGML_LOG_ERROR("%s: failed to initialize backend from %s: incompatible API version (backend: %d, current: %d)\n",
+                                   __func__, path, reg->api_version, LM_GGML_BACKEND_API_VERSION);
+                }
+            }
+#ifdef _WIN32
+            FreeLibrary(handle);
+#else
+            dlclose(handle);
+#endif
+            return nullptr;
+        }
+
+        LM_GGML_LOG_INFO("%s: loaded %s backend from %s\n", __func__, lm_ggml_backend_reg_name(reg), path);
+        register_backend(reg, handle);
+        return reg;
+    }
+
+    void unload_backend(lm_ggml_backend_reg_t reg, bool silent) {
+        auto it = std::find_if(backends.begin(), backends.end(),
+                                [reg](lm_ggml_backend_reg_entry entry) { return entry.reg == reg; });
+
+        if (it == backends.end()) {
+            if (!silent) {
+                LM_GGML_LOG_ERROR("%s: backend not found\n", __func__);
+            }
+            return;
+        }
+
+        if (!silent) {
+            LM_GGML_LOG_DEBUG("%s: unloading %s backend\n", __func__, lm_ggml_backend_reg_name(reg));
+        }
+
+        // remove devices
+        devices.erase(
+            std::remove_if(devices.begin(), devices.end(),
+                            [reg](lm_ggml_backend_dev_t dev) { return lm_ggml_backend_dev_backend_reg(dev) == reg; }),
+            devices.end());
+
+        // unload library
+        if (it->handle) {
+#ifdef _WIN32
+            FreeLibrary((HMODULE) it->handle);
+#else
+            dlclose(it->handle);
+#endif
+        }
+
+        // remove backend
+        backends.erase(it);
     }
 };
 
@@ -117,23 +253,32 @@ void lm_ggml_backend_device_register(lm_ggml_backend_dev_t device) {
 }
 
 // Backend (reg) enumeration
+static bool striequals(const char * a, const char * b) {
+    for (; *a && *b; a++, b++) {
+        if (std::tolower(*a) != std::tolower(*b)) {
+            return false;
+        }
+    }
+    return *a == *b;
+}
+
 size_t lm_ggml_backend_reg_count() {
     return get_reg().backends.size();
 }
 
 lm_ggml_backend_reg_t lm_ggml_backend_reg_get(size_t index) {
     LM_GGML_ASSERT(index < lm_ggml_backend_reg_count());
-    return get_reg().backends[index];
+    return get_reg().backends[index].reg;
 }
 
 lm_ggml_backend_reg_t lm_ggml_backend_reg_by_name(const char * name) {
     for (size_t i = 0; i < lm_ggml_backend_reg_count(); i++) {
         lm_ggml_backend_reg_t reg = lm_ggml_backend_reg_get(i);
-        if (std::strcmp(lm_ggml_backend_reg_name(reg), name) == 0) {
+        if (striequals(lm_ggml_backend_reg_name(reg), name)) {
             return reg;
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 // Device enumeration
@@ -149,11 +294,11 @@ lm_ggml_backend_dev_t lm_ggml_backend_dev_get(size_t index) {
 lm_ggml_backend_dev_t lm_ggml_backend_dev_by_name(const char * name) {
     for (size_t i = 0; i < lm_ggml_backend_dev_count(); i++) {
         lm_ggml_backend_dev_t dev = lm_ggml_backend_dev_get(i);
-        if (strcmp(lm_ggml_backend_dev_name(dev), name) == 0) {
+        if (striequals(lm_ggml_backend_dev_name(dev), name)) {
             return dev;
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 lm_ggml_backend_dev_t lm_ggml_backend_dev_by_type(enum lm_ggml_backend_dev_type type) {
@@ -163,14 +308,14 @@ lm_ggml_backend_dev_t lm_ggml_backend_dev_by_type(enum lm_ggml_backend_dev_type 
             return dev;
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 // Convenience functions
 lm_ggml_backend_t lm_ggml_backend_init_by_name(const char * name, const char * params) {
     lm_ggml_backend_dev_t dev = lm_ggml_backend_dev_by_name(name);
     if (!dev) {
-        return NULL;
+        return nullptr;
     }
     return lm_ggml_backend_dev_init(dev, params);
 }
@@ -178,7 +323,7 @@ lm_ggml_backend_t lm_ggml_backend_init_by_name(const char * name, const char * p
 lm_ggml_backend_t lm_ggml_backend_init_by_type(enum lm_ggml_backend_dev_type type, const char * params) {
     lm_ggml_backend_dev_t dev = lm_ggml_backend_dev_by_type(type);
     if (!dev) {
-        return NULL;
+        return nullptr;
     }
     return lm_ggml_backend_dev_init(dev, params);
 }
@@ -189,7 +334,97 @@ lm_ggml_backend_t lm_ggml_backend_init_best(void) {
         dev = lm_ggml_backend_dev_by_type(LM_GGML_BACKEND_DEVICE_TYPE_CPU);
     }
     if (!dev) {
-        return NULL;
+        return nullptr;
     }
-    return lm_ggml_backend_dev_init(dev, NULL);
+    return lm_ggml_backend_dev_init(dev, nullptr);
+}
+
+// Dynamic loading
+lm_ggml_backend_reg_t lm_ggml_backend_load(const char * path) {
+    return get_reg().load_backend(path, false);
+}
+
+void lm_ggml_backend_unload(lm_ggml_backend_reg_t reg) {
+    get_reg().unload_backend(reg, true);
+}
+
+void lm_ggml_backend_load_all() {
+    std::vector<std::string> search_prefix;
+
+    // add the executable directory to the search path
+    // FIXME: this is convenient for development, but it should probably be disabled in production
+
+#if defined(__APPLE__)
+    // get executable path
+    std::vector<char> path;
+    uint32_t size;
+    while (true) {
+        size = path.size();
+        if (_NSGetExecutablePath(path.data(), &size) == 0) {
+            break;
+        }
+        path.resize(size);
+    }
+    std::string base_path(path.data(), size);
+    // remove executable name
+    auto last_slash = base_path.find_last_of('/');
+    if (last_slash != std::string::npos) {
+        base_path = base_path.substr(0, last_slash);
+    }
+    search_prefix.push_back(base_path + "/");
+#elif defined(__linux__)
+    std::string base_path = ".";
+    std::vector<char> path(1024);
+    while (true) {
+        // get executable path
+        ssize_t len = readlink("/proc/self/exe", path.data(), path.size());
+        if (len == -1) {
+            break;
+        }
+        if (len < (ssize_t) path.size()) {
+            base_path = std::string(path.data(), len);
+            // remove executable name
+            auto last_slash = base_path.find_last_of('/');
+            if (last_slash != std::string::npos) {
+                base_path = base_path.substr(0, last_slash);
+            }
+            break;
+        }
+        path.resize(path.size() * 2);
+    }
+
+    search_prefix.push_back(base_path + "/");
+#endif
+
+    auto & reg = get_reg();
+
+    auto try_load = [&](const std::string & name) {
+        std::string os_name;
+#ifdef _WIN32
+        os_name = "ggml-" + name + ".dll";
+#else
+        os_name = "libggml-" + name + ".so";
+#endif
+        if (reg.load_backend(os_name.c_str(), true)) {
+            return;
+        }
+        for (const auto & prefix : search_prefix) {
+            if (reg.load_backend((prefix + os_name).c_str(), true)) {
+                return;
+            }
+        }
+    };
+
+    try_load("amx");
+    try_load("blas");
+    try_load("cann");
+    try_load("cuda");
+    try_load("hip");
+    try_load("kompute");
+    try_load("metal");
+    try_load("rpc");
+    try_load("sycl");
+    try_load("vulkan");
+    try_load("musa");
+    try_load("cpu");
 }

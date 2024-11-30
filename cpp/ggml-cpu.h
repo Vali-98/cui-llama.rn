@@ -7,29 +7,6 @@
 extern "C" {
 #endif
 
-    // Scheduling priorities
-    enum lm_ggml_sched_priority {
-        LM_GGML_SCHED_PRIO_NORMAL,
-        LM_GGML_SCHED_PRIO_MEDIUM,
-        LM_GGML_SCHED_PRIO_HIGH,
-        LM_GGML_SCHED_PRIO_REALTIME
-    };
-
-    // Threadpool params
-    // Use lm_ggml_threadpool_params_default() or lm_ggml_threadpool_params_init() to populate the defaults
-    struct lm_ggml_threadpool_params {
-        bool                cpumask[LM_GGML_MAX_N_THREADS]; // mask of cpu cores (all-zeros means use default affinity settings)
-        int                 n_threads;                   // number of threads
-        enum lm_ggml_sched_priority prio;                   // thread priority
-        uint32_t            poll;                        // polling level (0 - no polling, 100 - aggressive polling)
-        bool                strict_cpu;                  // strict cpu placement
-        bool                paused;                      // start in paused state
-    };
-
-    struct lm_ggml_threadpool;     // forward declaration, see ggml.c
-
-    typedef struct lm_ggml_threadpool * lm_ggml_threadpool_t;
-
     // the compute plan that needs to be prepared for lm_ggml_graph_compute()
     // since https://github.com/ggerganov/ggml/issues/287
     struct lm_ggml_cplan {
@@ -75,14 +52,11 @@ extern "C" {
     LM_GGML_BACKEND_API float   lm_ggml_get_f32_nd(const struct lm_ggml_tensor * tensor, int i0, int i1, int i2, int i3);
     LM_GGML_BACKEND_API void    lm_ggml_set_f32_nd(const struct lm_ggml_tensor * tensor, int i0, int i1, int i2, int i3, float value);
 
-    LM_GGML_BACKEND_API struct lm_ggml_threadpool_params lm_ggml_threadpool_params_default(int n_threads);
-    LM_GGML_BACKEND_API void                          lm_ggml_threadpool_params_init   (struct lm_ggml_threadpool_params * p, int n_threads);
-    LM_GGML_BACKEND_API bool                          lm_ggml_threadpool_params_match  (const struct lm_ggml_threadpool_params * p0, const struct lm_ggml_threadpool_params * p1);
-    LM_GGML_BACKEND_API struct lm_ggml_threadpool *      lm_ggml_threadpool_new          (struct lm_ggml_threadpool_params  * params);
-    LM_GGML_BACKEND_API void                          lm_ggml_threadpool_free         (struct lm_ggml_threadpool * threadpool);
-    LM_GGML_BACKEND_API int                           lm_ggml_threadpool_get_n_threads(struct lm_ggml_threadpool * threadpool);
-    LM_GGML_BACKEND_API void                          lm_ggml_threadpool_pause        (struct lm_ggml_threadpool * threadpool);
-    LM_GGML_BACKEND_API void                          lm_ggml_threadpool_resume       (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_BACKEND_API struct lm_ggml_threadpool *      lm_ggml_threadpool_new           (struct lm_ggml_threadpool_params  * params);
+    LM_GGML_BACKEND_API void                          lm_ggml_threadpool_free          (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_BACKEND_API int                           lm_ggml_threadpool_get_n_threads (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_BACKEND_API void                          lm_ggml_threadpool_pause         (struct lm_ggml_threadpool * threadpool);
+    LM_GGML_BACKEND_API void                          lm_ggml_threadpool_resume        (struct lm_ggml_threadpool * threadpool);
 
     // lm_ggml_graph_plan() has to be called before lm_ggml_graph_compute()
     // when plan.work_size > 0, caller must allocate memory for plan.work_data
@@ -104,10 +78,10 @@ extern "C" {
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_sse3       (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_ssse3      (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_avx        (void);
+    LM_GGML_BACKEND_API int lm_ggml_cpu_has_avx_vnni   (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_avx2       (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_f16c       (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_fma        (void);
-    LM_GGML_BACKEND_API int lm_ggml_cpu_has_avx_vnni   (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_avx512     (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_avx512_vbmi(void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_avx512_vnni(void);

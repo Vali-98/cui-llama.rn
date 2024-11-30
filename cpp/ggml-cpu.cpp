@@ -541,16 +541,12 @@ static lm_ggml_backend_dev_t lm_ggml_backend_cpu_reg_get_device(lm_ggml_backend_
     return &lm_ggml_backend_cpu_device;
 }
 
-struct lm_ggml_backend_feature {
-    const char * name;
-    const char * value;
-};
-
-// Not used yet
 // This is intended to replace the the lm_ggml_cpu_has_* functions when loading the CPU backend dynamically,
-// and additionally to allow other backends to expose their own list of features that applications can query using the same API.
+// and additionally to allow other backends to expose their own list of features that applications can query using the same API
 static lm_ggml_backend_feature * lm_ggml_backend_cpu_get_features(lm_ggml_backend_reg_t reg) {
     static std::vector<lm_ggml_backend_feature> features = []() {
+        lm_ggml_cpu_init();
+
         std::vector<lm_ggml_backend_feature> features;
         if (lm_ggml_cpu_has_sse3()) {
             features.push_back({ "SSE3", "1" });
@@ -561,6 +557,9 @@ static lm_ggml_backend_feature * lm_ggml_backend_cpu_get_features(lm_ggml_backen
         if (lm_ggml_cpu_has_avx()) {
             features.push_back({ "AVX", "1" });
         }
+        if (lm_ggml_cpu_has_avx_vnni()) {
+            features.push_back({ "AVX_VNNI", "1" });
+        }
         if (lm_ggml_cpu_has_avx2()) {
             features.push_back({ "AVX2", "1" });
         }
@@ -569,9 +568,6 @@ static lm_ggml_backend_feature * lm_ggml_backend_cpu_get_features(lm_ggml_backen
         }
         if (lm_ggml_cpu_has_fma()) {
             features.push_back({ "FMA", "1" });
-        }
-        if (lm_ggml_cpu_has_avx_vnni()) {
-            features.push_back({ "AVX_VNNI", "1" });
         }
         if (lm_ggml_cpu_has_avx512()) {
             features.push_back({ "AVX512", "1" });
@@ -619,6 +615,10 @@ static lm_ggml_backend_feature * lm_ggml_backend_cpu_get_features(lm_ggml_backen
         if (lm_ggml_cpu_has_llamafile()) {
             features.push_back({ "LLAMAFILE", "1" });
         }
+        // TODO: rename this
+    #ifdef LM_GGML_USE_CPU_AARCH64
+        features.push_back({ "AARCH64_REPACK", "1" });
+    #endif
 
         features.push_back({ nullptr, nullptr });
 
@@ -636,6 +636,29 @@ static void * lm_ggml_backend_cpu_get_proc_address(lm_ggml_backend_reg_t reg, co
     }
     if (strcmp(name, "lm_ggml_backend_dev_get_extra_bufts") == 0) {
         return (void *)lm_ggml_backend_cpu_get_extra_bufts;
+    }
+    if (strcmp(name, "lm_ggml_backend_get_features") == 0) {
+        return (void *)lm_ggml_backend_cpu_get_features;
+    }
+    if (strcmp(name, "lm_ggml_backend_set_abort_callback") == 0) {
+        return (void *)lm_ggml_backend_cpu_set_abort_callback;
+    }
+    if (strcmp(name, "lm_ggml_backend_cpu_numa_init") == 0) {
+        return (void *)lm_ggml_numa_init;
+    }
+    if (strcmp(name, "lm_ggml_backend_cpu_is_numa") == 0) {
+        return (void *)lm_ggml_is_numa;
+    }
+
+    // threadpool - TODO:  move to ggml-base
+    if (strcmp(name, "lm_ggml_threadpool_new") == 0) {
+        return (void *)lm_ggml_threadpool_new;
+    }
+    if (strcmp(name, "lm_ggml_threadpool_free") == 0) {
+        return (void *)lm_ggml_threadpool_free;
+    }
+    if (strcmp(name, "lm_ggml_backend_cpu_set_threadpool") == 0) {
+        return (void *)lm_ggml_backend_cpu_set_threadpool;
     }
 
     return NULL;
@@ -655,9 +678,12 @@ lm_ggml_backend_reg_t lm_ggml_backend_cpu_reg(void) {
     lm_ggml_cpu_init();
 
     static struct lm_ggml_backend_reg lm_ggml_backend_cpu_reg = {
-        /* .iface   = */ lm_ggml_backend_cpu_reg_i,
-        /* .context = */ NULL,
+        /* .api_version = */ LM_GGML_BACKEND_API_VERSION,
+        /* .iface       = */ lm_ggml_backend_cpu_reg_i,
+        /* .context     = */ NULL,
     };
 
     return &lm_ggml_backend_cpu_reg;
 }
+
+LM_GGML_BACKEND_DL_IMPL(lm_ggml_backend_cpu_reg)

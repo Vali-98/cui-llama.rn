@@ -72,8 +72,14 @@ cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/common.h ./cpp/common.h
 cp ./llama.cpp/common/common.cpp ./cpp/common.cpp
+cp ./llama.cpp/common/json.hpp ./cpp/json.hpp
 cp ./llama.cpp/common/sampling.h ./cpp/sampling.h
 cp ./llama.cpp/common/sampling.cpp ./cpp/sampling.cpp
+cp ./llama.cpp/common/speculative.h ./cpp/speculative.h
+cp ./llama.cpp/common/speculative.cpp ./cpp/speculative.cpp
+cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
+cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp
+
 
 # List of files to process
 files_add_lm_prefix=(
@@ -84,6 +90,11 @@ files_add_lm_prefix=(
   "./cpp/llama-grammar.cpp"
   "./cpp/llama-sampling.h"
   "./cpp/llama-sampling.cpp"
+  "./cpp/speculative.h"
+  "./cpp/speculative.cpp"
+  "./cpp/json-schema-to-grammar.h"
+  "./cpp/json-schema-to-grammar.cpp"
+  "./cpp/json.hpp"
   "./cpp/log.h"
   "./cpp/log.cpp"
   "./cpp/ggml.h"

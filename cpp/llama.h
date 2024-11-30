@@ -273,6 +273,9 @@ extern "C" {
     };
 
     struct llama_model_params {
+        // NULL-terminated list of devices to use for offloading (if NULL, all available devices are used)
+        lm_ggml_backend_dev_t * devices;
+
         int32_t n_gpu_layers; // number of layers to store in VRAM
         enum llama_split_mode split_mode; // how to split the model across multiple GPUs
 
@@ -667,6 +670,9 @@ extern "C" {
 
     // Apply the KV cache updates (such as K-shifts, defragmentation, etc.)
     LLAMA_API void llama_kv_cache_update(struct llama_context * ctx);
+
+    // Check if the context supports KV cache shifting
+    LLAMA_API bool llama_kv_cache_can_shift(struct llama_context * ctx);
 
     //
     // State / sessions

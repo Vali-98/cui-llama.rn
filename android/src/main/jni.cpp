@@ -259,7 +259,7 @@ Java_com_rnllama_LlamaContext_initContext(
 
     const char *model_path_chars = env->GetStringUTFChars(model_path_str, nullptr);
     defaultParams.model = model_path_chars;
-
+    
     defaultParams.n_ctx = n_ctx;
     defaultParams.n_batch = n_batch;
 
@@ -281,7 +281,7 @@ Java_com_rnllama_LlamaContext_initContext(
     int default_n_threads = max_threads == 4 ? 2 : min(4, max_threads);
     defaultParams.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
-    defaultParams.n_gpu_layers = n_gpu_layers;
+    // defaultParams.n_gpu_layers = n_gpu_layers;
     defaultParams.flash_attn = flash_attn;
 
     const char *cache_type_k_chars = env->GetStringUTFChars(cache_type_k, nullptr);
@@ -558,7 +558,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     //llama_reset_timings(llama->ctx);
 
     llama->params.prompt = env->GetStringUTFChars(prompt, nullptr);
-    llama->params.sparams.seed = (seed == -1) ? time(NULL) : seed;
+    llama->params.sampling.seed = (seed == -1) ? time(NULL) : seed;
 
     int max_threads = std::thread::hardware_concurrency();
     // Use 2 threads by default on 4-core devices, 4 threads on more cores
@@ -566,9 +566,9 @@ Java_com_rnllama_LlamaContext_doCompletion(
     llama->params.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
     llama->params.n_predict = n_predict;
-    llama->params.sparams.ignore_eos = ignore_eos;
+    llama->params.sampling.ignore_eos = ignore_eos;
 
-    auto & sparams = llama->params.sparams;
+    auto & sparams = llama->params.sampling;
     sparams.temp = temperature;
     sparams.penalty_last_n = penalty_last_n;
     sparams.penalty_repeat = penalty_repeat;
@@ -693,7 +693,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
             auto tokenResult = createWriteableMap(env);
             putString(env, tokenResult, "token", to_send.c_str());
 
-            if (llama->params.sparams.n_probs > 0) {
+            if (llama->params.sampling.n_probs > 0) {
               const std::vector<llama_token> to_send_toks = common_tokenize(llama->ctx, to_send, false);
               size_t probs_pos = std::min(sent_token_probs_index, llama->generated_token_probs.size());
               size_t probs_stop_pos = std::min(sent_token_probs_index + to_send_toks.size(), llama->generated_token_probs.size());

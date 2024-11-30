@@ -252,6 +252,7 @@ void lm_ggml_backend_tensor_get_async(lm_ggml_backend_t backend, const struct lm
 }
 
 void lm_ggml_backend_tensor_set(struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
+    LM_GGML_ASSERT(tensor);
     lm_ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
 
     if (size == 0) {
@@ -266,6 +267,7 @@ void lm_ggml_backend_tensor_set(struct lm_ggml_tensor * tensor, const void * dat
 }
 
 void lm_ggml_backend_tensor_get(const struct lm_ggml_tensor * tensor, void * data, size_t offset, size_t size) {
+    LM_GGML_ASSERT(tensor);
     lm_ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
 
     if (size == 0) {
@@ -279,7 +281,7 @@ void lm_ggml_backend_tensor_get(const struct lm_ggml_tensor * tensor, void * dat
     buf->iface.get_tensor(buf, tensor, data, offset, size);
 }
 
-LM_GGML_API void lm_ggml_backend_tensor_memset(struct lm_ggml_tensor * tensor, uint8_t value, size_t offset, size_t size) {
+void lm_ggml_backend_tensor_memset(struct lm_ggml_tensor * tensor, uint8_t value, size_t offset, size_t size) {
     lm_ggml_backend_buffer_t buf = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
 
     if (size == 0) {
@@ -689,7 +691,7 @@ static int lm_ggml_backend_sched_backend_id(lm_ggml_backend_sched_t sched, lm_gg
 }
 
 static int lm_ggml_backend_sched_backend_from_buffer(lm_ggml_backend_sched_t sched, const struct lm_ggml_tensor * tensor, const struct lm_ggml_tensor * op) {
-    lm_ggml_backend_buffer_t buffer = tensor->buffer;
+    lm_ggml_backend_buffer_t buffer = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
     if (buffer == NULL) {
         return -1;
     }
@@ -722,8 +724,6 @@ static char causes[LM_GGML_DEFAULT_GRAPH_SIZE*16 + LM_GGML_SCHED_MAX_SPLITS_DEBU
 
 // returns the backend that should be used for the node based on the current locations
 static int lm_ggml_backend_sched_backend_id_from_cur(lm_ggml_backend_sched_t sched, struct lm_ggml_tensor * tensor) {
-    // TODO: use supports_op to check if the backend supports the op
-
     // assign pre-allocated nodes to their backend
     int cur_backend_id = lm_ggml_backend_sched_backend_from_buffer(sched, tensor, tensor);
     if (cur_backend_id != -1) {
@@ -742,7 +742,7 @@ static int lm_ggml_backend_sched_backend_id_from_cur(lm_ggml_backend_sched_t sch
 
     if (tensor->buffer || (tensor->view_src && tensor->view_src->buffer)) {
         // since the tensor is pre-allocated, it cannot be moved to another backend
-        LM_GGML_ABORT("pre-allocated tensor in a backend that cannot run the operation");
+        LM_GGML_ABORT("pre-allocated tensor (%s) in a backend that cannot run the operation", tensor->name);
     }
 
     // graph input
@@ -1538,12 +1538,13 @@ bool lm_ggml_backend_sched_reserve(lm_ggml_backend_sched_t sched, struct lm_ggml
 
     lm_ggml_backend_sched_split_graph(sched, measure_graph);
 
+    lm_ggml_backend_sched_synchronize(sched);
+
     if (!lm_ggml_gallocr_reserve_n(sched->galloc, &sched->graph, sched->node_backend_ids, sched->leaf_backend_ids)) {
         return false;
     }
 
     lm_ggml_backend_sched_reset(sched);
-    lm_ggml_backend_sched_synchronize(sched);
 
     return true;
 }

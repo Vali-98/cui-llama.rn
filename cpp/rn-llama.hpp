@@ -197,7 +197,6 @@ static std::string tokens_to_str(llama_context *ctx, Iter begin, Iter end)
     return ret;
 }
 
-
 struct llama_rn_context
 {
     bool is_predicting = false;
@@ -253,7 +252,7 @@ struct llama_rn_context
     {
         is_interrupted = false;
         params.antiprompt.clear();
-        params.sparams.grammar.clear();
+        params.sampling.grammar.clear();
         num_prompt_tokens = 0;
         num_tokens_predicted = 0;
         generated_text = "";
@@ -267,14 +266,14 @@ struct llama_rn_context
         incomplete = false;
         n_remain = 0;
         n_past = 0;
-        params.sparams.n_prev = n_ctx;
+        params.sampling.n_prev = n_ctx;
     }
 
     bool initSampling() {
         if (ctx_sampling != nullptr) {
             common_sampler_free(ctx_sampling);
         }
-        ctx_sampling = common_sampler_init(model, params.sparams);
+        ctx_sampling = common_sampler_init(model, params.sampling);
         return ctx_sampling != nullptr;
     }
 
@@ -289,6 +288,7 @@ struct llama_rn_context
            LOG_ERROR("unable to load model: %s", params_.model.c_str());
            return false;
         }
+        LOG_VERBOSE("getting n_ctx");
         n_ctx = llama_n_ctx(ctx);
         return true;
     }
@@ -474,7 +474,7 @@ struct llama_rn_context
 
             llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling);
 
-            const int32_t n_probs = params.sparams.n_probs;
+            const int32_t n_probs = params.sampling.n_probs;
 
             // deprecated
             /*if (params.sparams.temp <= 0 && n_probs > 0)
@@ -553,7 +553,7 @@ struct llama_rn_context
         const std::string token_text = token_with_probs.tok == -1 ? "" : common_token_to_piece(ctx, token_with_probs.tok);
         generated_text += token_text;
 
-        if (params.sparams.n_probs > 0)
+        if (params.sampling.n_probs > 0)
         {
             generated_token_probs.push_back(token_with_probs);
         }
