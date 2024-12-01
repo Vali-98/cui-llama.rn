@@ -13,6 +13,9 @@ set(
     ${RNLLAMA_LIB_DIR}/llama-sampling.cpp
     ${RNLLAMA_LIB_DIR}/llama-vocab.cpp
     ${RNLLAMA_LIB_DIR}/log.cpp
+    
+    ${RNLLAMA_LIB_DIR}/amx/amx.cpp
+    ${RNLLAMA_LIB_DIR}/amx/mmq.cpp
 
     ${RNLLAMA_LIB_DIR}/ggml-aarch64.c
     ${RNLLAMA_LIB_DIR}/llama-grammar.cpp
