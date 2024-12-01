@@ -742,7 +742,8 @@ static int lm_ggml_backend_sched_backend_id_from_cur(lm_ggml_backend_sched_t sch
 
     if (tensor->buffer || (tensor->view_src && tensor->view_src->buffer)) {
         // since the tensor is pre-allocated, it cannot be moved to another backend
-        LM_GGML_ABORT("pre-allocated tensor (%s) in a backend that cannot run the operation", tensor->name);
+        lm_ggml_backend_buffer_t buffer = tensor->view_src ? tensor->view_src->buffer : tensor->buffer;
+        LM_GGML_ABORT("pre-allocated tensor (%s) in a buffer (%s) that cannot run the operation (%s)", tensor->name, lm_ggml_backend_buffer_name(buffer), lm_ggml_op_name(tensor->op));
     }
 
     // graph input

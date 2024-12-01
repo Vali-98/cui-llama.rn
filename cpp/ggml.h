@@ -390,6 +390,9 @@ extern "C" {
         LM_GGML_TYPE_Q4_0_8_8 = 33,
         LM_GGML_TYPE_TQ1_0   = 34,
         LM_GGML_TYPE_TQ2_0   = 35,
+        LM_GGML_TYPE_IQ4_NL_4_4 = 36,
+        // LM_GGML_TYPE_IQ4_NL_4_8 = 37,
+        // LM_GGML_TYPE_IQ4_NL_8_8 = 38,
         LM_GGML_TYPE_COUNT,
     };
 

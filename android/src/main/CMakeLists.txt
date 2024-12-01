@@ -55,7 +55,7 @@ function(build_library target_name cpu_flags)
 
     target_link_libraries(${target_name} ${LOG_LIB} android)
 
-    target_compile_options(${target_name} PRIVATE -pthread ${cpu_flags} -DLM_GGML_USE_CPU)
+    target_compile_options(${target_name} PRIVATE -pthread ${cpu_flags} -DLM_GGML_USE_CPU -DLM_GGML_USE_CPU_AARCH64)
 
     if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
         target_compile_options(${target_name} PRIVATE -DRNLLAMA_ANDROID_ENABLE_LOGGING)
@@ -63,7 +63,7 @@ function(build_library target_name cpu_flags)
 
     # NOTE: If you want to debug the native code, you can uncomment if and endif
     # Note that it will be extremely slow
-     if (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+    # if (NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
         target_compile_options(${target_name} PRIVATE -O3 -DNDEBUG -DRNLLAMA_USE_FD_FILE)
         target_compile_options(${target_name} PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
         target_compile_options(${target_name} PRIVATE -ffunction-sections -fdata-sections)
@@ -71,7 +71,7 @@ function(build_library target_name cpu_flags)
         target_link_options(${target_name} PRIVATE -Wl,--gc-sections)
         target_link_options(${target_name} PRIVATE -Wl,--exclude-libs,ALL)
         target_link_options(${target_name} PRIVATE -flto)
-     endif ()
+    # endif ()
 endfunction()
 
 

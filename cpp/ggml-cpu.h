@@ -91,6 +91,7 @@ extern "C" {
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_neon       (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_arm_fma    (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_fp16_va    (void);
+    LM_GGML_BACKEND_API int lm_ggml_cpu_has_dotprod    (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_matmul_int8(void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_has_sve        (void);
     LM_GGML_BACKEND_API int lm_ggml_cpu_get_sve_cnt    (void);  // sve vector length in bytes

@@ -3,6 +3,7 @@
 #include "ggml-cpu.h"
 #include "ggml-cpu-aarch64.h"
 #include "ggml-impl.h"
+#include "amx/amx.h"
 #include <cctype>
 #include <string>
 #include <vector>
@@ -134,12 +135,16 @@ static lm_ggml_backend_buffer_type_t * lm_ggml_backend_cpu_get_extra_bufts(lm_gg
     static std::vector<lm_ggml_backend_buffer_type_t> bufts = []() {
         std::vector<lm_ggml_backend_buffer_type_t> bufts;
 
-#ifdef LM_GGML_USE_CPU_HBM
-        bufts.push_back(lm_ggml_backend_cpu_hbm_buffer_type());
+#if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
+        if (lm_ggml_backend_amx_buffer_type()) {
+            bufts.push_back(lm_ggml_backend_amx_buffer_type());
+        }
 #endif
 
 #ifdef LM_GGML_USE_CPU_AARCH64
-        bufts.push_back(lm_ggml_backend_cpu_aarch64_buffer_type());
+        if (lm_ggml_backend_cpu_aarch64_buffer_type()) {
+            bufts.push_back(lm_ggml_backend_cpu_aarch64_buffer_type());
+        }
 #endif
 
         bufts.push_back(NULL);
@@ -456,11 +461,26 @@ static bool lm_ggml_backend_cpu_device_supports_op(lm_ggml_backend_dev_t dev, co
     const struct lm_ggml_tensor * src0 = op->src[0];
     const struct lm_ggml_tensor * src1 = op->src[1];
 
+    if (op->op == LM_GGML_OP_NONE || op->op == LM_GGML_OP_RESHAPE || op->op == LM_GGML_OP_VIEW || op->op == LM_GGML_OP_PERMUTE || op->op == LM_GGML_OP_TRANSPOSE) {
+        return true;
+    }
+
     if (src0 && src0->buffer && lm_ggml_backend_cpu_buft_is_aarch64(src0->buffer->buft)) {
-        if (op->op != LM_GGML_OP_MUL_MAT || src0->type != LM_GGML_TYPE_Q4_0 || lm_ggml_aarch64_get_optimal_repack_type(src0) == LM_GGML_TYPE_Q4_0) {
+        if (op->op != LM_GGML_OP_MUL_MAT || src0->type == lm_ggml_aarch64_get_optimal_repack_type(src0)) {
             return false;
         }
     }
+
+#if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
+    if (src0 && src0->buffer && lm_ggml_backend_amx_buft_is_amx(src0->buffer->buft)) {
+        return lm_ggml_backend_amx_device_supports_op(op);
+    }
+    for (int i = 1; i < LM_GGML_MAX_SRC; i++) {
+        if (op->src[i] && op->src[i]->buffer && lm_ggml_backend_amx_buft_is_amx(op->src[i]->buffer->buft)) {
+            return false;
+        }
+    }
+#endif
 
     for (int i = 1; i < LM_GGML_MAX_SRC; i++) {
         if (op->src[i] && op->src[i]->buffer && lm_ggml_backend_cpu_buft_is_aarch64(op->src[i]->buffer->buft)) {
@@ -491,7 +511,13 @@ static bool lm_ggml_backend_cpu_device_supports_op(lm_ggml_backend_dev_t dev, co
 }
 
 static bool lm_ggml_backend_cpu_device_supports_buft(lm_ggml_backend_dev_t dev, lm_ggml_backend_buffer_type_t buft) {
-    return lm_ggml_backend_buft_is_host(buft) || lm_ggml_backend_cpu_buft_is_aarch64(buft);
+    bool supported = lm_ggml_backend_buft_is_host(buft) || lm_ggml_backend_cpu_buft_is_aarch64(buft);
+
+#if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
+    supported = supported || lm_ggml_backend_amx_buft_is_amx(buft);
+#endif
+
+    return supported;
 
     LM_GGML_UNUSED(dev);
 }

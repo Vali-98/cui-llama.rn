@@ -844,6 +844,15 @@ static const struct lm_ggml_type_traits type_traits[LM_GGML_TYPE_COUNT] = {
         .to_float                 = (lm_ggml_to_float_t) dequantize_row_tq2_0,
         .from_float_ref           = (lm_ggml_from_float_t) quantize_row_tq2_0_ref,
     },
+    [LM_GGML_TYPE_IQ4_NL_4_4] = {
+        .type_name                = "iq4_nl_4x4",
+        .blck_size                = QK4_NL,
+        .blck_size_interleave     = 4,
+        .type_size                = sizeof(block_iq4_nl),
+        .is_quantized             = true,
+        .to_float                 = NULL,
+        .from_float_ref           = NULL,
+    },
 };
 
 const struct lm_ggml_type_traits * lm_ggml_get_type_traits(enum lm_ggml_type type) {

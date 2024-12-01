@@ -41,6 +41,8 @@ cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-quants.c ./cpp/ggml-cpu-quants.c
 
 cp ./llama.cpp/ggml/src/ggml-metal/ggml-metal.m ./cpp/ggml-metal.m
 
+cp -r ./llama.cpp/ggml/src/ggml-cpu/amx ./cpp
+
 cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.h ./cpp/sgemm.h
 cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp ./cpp/sgemm.cpp
 
@@ -132,6 +134,13 @@ files_add_lm_prefix=(
   "./cpp/sgemm.cpp"
   "./cpp/ggml-aarch64.h"
   "./cpp/ggml-aarch64.c"
+
+  # amx
+  "./cpp/amx/amx.h"
+  "./cpp/amx/amx.cpp"
+  "./cpp/amx/mmq.h"
+  "./cpp/amx/mmq.cpp"
+  "./cpp/amx/common.h"
 )
 
 # Loop through each file and run the sed commands
@@ -193,7 +202,7 @@ yarn example
 # patch -p0 -d ./cpp < ./scripts/ggml.c.patch
 patch -p0 -d ./cpp < ./scripts/ggml-cpu-aarch64.c.patch
 patch -p0 -d ./cpp < ./scripts/ggml-quants.c.patch
-patch -p0 -d ./cpp < ./scripts/sgemm.cpp.patch
+# patch -p0 -d ./cpp < ./scripts/sgemm.cpp.patch
 
 if [ "$OS" = "Darwin" ]; then
   # Build metallib (~1.4MB)
