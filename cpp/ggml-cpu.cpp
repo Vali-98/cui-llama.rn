@@ -2,11 +2,16 @@
 #include "ggml-backend-impl.h"
 #include "ggml-cpu.h"
 #include "ggml-cpu-aarch64.h"
+#include "ggml-cpu-traits.h"
 #include "ggml-impl.h"
-#include "amx/amx.h"
+
 #include <cctype>
 #include <string>
 #include <vector>
+
+#ifdef LM_GGML_USE_CPU_HBM
+#include "ggml-cpu-hbm.h"
+#endif
 
 #if defined(__APPLE__)
 #include <sys/types.h>
@@ -23,115 +28,7 @@
 
 // ggml-backend interface
 
-#ifdef LM_GGML_USE_CPU_HBM
-
-// buffer type HBM
-
-#include <hbwmalloc.h>
-
-static const char * lm_ggml_backend_cpu_hbm_buffer_type_get_name(lm_ggml_backend_buffer_type_t buft) {
-    return "CPU_HBM";
-
-    LM_GGML_UNUSED(buft);
-}
-
-static void lm_ggml_backend_cpu_hbm_buffer_free_buffer(lm_ggml_backend_buffer_t buffer) {
-    hbw_free(buffer->context);
-}
-
-static lm_ggml_backend_buffer_t lm_ggml_backend_cpu_hbm_buffer_type_alloc_buffer(lm_ggml_backend_buffer_type_t buft, size_t size) {
-    void * ptr;
-    int result = hbw_posix_memalign(&ptr, lm_ggml_backend_cpu_buffer_type_get_alignment(buft), size);
-    if (result != 0) {
-        LM_GGML_LOG_ERROR("failed to allocate HBM buffer of size %zu\n", size);
-        return NULL;
-    }
-
-    lm_ggml_backend_buffer_t buffer = lm_ggml_backend_cpu_buffer_from_ptr(ptr, size);
-    buffer->buft = buft;
-    buffer->iface.free_buffer = lm_ggml_backend_cpu_hbm_buffer_free_buffer;
-
-    return buffer;
-}
-
-lm_ggml_backend_buffer_type_t lm_ggml_backend_cpu_hbm_buffer_type(void) {
-    static struct lm_ggml_backend_buffer_type lm_ggml_backend_cpu_buffer_type_hbm = {
-        /* .iface    = */ {
-            /* .get_name         = */ lm_ggml_backend_cpu_hbm_buffer_type_get_name,
-            /* .alloc_buffer     = */ lm_ggml_backend_cpu_hbm_buffer_type_alloc_buffer,
-            /* .get_alignment    = */ lm_ggml_backend_cpu_buffer_type_get_alignment,
-            /* .get_max_size     = */ NULL, // defaults to SIZE_MAX
-            /* .get_alloc_size   = */ NULL, // defaults to lm_ggml_nbytes
-            /* .is_host          = */ lm_ggml_backend_cpu_buffer_type_is_host,
-        },
-        /* .context  = */ NULL,
-    };
-
-    return &lm_ggml_backend_cpu_buffer_type_hbm;
-}
-#endif
-
-// buffer type AARCH64
-
-static void lm_ggml_backend_cpu_aarch64_buffer_init_tensor(lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor) {
-    tensor->extra = (void *)lm_ggml_aarch64_get_optimal_repack_type(tensor); // NOLINT
-
-    LM_GGML_UNUSED(buffer);
-}
-
-static void lm_ggml_backend_cpu_aarch64_buffer_set_tensor(lm_ggml_backend_buffer_t buffer, struct lm_ggml_tensor * tensor, const void * data, size_t offset, size_t size) {
-    LM_GGML_ASSERT(offset == 0);
-    LM_GGML_ASSERT(size == lm_ggml_nbytes(tensor));
-
-    enum lm_ggml_type repack_type = (enum lm_ggml_type)(intptr_t)tensor->extra;
-
-    lm_ggml_aarch64_repack_tensor(tensor, repack_type, data, size);
-
-    LM_GGML_UNUSED(buffer);
-}
-
-static const char * lm_ggml_backend_cpu_aarch64_buffer_type_get_name(lm_ggml_backend_buffer_type_t buft) {
-    return "CPU_AARCH64";
-
-    LM_GGML_UNUSED(buft);
-}
-
-static lm_ggml_backend_buffer_t lm_ggml_backend_cpu_aarch64_buffer_type_alloc_buffer(lm_ggml_backend_buffer_type_t buft, size_t size) {
-    auto * buffer = lm_ggml_backend_buft_alloc_buffer(lm_ggml_backend_cpu_buffer_type(), size);
-
-    if (buffer == NULL) {
-        return NULL;
-    }
-
-    buffer->buft = buft;
-    buffer->iface.init_tensor = lm_ggml_backend_cpu_aarch64_buffer_init_tensor;
-    buffer->iface.set_tensor = lm_ggml_backend_cpu_aarch64_buffer_set_tensor;
-
-    return buffer;
-}
-
-lm_ggml_backend_buffer_type_t lm_ggml_backend_cpu_aarch64_buffer_type(void) {
-    static struct lm_ggml_backend_buffer_type lm_ggml_backend_cpu_buffer_type_aarch64 = {
-        /* .iface    = */ {
-            /* .get_name         = */ lm_ggml_backend_cpu_aarch64_buffer_type_get_name,
-            /* .alloc_buffer     = */ lm_ggml_backend_cpu_aarch64_buffer_type_alloc_buffer,
-            /* .get_alignment    = */ lm_ggml_backend_cpu_buffer_type()->iface.get_alignment,
-            /* .get_max_size     = */ NULL, // defaults to SIZE_MAX
-            /* .get_alloc_size   = */ NULL, // defaults to lm_ggml_nbytes
-            /* .is_host          = */ NULL,
-        },
-        /* .device  = */ lm_ggml_backend_reg_dev_get(lm_ggml_backend_cpu_reg(), 0),
-        /* .context = */ NULL,
-    };
-
-    return &lm_ggml_backend_cpu_buffer_type_aarch64;
-}
-
-bool lm_ggml_backend_cpu_buft_is_aarch64(lm_ggml_backend_buffer_type_t buft) {
-    return buft == lm_ggml_backend_cpu_aarch64_buffer_type();
-}
-
-static lm_ggml_backend_buffer_type_t * lm_ggml_backend_cpu_get_extra_bufts(lm_ggml_backend_dev_t device) {
+std::vector<lm_ggml_backend_buffer_type_t>& lm_ggml_backend_cpu_get_extra_buffers_type() {
     static std::vector<lm_ggml_backend_buffer_type_t> bufts = []() {
         std::vector<lm_ggml_backend_buffer_type_t> bufts;
 
@@ -152,9 +49,20 @@ static lm_ggml_backend_buffer_type_t * lm_ggml_backend_cpu_get_extra_bufts(lm_gg
         return bufts;
     }();
 
-    return bufts.data();
+    return bufts;
+}
+
+static lm_ggml_backend_buffer_type_t * lm_ggml_backend_cpu_device_get_extra_buffers_type(lm_ggml_backend_dev_t device) {
+    return lm_ggml_backend_cpu_get_extra_buffers_type().data();
 
     LM_GGML_UNUSED(device);
+}
+
+static bool lm_ggml_backend_cpu_is_extra_buffer_type(lm_ggml_backend_buffer_type_t buft) {
+    for (auto extra : lm_ggml_backend_cpu_get_extra_buffers_type()) {
+        if (extra && extra == buft) return true;
+    }
+    return false;
 }
 
 // CPU backend - backend (stream)
@@ -465,25 +373,19 @@ static bool lm_ggml_backend_cpu_device_supports_op(lm_ggml_backend_dev_t dev, co
         return true;
     }
 
-    if (src0 && src0->buffer && lm_ggml_backend_cpu_buft_is_aarch64(src0->buffer->buft)) {
-        if (op->op != LM_GGML_OP_MUL_MAT || src0->type == lm_ggml_aarch64_get_optimal_repack_type(src0)) {
-            return false;
+    // extra_buffer_op?
+    for (auto extra : lm_ggml_backend_cpu_get_extra_buffers_type()) {
+        if (extra) {
+            auto buf_extra = (ggml::cpu::extra_buffer_type*) extra->context;
+            if (buf_extra && buf_extra->supports_op(dev, op)) {
+                return true;
+            }
         }
     }
 
-#if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
-    if (src0 && src0->buffer && lm_ggml_backend_amx_buft_is_amx(src0->buffer->buft)) {
-        return lm_ggml_backend_amx_device_supports_op(op);
-    }
-    for (int i = 1; i < LM_GGML_MAX_SRC; i++) {
-        if (op->src[i] && op->src[i]->buffer && lm_ggml_backend_amx_buft_is_amx(op->src[i]->buffer->buft)) {
-            return false;
-        }
-    }
-#endif
-
-    for (int i = 1; i < LM_GGML_MAX_SRC; i++) {
-        if (op->src[i] && op->src[i]->buffer && lm_ggml_backend_cpu_buft_is_aarch64(op->src[i]->buffer->buft)) {
+    // the other case need host buffer.
+    for (int i = 0; i < LM_GGML_MAX_SRC; i++) {
+        if (op->src[i] && op->src[i]->buffer && !lm_ggml_backend_buft_is_host(op->src[i]->buffer->buft)) {
             return false;
         }
     }
@@ -506,19 +408,10 @@ static bool lm_ggml_backend_cpu_device_supports_op(lm_ggml_backend_dev_t dev, co
         default:
             return true;
     }
-
-    LM_GGML_UNUSED(dev);
 }
 
 static bool lm_ggml_backend_cpu_device_supports_buft(lm_ggml_backend_dev_t dev, lm_ggml_backend_buffer_type_t buft) {
-    bool supported = lm_ggml_backend_buft_is_host(buft) || lm_ggml_backend_cpu_buft_is_aarch64(buft);
-
-#if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
-    supported = supported || lm_ggml_backend_amx_buft_is_amx(buft);
-#endif
-
-    return supported;
-
+    return lm_ggml_backend_buft_is_host(buft) || lm_ggml_backend_cpu_is_extra_buffer_type(buft);
     LM_GGML_UNUSED(dev);
 }
 
@@ -641,7 +534,15 @@ static lm_ggml_backend_feature * lm_ggml_backend_cpu_get_features(lm_ggml_backen
         if (lm_ggml_cpu_has_llamafile()) {
             features.push_back({ "LLAMAFILE", "1" });
         }
-        // TODO: rename this
+    #ifdef LM_GGML_USE_ACCELERATE
+        features.push_back({ "ACCELERATE", "1" });
+    #endif
+    #ifdef LM_GGML_USE_CPU_HBM
+        features.push_back({ "CPU_HBM", "1" });
+    #endif
+    #ifdef LM_GGML_USE_OPENMP
+        features.push_back({ "OPENMP", "1" });
+    #endif
     #ifdef LM_GGML_USE_CPU_AARCH64
         features.push_back({ "AARCH64_REPACK", "1" });
     #endif
@@ -658,10 +559,12 @@ static lm_ggml_backend_feature * lm_ggml_backend_cpu_get_features(lm_ggml_backen
 
 static void * lm_ggml_backend_cpu_get_proc_address(lm_ggml_backend_reg_t reg, const char * name) {
     if (strcmp(name, "lm_ggml_backend_set_n_threads") == 0) {
-        return (void *)lm_ggml_backend_cpu_set_n_threads;
+        lm_ggml_backend_set_n_threads_t fct = lm_ggml_backend_cpu_set_n_threads;
+        return (void *)fct;
     }
     if (strcmp(name, "lm_ggml_backend_dev_get_extra_bufts") == 0) {
-        return (void *)lm_ggml_backend_cpu_get_extra_bufts;
+        lm_ggml_backend_dev_get_extra_bufts_t fct = lm_ggml_backend_cpu_device_get_extra_buffers_type;
+        return (void *)fct;
     }
     if (strcmp(name, "lm_ggml_backend_get_features") == 0) {
         return (void *)lm_ggml_backend_cpu_get_features;

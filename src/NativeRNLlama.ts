@@ -24,11 +24,11 @@ export type NativeContextParams = {
   /**
    * KV cache data type for the K (Experimental in llama.cpp)
    */
-  cache_type_k?: string
+  cache_type_k?: number
   /**
    * KV cache data type for the V (Experimental in llama.cpp)
    */
-  cache_type_v?: string
+  cache_type_v?: number
 
   use_mlock?: boolean
   use_mmap?: boolean
@@ -118,7 +118,7 @@ export type NativeCompletionParams = {
   /**
    * Penalize newline tokens when applying the repeat penalty. Default: `false`
    */
-  penalize_nl?: boolean
+  // penalize_nl?: boolean
   /**
    * Enable Mirostat sampling, controlling perplexity during text generation. Default: `0`, where `0` is disabled, `1` is Mirostat, and `2` is Mirostat 2.0.
    */

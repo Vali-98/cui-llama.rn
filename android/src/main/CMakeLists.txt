@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 
 project(llama.rn)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(RNLLAMA_LIB_DIR ${CMAKE_SOURCE_DIR}/../../../cpp)
 
 include_directories(${RNLLAMA_LIB_DIR})
@@ -14,10 +14,9 @@ set(
     ${RNLLAMA_LIB_DIR}/llama-vocab.cpp
     ${RNLLAMA_LIB_DIR}/log.cpp
     
-    ${RNLLAMA_LIB_DIR}/amx/amx.cpp
-    ${RNLLAMA_LIB_DIR}/amx/mmq.cpp
+    #${RNLLAMA_LIB_DIR}/amx/amx.cpp
+    #${RNLLAMA_LIB_DIR}/amx/mmq.cpp
 
-    ${RNLLAMA_LIB_DIR}/ggml-aarch64.c
     ${RNLLAMA_LIB_DIR}/llama-grammar.cpp
     ${RNLLAMA_LIB_DIR}/llama-sampling.cpp
     ${RNLLAMA_LIB_DIR}/llama-vocab.cpp
@@ -25,14 +24,14 @@ set(
     ${RNLLAMA_LIB_DIR}/json.hpp
     ${RNLLAMA_LIB_DIR}/json-schema-to-grammar.cpp
 
-    ${RNLLAMA_LIB_DIR}/ggml-aarch64.c
     ${RNLLAMA_LIB_DIR}/ggml-alloc.c
     ${RNLLAMA_LIB_DIR}/ggml-backend.cpp
     ${RNLLAMA_LIB_DIR}/ggml-backend-reg.cpp
     ${RNLLAMA_LIB_DIR}/ggml.c
     ${RNLLAMA_LIB_DIR}/ggml-cpu.c
     ${RNLLAMA_LIB_DIR}/ggml-cpu.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-cpu-aarch64.c
+    ${RNLLAMA_LIB_DIR}/ggml-cpu-aarch64.cpp
+    ${RNLLAMA_LIB_DIR}/ggml-cpu-traits.cpp
     ${RNLLAMA_LIB_DIR}/ggml-cpu-quants.c
     ${RNLLAMA_LIB_DIR}/ggml-threading.cpp
     ${RNLLAMA_LIB_DIR}/ggml-quants.c
@@ -42,7 +41,6 @@ set(
     ${RNLLAMA_LIB_DIR}/unicode.cpp
     ${RNLLAMA_LIB_DIR}/llama.cpp
     ${RNLLAMA_LIB_DIR}/sgemm.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-aarch64.c
     ${RNLLAMA_LIB_DIR}/rn-llama.hpp
     ${CMAKE_SOURCE_DIR}/jni.cpp
 )

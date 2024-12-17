@@ -238,7 +238,9 @@
 #define LM_GGML_EXIT_SUCCESS 0
 #define LM_GGML_EXIT_ABORTED 1
 
-#define LM_GGML_ROPE_TYPE_NEOX 2
+#define LM_GGML_ROPE_TYPE_NEOX   2
+#define LM_GGML_ROPE_TYPE_MROPE  8
+#define LM_GGML_ROPE_TYPE_VISION 24
 
 #define LM_GGUF_MAGIC "GGUF"
 
@@ -385,15 +387,15 @@ extern "C" {
         LM_GGML_TYPE_F64     = 28,
         LM_GGML_TYPE_IQ1_M   = 29,
         LM_GGML_TYPE_BF16    = 30,
-        LM_GGML_TYPE_Q4_0_4_4 = 31,
-        LM_GGML_TYPE_Q4_0_4_8 = 32,
-        LM_GGML_TYPE_Q4_0_8_8 = 33,
+        // LM_GGML_TYPE_Q4_0_4_4 = 31, support has been removed from gguf files
+        // LM_GGML_TYPE_Q4_0_4_8 = 32,
+        // LM_GGML_TYPE_Q4_0_8_8 = 33,
         LM_GGML_TYPE_TQ1_0   = 34,
         LM_GGML_TYPE_TQ2_0   = 35,
-        LM_GGML_TYPE_IQ4_NL_4_4 = 36,
+        // LM_GGML_TYPE_IQ4_NL_4_4 = 36,
         // LM_GGML_TYPE_IQ4_NL_4_8 = 37,
         // LM_GGML_TYPE_IQ4_NL_8_8 = 38,
-        LM_GGML_TYPE_COUNT,
+        LM_GGML_TYPE_COUNT   = 39,
     };
 
     // precision
@@ -434,9 +436,6 @@ extern "C" {
         LM_GGML_FTYPE_MOSTLY_IQ4_XS  = 22, // except 1d tensors
         LM_GGML_FTYPE_MOSTLY_IQ1_M   = 23, // except 1d tensors
         LM_GGML_FTYPE_MOSTLY_BF16    = 24, // except 1d tensors
-        LM_GGML_FTYPE_MOSTLY_Q4_0_4_4 = 25, // except 1d tensors
-        LM_GGML_FTYPE_MOSTLY_Q4_0_4_8 = 26, // except 1d tensors
-        LM_GGML_FTYPE_MOSTLY_Q4_0_8_8 = 27, // except 1d tensors
     };
 
     // available tensor operations:
@@ -500,6 +499,7 @@ extern "C" {
         LM_GGML_OP_POOL_2D_BACK,
         LM_GGML_OP_UPSCALE, // nearest interpolate
         LM_GGML_OP_PAD,
+        LM_GGML_OP_PAD_REFLECT_1D,
         LM_GGML_OP_ARANGE,
         LM_GGML_OP_TIMESTEP_EMBEDDING,
         LM_GGML_OP_ARGSORT,
@@ -1446,6 +1446,22 @@ extern "C" {
             float                 beta_fast,
             float                 beta_slow);
 
+    LM_GGML_API struct lm_ggml_tensor * lm_ggml_rope_multi(
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_tensor  * a,
+            struct lm_ggml_tensor  * b,
+            struct lm_ggml_tensor  * c,
+            int                   n_dims,
+            int                   sections[4],
+            int                   mode,
+            int                   n_ctx_orig,
+            float                 freq_base,
+            float                 freq_scale,
+            float                 ext_factor,
+            float                 attn_factor,
+            float                 beta_fast,
+            float                 beta_slow);
+
     // in-place, returns view(a)
     LM_GGML_API struct lm_ggml_tensor * lm_ggml_rope_ext_inplace(
             struct lm_ggml_context * ctx,
@@ -1695,6 +1711,13 @@ extern "C" {
             int                  p1,
             int                  p2,
             int                  p3);
+
+    // pad each dimension with reflection: [a, b, c, d] -> [b, a, b, c, d, c]
+    LM_GGML_API struct lm_ggml_tensor * lm_ggml_pad_reflect_1d(
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_tensor  * a,
+            int                   p0,
+            int                   p1);
 
     // Ref: https://github.com/CompVis/stable-diffusion/blob/main/ldm/modules/diffusionmodules/util.py#L151
     // timesteps: [N,]
@@ -2198,11 +2221,19 @@ extern "C" {
     LM_GGML_API size_t lm_gguf_get_meta_size(const struct lm_gguf_context * ctx);
     LM_GGML_API void   lm_gguf_get_meta_data(const struct lm_gguf_context * ctx, void * data);
 
-#ifdef  __cplusplus
-// restrict not standard in C++
-#define LM_GGML_RESTRICT
+#ifdef __cplusplus
+    // restrict not standard in C++
+#    if defined(__GNUC__)
+#        define LM_GGML_RESTRICT __restrict__
+#    elif defined(__clang__)
+#        define LM_GGML_RESTRICT __restrict
+#    elif defined(_MSC_VER)
+#        define LM_GGML_RESTRICT __restrict
+#    else
+#        define LM_GGML_RESTRICT
+#    endif
 #else
-#define LM_GGML_RESTRICT restrict
+#    define LM_GGML_RESTRICT restrict
 #endif
     typedef void (*lm_ggml_to_float_t)  (const void  * LM_GGML_RESTRICT x, float * LM_GGML_RESTRICT y, int64_t k);
     typedef void (*lm_ggml_from_float_t)(const float * LM_GGML_RESTRICT x, void  * LM_GGML_RESTRICT y, int64_t k);

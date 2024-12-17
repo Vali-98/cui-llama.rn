@@ -103,24 +103,14 @@ extern "C" {
 
     // Internal types and functions exposed for tests and benchmarks
 
-    typedef void (*lm_ggml_from_float_to_mat_t)
-                                     (const float * LM_GGML_RESTRICT x, void * LM_GGML_RESTRICT y, int64_t nr, int64_t k, int64_t bs);
     typedef void (*lm_ggml_vec_dot_t)  (int n, float * LM_GGML_RESTRICT s, size_t bs, const void * LM_GGML_RESTRICT x, size_t bx,
                                        const void * LM_GGML_RESTRICT y, size_t by, int nrc);
-    typedef void (*lm_ggml_gemv_t)     (int n, float * LM_GGML_RESTRICT s, size_t bs, const void * LM_GGML_RESTRICT x,
-                                       const void * LM_GGML_RESTRICT y, int nr, int nc);
-    typedef void (*lm_ggml_gemm_t)     (int n, float * LM_GGML_RESTRICT s, size_t bs, const void * LM_GGML_RESTRICT x,
-                                       const void * LM_GGML_RESTRICT y, int nr, int nc);
 
     struct lm_ggml_type_traits_cpu {
         lm_ggml_from_float_t        from_float;
-        lm_ggml_from_float_to_mat_t from_float_to_mat;
         lm_ggml_vec_dot_t           vec_dot;
         enum lm_ggml_type           vec_dot_type;
         int64_t                  nrows; // number of rows to process simultaneously
-        int64_t                  ncols; // number of columns to process simultaneously
-        lm_ggml_gemv_t              gemv;
-        lm_ggml_gemm_t              gemm;
     };
 
     LM_GGML_BACKEND_API const struct lm_ggml_type_traits_cpu * lm_ggml_get_type_traits_cpu(enum lm_ggml_type type);
@@ -139,13 +129,6 @@ extern "C" {
     LM_GGML_BACKEND_API void lm_ggml_backend_cpu_set_abort_callback(lm_ggml_backend_t backend_cpu, lm_ggml_abort_callback abort_callback, void * abort_callback_data);
 
     LM_GGML_BACKEND_API lm_ggml_backend_reg_t lm_ggml_backend_cpu_reg(void);
-
-#ifdef LM_GGML_USE_CPU_HBM
-    LM_GGML_BACKEND_API lm_ggml_backend_buffer_type_t lm_ggml_backend_cpu_hbm_buffer_type(void);
-#endif
-
-    LM_GGML_BACKEND_API lm_ggml_backend_buffer_type_t lm_ggml_backend_cpu_aarch64_buffer_type(void);
-    LM_GGML_BACKEND_API bool lm_ggml_backend_cpu_buft_is_aarch64(lm_ggml_backend_buffer_type_t buft);
 
 #ifdef __cplusplus
 }

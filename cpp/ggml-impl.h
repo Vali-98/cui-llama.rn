@@ -74,8 +74,8 @@ static inline int lm_ggml_up(int n, int m) {
 //
 
 LM_GGML_ATTRIBUTE_FORMAT(2, 3)
-void lm_ggml_log_internal        (enum lm_ggml_log_level level, const char * format, ...);
-void lm_ggml_log_callback_default(enum lm_ggml_log_level level, const char * text, void * user_data);
+LM_GGML_API void lm_ggml_log_internal        (enum lm_ggml_log_level level, const char * format, ...);
+LM_GGML_API void lm_ggml_log_callback_default(enum lm_ggml_log_level level, const char * text, void * user_data);
 
 #define LM_GGML_LOG(...)       lm_ggml_log_internal(LM_GGML_LOG_LEVEL_NONE , __VA_ARGS__)
 #define LM_GGML_LOG_INFO(...)  lm_ggml_log_internal(LM_GGML_LOG_LEVEL_INFO , __VA_ARGS__)
@@ -304,20 +304,20 @@ struct lm_ggml_cgraph lm_ggml_graph_view(struct lm_ggml_cgraph * cgraph, int i0,
 
 // Memory allocation
 
-void * lm_ggml_aligned_malloc(size_t size);
-void lm_ggml_aligned_free(void * ptr, size_t size);
+LM_GGML_API void * lm_ggml_aligned_malloc(size_t size);
+LM_GGML_API void lm_ggml_aligned_free(void * ptr, size_t size);
 
 // FP16 to FP32 conversion
 
 #if defined(__ARM_NEON)
-    #ifdef _MSC_VER
+    #if defined(_MSC_VER) || (defined(__CUDACC__) && __CUDACC_VER_MAJOR__ <= 11)
         typedef uint16_t lm_ggml_fp16_internal_t;
     #else
         typedef __fp16 lm_ggml_fp16_internal_t;
     #endif
 #endif
 
-#if defined(__ARM_NEON) && !defined(_MSC_VER)
+#if defined(__ARM_NEON) && !defined(_MSC_VER) && !(defined(__CUDACC__) && __CUDACC_VER_MAJOR__ <= 11)
     #define LM_GGML_COMPUTE_FP16_TO_FP32(x) lm_ggml_compute_fp16_to_fp32(x)
     #define LM_GGML_COMPUTE_FP32_TO_FP16(x) lm_ggml_compute_fp32_to_fp16(x)
 
