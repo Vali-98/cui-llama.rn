@@ -483,9 +483,6 @@ extern "C" {
     // Returns the total number of parameters in the model
     LLAMA_API uint64_t llama_model_n_params(const struct llama_model * model);
 
-    // Get a llama model tensor
-    LLAMA_API struct lm_ggml_tensor * llama_get_model_tensor(struct llama_model * model, const char * name);
-
     // Returns true if the model contains an encoder that requires llama_encode() call
     LLAMA_API bool llama_model_has_encoder(const struct llama_model * model);
 

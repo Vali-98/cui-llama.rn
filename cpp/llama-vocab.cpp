@@ -1657,7 +1657,7 @@ bool llama_token_is_control_impl(const struct llama_vocab & vocab, llama_token t
 }
 
 llama_token llama_token_bos_impl(const struct llama_vocab & vocab) {
-    return vocab.special_bos_id;
+    return vocab.type != LLAMA_VOCAB_TYPE_WPM ? vocab.special_bos_id : vocab.special_cls_id;
 }
 
 llama_token llama_token_eos_impl(const struct llama_vocab & vocab) {
@@ -1867,6 +1867,10 @@ int32_t llama_detokenize_impl(
                          int32_t   text_len_max,
                             bool   remove_special,
                             bool   unparse_special) {
+    if (vocab.type == LLAMA_VOCAB_TYPE_NONE) {
+        return 0;
+    }
+
     LM_GGML_ASSERT(vocab.tokenizer && "Tokenizer not initialized. Call llama_vocab::init_tokenizer() first.");
 
     int32_t avail = text_len_max;

@@ -393,8 +393,11 @@ static bool lm_ggml_backend_cpu_device_supports_op(lm_ggml_backend_dev_t dev, co
     switch (op->op) {
         case LM_GGML_OP_CPY:
             return
+                op->type != LM_GGML_TYPE_IQ3_XXS &&
+                op->type != LM_GGML_TYPE_IQ3_S   &&
                 op->type != LM_GGML_TYPE_IQ2_XXS &&
                 op->type != LM_GGML_TYPE_IQ2_XS  &&
+                op->type != LM_GGML_TYPE_IQ2_S   &&
                 op->type != LM_GGML_TYPE_IQ1_S   &&
                 op->type != LM_GGML_TYPE_IQ1_M; // missing type_traits.from_float
         case LM_GGML_OP_MUL_MAT:
@@ -517,6 +520,12 @@ static lm_ggml_backend_feature * lm_ggml_backend_cpu_get_features(lm_ggml_backen
         }
         if (lm_ggml_cpu_has_sve()) {
             features.push_back({ "SVE", "1" });
+        }
+        if (lm_ggml_cpu_has_dotprod()) {
+            features.push_back({ "DOTPROD", "1" });
+        }
+        if (lm_ggml_cpu_has_matmul_int8()) {
+            features.push_back({ "MATMUL_INT8", "1" });
         }
         if (lm_ggml_cpu_get_sve_cnt() > 0) {
             static std::string sve_cnt = std::to_string(lm_ggml_cpu_get_sve_cnt());
