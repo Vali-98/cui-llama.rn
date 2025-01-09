@@ -8,6 +8,7 @@
 #include "llama.h"
 #include "llama-impl.h"
 #include "sampling.h"
+#include "llama-cpp.h"
 
 namespace rnllama {
 
@@ -187,7 +188,7 @@ static std::string tokens_to_output_formatted_string(const llama_context *ctx, c
 }
 
 template <class Iter>
-static std::string tokens_to_str(llama_context *ctx, Iter begin, Iter end)
+static std::string tokens_to_str(llama_context* ctx, Iter begin, Iter end)
 {
     std::string ret;
     for (; begin != end; ++begin)
@@ -214,11 +215,11 @@ struct llama_rn_context
 
     common_params params;
 
-    llama_model *model = nullptr;
+    llama_model_ptr model = nullptr;
     float loading_progress = 0;
     bool is_load_interrupted = false;
 
-    llama_context *ctx = nullptr;
+    llama_context_ptr ctx = nullptr;
     common_sampler *ctx_sampling = nullptr;
 
     int n_ctx;
@@ -234,12 +235,12 @@ struct llama_rn_context
     {
         if (ctx)
         {
-            llama_free(ctx);
+            llama_free(ctx.get());
             ctx = nullptr;
         }
         if (model)
         {
-            llama_free_model(model);
+            llama_model_free(model.get());
             model = nullptr;
         }
         if (ctx_sampling != nullptr)
@@ -273,7 +274,7 @@ struct llama_rn_context
         if (ctx_sampling != nullptr) {
             common_sampler_free(ctx_sampling);
         }
-        ctx_sampling = common_sampler_init(model, params.sampling);
+        ctx_sampling = common_sampler_init(model.get(), params.sampling);
         return ctx_sampling != nullptr;
     }
 
@@ -281,26 +282,26 @@ struct llama_rn_context
     {
         params = params_;
         common_init_result result = common_init_from_params(params);
-        model = result.model;
-        ctx = result.context;
+        model = std::move(result.model);
+        ctx = std::move(result.context);
         if (model == nullptr)
         {
            LOG_ERROR("unable to load model: %s", params_.model.c_str());
            return false;
         }
         LOG_VERBOSE("getting n_ctx");
-        n_ctx = llama_n_ctx(ctx);
+        n_ctx = llama_n_ctx(ctx.get());
         return true;
     }
 
     bool validateModelChatTemplate() const {
         std::vector<char> model_template(2048, 0); // longest known template is about 1200 bytes
         std::string template_key = "tokenizer.chat_template";
-        int32_t res = llama_model_meta_val_str(model, template_key.c_str(), model_template.data(), model_template.size());
+        int32_t res = llama_model_meta_val_str(model.get(), template_key.c_str(), model_template.data(), model_template.size());
         if (res >= 0) {
             llama_chat_message chat[] = {{"user", "test"}};
             std::string tmpl = std::string(model_template.data(), model_template.size());
-            int32_t chat_res = llama_chat_apply_template(model, tmpl.c_str(), chat, 1, true, nullptr, 0);
+            int32_t chat_res = llama_chat_apply_template(model.get(), tmpl.c_str(), chat, 1, true, nullptr, 0);
             return chat_res > 0;
         }
         return res > 0;
@@ -330,7 +331,7 @@ struct llama_rn_context
 
     void loadPrompt()
     {
-        std::vector<llama_token> prompt_tokens = ::common_tokenize(ctx, params.prompt, true, true);
+        std::vector<llama_token> prompt_tokens = ::common_tokenize(model.get(), params.prompt, true, true);
         num_prompt_tokens = prompt_tokens.size();
 
         // LOG tokens
@@ -358,7 +359,7 @@ struct llama_rn_context
 
         // do Context Shift , may be buggy! TODO: Verify functionality
         if(!params.embedding){
-            purge_missing_tokens(ctx, embd, prompt_tokens, params.n_predict, params.n_ctx);
+            purge_missing_tokens(ctx.get(), embd, prompt_tokens, params.n_predict, params.n_ctx);
         }
 
         // push the prompt into the sampling context (do not apply grammar)
@@ -379,7 +380,7 @@ struct llama_rn_context
         }
 
         // since #3228 we now have to manually manage the KV cache
-        llama_kv_cache_seq_rm(ctx, 0, n_past, -1);
+        llama_kv_cache_seq_rm(ctx.get(), 0, n_past, -1);
 
         LOG_VERBOSE("prompt ingested, n_past: %d, cached: %s, to_eval: %s",
             n_past,
@@ -394,7 +395,7 @@ struct llama_rn_context
     {
         // number of tokens to keep when resetting context
         n_remain = params.n_predict;
-        llama_perf_context_reset(ctx);
+        llama_perf_context_reset(ctx.get());
         is_predicting = true;
     }
 
@@ -410,8 +411,8 @@ struct llama_rn_context
             const int n_left    = n_past - params.n_keep - 1;
             const int n_discard = n_left/2;
 
-            llama_kv_cache_seq_rm (ctx, 0, params.n_keep + 1            , params.n_keep + n_discard + 1);
-            llama_kv_cache_seq_add(ctx, 0, params.n_keep + 1 + n_discard, n_past, -n_discard);
+            llama_kv_cache_seq_rm (ctx.get(), 0, params.n_keep + 1            , params.n_keep + n_discard + 1);
+            llama_kv_cache_seq_add(ctx.get(), 0, params.n_keep + 1 + n_discard, n_past, -n_discard);
 
             for (size_t i = params.n_keep + 1 + n_discard; i < embd.size(); i++)
             {
@@ -437,13 +438,14 @@ struct llama_rn_context
             {
                 n_eval = params.n_batch;
             }
-            if (llama_decode(ctx, llama_batch_get_one(&embd[n_past], n_eval)))
+            if (llama_decode(ctx.get(), llama_batch_get_one(&embd[n_past], n_eval)))
             {
+                
                 LOG_ERROR("failed to eval, n_eval: %d, n_past: %d, n_threads: %d, embd: %s",
                     n_eval,
                     n_past,
                     params.cpuparams.n_threads,
-                    tokens_to_str(ctx, embd.cbegin() + n_past, embd.cend()).c_str()
+                    tokens_to_str(ctx.get(), embd.cbegin() + n_past, embd.cend()).c_str()
                 );
                 has_next_token = false;
                 return result;
@@ -461,16 +463,16 @@ struct llama_rn_context
         if (params.n_predict == 0)
         {
             has_next_token = false;
-            result.tok = llama_token_eos(model);
+            result.tok = llama_token_eos(model.get());
             return result;
         }
 
         {
             // out of user input, sample next token
             std::vector<llama_token_data> candidates;
-            candidates.reserve(llama_n_vocab(model));
+            candidates.reserve(llama_n_vocab(model.get()));
 
-            result.tok = common_sampler_sample(ctx_sampling, ctx, -1);
+            result.tok = common_sampler_sample(ctx_sampling, ctx.get(), -1);
 
             llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling);
 
@@ -501,7 +503,7 @@ struct llama_rn_context
         // decrement remaining sampling budget
         --n_remain;
 
-        if (!embd.empty() && embd.back() == llama_token_eos(model))
+        if (!embd.empty() && embd.back() == llama_token_eos(model.get()))
         {
             // stopping_word = llama_token_to_piece(ctx, embd.back());
             has_next_token = false;
@@ -550,7 +552,7 @@ struct llama_rn_context
     {
         const completion_token_output token_with_probs = nextToken();
 
-        const std::string token_text = token_with_probs.tok == -1 ? "" : common_token_to_piece(ctx, token_with_probs.tok);
+        const std::string token_text = token_with_probs.tok == -1 ? "" : common_token_to_piece(ctx.get(), token_with_probs.tok);
         generated_text += token_text;
 
         if (params.sampling.n_probs > 0)
@@ -606,7 +608,7 @@ struct llama_rn_context
 
     std::vector<float> getEmbedding(common_params &embd_params)
     {
-        static const int n_embd = llama_n_embd(llama_get_model(ctx));
+        static const int n_embd = llama_n_embd(llama_get_model(ctx.get()));
         if (!embd_params.embedding)
         {
             LOG_WARNING("embedding disabled, embedding: %s", embd_params.embedding);
@@ -614,12 +616,12 @@ struct llama_rn_context
         }
         float *data;
 
-        const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
+        const enum llama_pooling_type pooling_type = llama_pooling_type(ctx.get());
         printf("pooling_type: %d\n", pooling_type);
         if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
-            data = llama_get_embeddings(ctx);
+            data = llama_get_embeddings(ctx.get());
         } else {
-            data = llama_get_embeddings_seq(ctx, 0);
+            data = llama_get_embeddings_seq(ctx.get(), 0);
         }
 
         if (!data) {
@@ -661,15 +663,15 @@ struct llama_rn_context
             }
             batch.logits[batch.n_tokens - 1] = 1; // true
 
-            llama_kv_cache_clear(ctx);
+            llama_kv_cache_clear(ctx.get());
 
             const int64_t t_pp_start = llama_time_us();
-            if (llama_decode(ctx, batch) != 0)
+            if (llama_decode(ctx.get(), batch) != 0)
             {
                 LOG_ERROR("llama_decode() failed during prompt", "");
             }
             const int64_t t_pp_end = llama_time_us();
-            llama_kv_cache_clear(ctx);
+            llama_kv_cache_clear(ctx.get());
 
             if (is_interrupted) break;
 
@@ -684,7 +686,7 @@ struct llama_rn_context
                     llama_batch_add(&batch, 0, i, {j}, true);
                 }
 
-                if (llama_decode(ctx, batch) != 0)
+                if (llama_decode(ctx.get(), batch) != 0)
                 {
                     LOG_ERROR("llama_decode() failed during text generation", "");
                 }
@@ -693,7 +695,7 @@ struct llama_rn_context
 
             const int64_t t_tg_end = llama_time_us();
 
-            llama_kv_cache_clear(ctx);
+            llama_kv_cache_clear(ctx.get());
 
             const double t_pp = (t_pp_end - t_pp_start) / 1000000.0;
             const double t_tg = (t_tg_end - t_tg_start) / 1000000.0;
@@ -719,14 +721,14 @@ struct llama_rn_context
             tg_std = 0;
         }
 
-        if (is_interrupted) llama_kv_cache_clear(ctx);
+        if (is_interrupted) llama_kv_cache_clear(ctx.get());
         is_predicting = false;
 
         char model_desc[128];
-        llama_model_desc(model, model_desc, sizeof(model_desc));
+        llama_model_desc(model.get(), model_desc, sizeof(model_desc));
         return std::string("[\"") + model_desc + std::string("\",") +
-            std::to_string(llama_model_size(model)) + std::string(",") +
-            std::to_string(llama_model_n_params(model)) + std::string(",") +
+            std::to_string(llama_model_size(model.get())) + std::string(",") +
+            std::to_string(llama_model_n_params(model.get())) + std::string(",") +
             std::to_string(pp_avg) + std::string(",") +
             std::to_string(pp_std) + std::string(",") +
             std::to_string(tg_avg) + std::string(",") +

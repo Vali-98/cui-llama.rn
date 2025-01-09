@@ -9,17 +9,23 @@ include_directories(${RNLLAMA_LIB_DIR})
 
 set(
     SOURCE_FILES
-    ${RNLLAMA_LIB_DIR}/llama-grammar.cpp
-    ${RNLLAMA_LIB_DIR}/llama-sampling.cpp
-    ${RNLLAMA_LIB_DIR}/llama-vocab.cpp
-    ${RNLLAMA_LIB_DIR}/log.cpp
-    
-    #${RNLLAMA_LIB_DIR}/amx/amx.cpp
-    #${RNLLAMA_LIB_DIR}/amx/mmq.cpp
 
+    ${RNLLAMA_LIB_DIR}/common.cpp
     ${RNLLAMA_LIB_DIR}/llama-grammar.cpp
     ${RNLLAMA_LIB_DIR}/llama-sampling.cpp
     ${RNLLAMA_LIB_DIR}/llama-vocab.cpp
+    ${RNLLAMA_LIB_DIR}/llama-chat.cpp
+    ${RNLLAMA_LIB_DIR}/llama-mmap.cpp
+    ${RNLLAMA_LIB_DIR}/llama-context.cpp
+    ${RNLLAMA_LIB_DIR}/llama-kv-cache.cpp
+    ${RNLLAMA_LIB_DIR}/llama-model-loader.cpp
+    ${RNLLAMA_LIB_DIR}/llama-model.cpp
+    ${RNLLAMA_LIB_DIR}/llama-batch.cpp
+    ${RNLLAMA_LIB_DIR}/llama-arch.cpp
+    ${RNLLAMA_LIB_DIR}/llama-cparams.cpp
+    ${RNLLAMA_LIB_DIR}/llama-hparams.cpp
+    ${RNLLAMA_LIB_DIR}/llama-adapter.cpp
+    ${RNLLAMA_LIB_DIR}/llama-impl.cpp
     ${RNLLAMA_LIB_DIR}/log.cpp
     ${RNLLAMA_LIB_DIR}/json.hpp
     ${RNLLAMA_LIB_DIR}/json-schema-to-grammar.cpp
@@ -28,6 +34,7 @@ set(
     ${RNLLAMA_LIB_DIR}/ggml-backend.cpp
     ${RNLLAMA_LIB_DIR}/ggml-backend-reg.cpp
     ${RNLLAMA_LIB_DIR}/ggml.c
+    ${RNLLAMA_LIB_DIR}/gguf.cpp
     ${RNLLAMA_LIB_DIR}/ggml-cpu.c
     ${RNLLAMA_LIB_DIR}/ggml-cpu.cpp
     ${RNLLAMA_LIB_DIR}/ggml-cpu-aarch64.cpp
@@ -35,7 +42,6 @@ set(
     ${RNLLAMA_LIB_DIR}/ggml-cpu-quants.c
     ${RNLLAMA_LIB_DIR}/ggml-threading.cpp
     ${RNLLAMA_LIB_DIR}/ggml-quants.c
-    ${RNLLAMA_LIB_DIR}/common.cpp
     ${RNLLAMA_LIB_DIR}/sampling.cpp
     ${RNLLAMA_LIB_DIR}/unicode-data.cpp
     ${RNLLAMA_LIB_DIR}/unicode.cpp

@@ -6,8 +6,10 @@ git submodule update --recursive --remote
 # cp ./llama.cpp/
 
 cp ./llama.cpp/include/llama.h ./cpp/llama.h
+cp ./llama.cpp/include/llama-cpp.h ./cpp/llama-cpp.h
 
 cp ./llama.cpp/ggml/include/ggml.h ./cpp/ggml.h
+cp ./llama.cpp/ggml/include/gguf.h ./cpp/gguf.h
 cp ./llama.cpp/ggml/include/ggml-alloc.h ./cpp/ggml-alloc.h
 cp ./llama.cpp/ggml/include/ggml-backend.h ./cpp/ggml-backend.h
 cp ./llama.cpp/ggml/include/ggml-cpu.h ./cpp/ggml-cpu.h
@@ -15,6 +17,7 @@ cp ./llama.cpp/ggml/include/ggml-cpp.h ./cpp/ggml-cpp.h
 cp ./llama.cpp/ggml/include/ggml-metal.h ./cpp/ggml-metal.h
 
 cp ./llama.cpp/ggml/src/ggml.c ./cpp/ggml.c
+cp ./llama.cpp/ggml/src/gguf.cpp ./cpp/gguf.cpp
 cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
 cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
 cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
@@ -23,11 +26,7 @@ cp ./llama.cpp/ggml/src/ggml-backend-reg.cpp ./cpp/ggml-backend-reg.cpp
 cp ./llama.cpp/ggml/src/ggml-common.h ./cpp/ggml-common.h
 cp ./llama.cpp/ggml/src/ggml-quants.h ./cpp/ggml-quants.h
 cp ./llama.cpp/ggml/src/ggml-quants.c ./cpp/ggml-quants.c
-# cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
-# cp ./llama.cpp/ggml/src/ggml-aarch64.h ./cpp/ggml-aarch64.h
 
-# cp ./llama.cpp/ggml/src/ggml-aarch64.c ./cpp/ggml-aarch64.c
-# cp ./llama.cpp/ggml/src/ggml-aarch64.h ./cpp/ggml-aarch64.h
 cp ./llama.cpp/ggml/src/ggml-threading.cpp ./cpp/ggml-threading.cpp
 cp ./llama.cpp/ggml/src/ggml-threading.h ./cpp/ggml-threading.h
 
@@ -51,9 +50,8 @@ cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp ./cpp/sgemm.cpp
 
 cp ./llama.cpp/src/llama.cpp ./cpp/llama.cpp
 cp ./llama.cpp/src/llama-impl.h ./cpp/llama-impl.h
-
+cp ./llama.cpp/src/llama-impl.cpp ./cpp/llama-impl.cpp
 cp ./llama.cpp/src/llama-vocab.h ./cpp/llama-vocab.h
-cp ./llama.cpp/src/llama-impl.h ./cpp/llama-impl.h
 
 cp ./llama.cpp/src/llama-vocab.h ./cpp/llama-vocab.h
 cp ./llama.cpp/src/llama-vocab.cpp ./cpp/llama-vocab.cpp
@@ -65,6 +63,28 @@ cp ./llama.cpp/src/llama-grammar.cpp ./cpp/llama-grammar.cpp
 cp ./llama.cpp/src/llama-sampling.h ./cpp/llama-sampling.h
 cp ./llama.cpp/src/llama-sampling.cpp ./cpp/llama-sampling.cpp
 
+cp ./llama.cpp/src/llama-chat.h ./cpp/llama-chat.h
+cp ./llama.cpp/src/llama-chat.cpp ./cpp/llama-chat.cpp
+cp ./llama.cpp/src/llama-mmap.h ./cpp/llama-mmap.h
+cp ./llama.cpp/src/llama-mmap.cpp ./cpp/llama-mmap.cpp
+cp ./llama.cpp/src/llama-context.h ./cpp/llama-context.h
+cp ./llama.cpp/src/llama-context.cpp ./cpp/llama-context.cpp
+cp ./llama.cpp/src/llama-kv-cache.h ./cpp/llama-kv-cache.h
+cp ./llama.cpp/src/llama-kv-cache.cpp ./cpp/llama-kv-cache.cpp
+cp ./llama.cpp/src/llama-model-loader.h ./cpp/llama-model-loader.h
+cp ./llama.cpp/src/llama-model-loader.cpp ./cpp/llama-model-loader.cpp
+cp ./llama.cpp/src/llama-model.h ./cpp/llama-model.h
+cp ./llama.cpp/src/llama-model.cpp ./cpp/llama-model.cpp
+cp ./llama.cpp/src/llama-batch.h ./cpp/llama-batch.h
+cp ./llama.cpp/src/llama-batch.cpp ./cpp/llama-batch.cpp
+cp ./llama.cpp/src/llama-arch.h ./cpp/llama-arch.h
+cp ./llama.cpp/src/llama-arch.cpp ./cpp/llama-arch.cpp
+cp ./llama.cpp/src/llama-cparams.h ./cpp/llama-cparams.h
+cp ./llama.cpp/src/llama-cparams.cpp ./cpp/llama-cparams.cpp
+cp ./llama.cpp/src/llama-hparams.h ./cpp/llama-hparams.h
+cp ./llama.cpp/src/llama-hparams.cpp ./cpp/llama-hparams.cpp
+cp ./llama.cpp/src/llama-adapter.h ./cpp/llama-adapter.h
+cp ./llama.cpp/src/llama-adapter.cpp ./cpp/llama-adapter.cpp
 
 cp ./llama.cpp/src/unicode.h ./cpp/unicode.h
 cp ./llama.cpp/src/unicode.cpp ./cpp/unicode.cpp
@@ -89,12 +109,35 @@ cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cp
 # List of files to process
 files_add_lm_prefix=(
   "./cpp/llama-impl.h"
+  "./cpp/llama-impl.cpp"
   "./cpp/llama-vocab.h"
   "./cpp/llama-vocab.cpp"
   "./cpp/llama-grammar.h"
   "./cpp/llama-grammar.cpp"
   "./cpp/llama-sampling.h"
   "./cpp/llama-sampling.cpp"
+  "./cpp/llama-chat.h"
+  "./cpp/llama-chat.cpp"
+  "./cpp/llama-mmap.h"
+  "./cpp/llama-mmap.cpp"
+  "./cpp/llama-context.h"
+  "./cpp/llama-context.cpp"
+  "./cpp/llama-kv-cache.h"
+  "./cpp/llama-kv-cache.cpp"
+  "./cpp/llama-model-loader.h"
+  "./cpp/llama-model-loader.cpp"
+  "./cpp/llama-model.h"
+  "./cpp/llama-model.cpp"
+  "./cpp/llama-batch.h"
+  "./cpp/llama-batch.cpp"
+  "./cpp/llama-arch.h"
+  "./cpp/llama-arch.cpp"
+  "./cpp/llama-cparams.h"
+  "./cpp/llama-cparams.cpp"
+  "./cpp/llama-hparams.h"
+  "./cpp/llama-hparams.cpp"
+  "./cpp/llama-adapter.h"
+  "./cpp/llama-adapter.cpp"
   "./cpp/speculative.h"
   "./cpp/speculative.cpp"
   "./cpp/json-schema-to-grammar.h"
@@ -104,6 +147,8 @@ files_add_lm_prefix=(
   "./cpp/log.cpp"
   "./cpp/ggml.h"
   "./cpp/ggml.c"
+  "./cpp/gguf.h"
+  "./cpp/gguf.cpp"
   "./cpp/ggml-impl.h"
   "./cpp/common.h"
   "./cpp/common.cpp"
@@ -111,6 +156,7 @@ files_add_lm_prefix=(
   "./cpp/ggml-metal.h"
   "./cpp/ggml-metal.m"
   "./cpp/llama.h"
+  "./cpp/llama-cpp.h"
   "./cpp/llama.cpp"
   "./cpp/sampling.cpp"
   "./cpp/ggml-quants.h"
@@ -183,6 +229,8 @@ done
 # Clean up logs to be readable
 sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/ggml.h
 sed -i 's/#include <stdio.h>/&\n#include <string.h>/' ./cpp/ggml.h
+sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.c
+sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.cpp
 # end clean logs
 
 echo "Replacement completed successfully!"
@@ -193,7 +241,7 @@ yarn example
 # patch -p0 -d ./cpp < ./scripts/common.h.patch
 # patch -p0 -d ./cpp < ./scripts/common.cpp.patch
 # patch -p0 -d ./cpp < ./scripts/log.h.patch
-# patch -p0 -d ./cpp < ./scripts/llama.cpp.patch
+patch -p0 -d ./cpp < ./scripts/llama-mmap.cpp.patch
 # patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
 # patch -p0 -d ./cpp < ./scripts/ggml.c.patch
 patch -p0 -d ./cpp < ./scripts/ggml-cpu-aarch64.c.patch

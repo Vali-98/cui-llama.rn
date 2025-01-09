@@ -11,7 +11,8 @@
 #include <unordered_map>
 #include "llama.h"
 #include "llama-impl.h"
-#include "ggml.h"
+#include "llama-context.h"
+#include "gguf.h"
 #include "rn-llama.hpp"
 
 #define UNUSED(x) (void)(x)
@@ -336,17 +337,17 @@ Java_com_rnllama_LlamaContext_initContext(
 
     LOGI("[RNLlama] is_model_loaded %s", (is_model_loaded ? "true" : "false"));
     if (is_model_loaded) {
-      if (embedding && llama_model_has_encoder(llama->model) && llama_model_has_decoder(llama->model)) {
+      if (embedding && llama_model_has_encoder(llama->model.get()) && llama_model_has_decoder(llama->model.get())) {
         LOGI("[RNLlama] computing embeddings in encoder-decoder models is not supported");
-        llama_free(llama->ctx);
+        llama_free(llama->ctx.get());
         return -1;
       }
-      context_map[(long) llama->ctx] = llama;
+      context_map[(long) llama->ctx.get()] = llama;
     } else {
-      llama_free(llama->ctx);
+      llama_free(llama->ctx.get());
     }
 
-    return reinterpret_cast<jlong>(llama->ctx);
+    return reinterpret_cast<jlong>(llama->ctx.get());
 }
 
 
@@ -372,13 +373,13 @@ Java_com_rnllama_LlamaContext_loadModelDetails(
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
 
-    int count = llama_model_meta_count(llama->model);
+    int count = llama_model_meta_count(llama->model.get());
     auto meta = createWriteableMap(env);
     for (int i = 0; i < count; i++) {
         char key[256];
-        llama_model_meta_key_by_index(llama->model, i, key, sizeof(key));
+        llama_model_meta_key_by_index(llama->model.get(), i, key, sizeof(key));
         char val[2048];
-        llama_model_meta_val_str_by_index(llama->model, i, val, sizeof(val));
+        llama_model_meta_val_str_by_index(llama->model.get(), i, val, sizeof(val));
 
         putString(env, meta, key, val);
     }
@@ -386,10 +387,10 @@ Java_com_rnllama_LlamaContext_loadModelDetails(
     auto result = createWriteableMap(env);
 
     char desc[1024];
-    llama_model_desc(llama->model, desc, sizeof(desc));
+    llama_model_desc(llama->model.get(), desc, sizeof(desc));
     putString(env, result, "desc", desc);
-    putDouble(env, result, "size", llama_model_size(llama->model));
-    putDouble(env, result, "nParams", llama_model_n_params(llama->model));
+    putDouble(env, result, "size", llama_model_size(llama->model.get()));
+    putDouble(env, result, "nParams", llama_model_n_params(llama->model.get()));
     putBoolean(env, result, "isChatTemplateSupported", llama->validateModelChatTemplate());
     putMap(env, result, "metadata", meta);
 
@@ -431,7 +432,7 @@ Java_com_rnllama_LlamaContext_getFormattedChat(
     }
 
     const char *tmpl_chars = env->GetStringUTFChars(chat_template, nullptr);
-    std::string formatted_chat = common_chat_apply_template(llama->model, tmpl_chars, chat, true);
+    std::string formatted_chat = common_chat_apply_template(llama->model.get(), tmpl_chars, chat, true);
 
     return env->NewStringUTF(formatted_chat.c_str());
 }
@@ -450,7 +451,7 @@ Java_com_rnllama_LlamaContext_loadSession(
     auto result = createWriteableMap(env);
     size_t n_token_count_out = 0;
     llama->embd.resize(llama->params.n_ctx);
-    if (!llama_state_load_file(llama->ctx, path_chars, llama->embd.data(), llama->embd.capacity(), &n_token_count_out)) {
+    if (!llama_state_load_file(llama->ctx.get(), path_chars, llama->embd.data(), llama->embd.capacity(), &n_token_count_out)) {
       env->ReleaseStringUTFChars(path, path_chars);
 
       putString(env, result, "error", "Failed to load session");
@@ -459,7 +460,7 @@ Java_com_rnllama_LlamaContext_loadSession(
     llama->embd.resize(n_token_count_out);
     env->ReleaseStringUTFChars(path, path_chars);
 
-    const std::string text = rnllama::tokens_to_str(llama->ctx, llama->embd.cbegin(), llama->embd.cend());
+    const std::string text = rnllama::tokens_to_str(llama->ctx.get(), llama->embd.cbegin(), llama->embd.cend());
     putInt(env, result, "tokens_loaded", n_token_count_out);
     putString(env, result, "prompt", text.c_str());
     return reinterpret_cast<jobject>(result);
@@ -481,7 +482,7 @@ Java_com_rnllama_LlamaContext_saveSession(
     std::vector<llama_token> session_tokens = llama->embd;
     int default_size = session_tokens.size();
     int save_size = size > 0 && size <= default_size ? size : default_size;
-    if (!llama_state_save_file(llama->ctx, path_chars, session_tokens.data(), save_size)) {
+    if (!llama_state_save_file(llama->ctx.get(), path_chars, session_tokens.data(), save_size)) {
       env->ReleaseStringUTFChars(path, path_chars);
       return -1;
     }
@@ -499,13 +500,13 @@ static inline jobject tokenProbsToMap(
     for (const auto &prob : probs) {
         auto probsForToken = createWritableArray(env);
         for (const auto &p : prob.probs) {
-            std::string tokStr = rnllama::tokens_to_output_formatted_string(llama->ctx, p.tok);
+            std::string tokStr = rnllama::tokens_to_output_formatted_string(llama->ctx.get(), p.tok);
             auto probResult = createWriteableMap(env);
             putString(env, probResult, "tok_str", tokStr.c_str());
             putDouble(env, probResult, "prob", p.prob);
             pushMap(env, probsForToken, probResult);
         }
-        std::string tokStr = rnllama::tokens_to_output_formatted_string(llama->ctx, prob.tok);
+        std::string tokStr = rnllama::tokens_to_output_formatted_string(llama->ctx.get(), prob.tok);
         auto tokenResult = createWriteableMap(env);
         putString(env, tokenResult, "content", tokStr.c_str());
         putArray(env, tokenResult, "probs", probsForToken);
@@ -555,7 +556,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
 
     llama->rewind();
 
-    //llama_reset_timings(llama->ctx);
+    //llama_reset_timings(llama->ctx.get());
 
     llama->params.prompt = env->GetStringUTFChars(prompt, nullptr);
     llama->params.sampling.seed = (seed == -1) ? time(NULL) : seed;
@@ -593,7 +594,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
 
     sparams.logit_bias.clear();
     if (ignore_eos) {
-        sparams.logit_bias[llama_token_eos(llama->model)].bias = -INFINITY;
+        sparams.logit_bias[llama_token_eos(llama->model.get())].bias = -INFINITY;
     }
 
     // dry break seq
@@ -612,7 +613,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.dry_sequence_breakers = dry_sequence_breakers_vector;
 
     // logit bias
-    const int n_vocab = llama_n_vocab(llama_get_model(llama->ctx));
+    const int n_vocab = llama_n_vocab(llama_get_model(llama->ctx.get()));
     jsize logit_bias_len = env->GetArrayLength(logit_bias);
 
     for (jsize i = 0; i < logit_bias_len; i++) {
@@ -659,7 +660,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
         if (token_with_probs.tok == -1 || llama->incomplete) {
             continue;
         }
-        const std::string token_text = common_token_to_piece(llama->ctx, token_with_probs.tok);
+        const std::string token_text = common_token_to_piece(llama->ctx.get(), token_with_probs.tok);
 
         size_t pos = std::min(sent_count, llama->generated_text.size());
 
@@ -694,7 +695,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
             putString(env, tokenResult, "token", to_send.c_str());
 
             if (llama->params.sampling.n_probs > 0) {
-              const std::vector<llama_token> to_send_toks = common_tokenize(llama->ctx, to_send, false);
+              const std::vector<llama_token> to_send_toks = common_tokenize(llama->ctx.get(), to_send, false);
               size_t probs_pos = std::min(sent_token_probs_index, llama->generated_token_probs.size());
               size_t probs_stop_pos = std::min(sent_token_probs_index + to_send_toks.size(), llama->generated_token_probs.size());
               if (probs_pos < probs_stop_pos) {
@@ -711,7 +712,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
         }
     }
 
-    llama_perf_context_print(llama->ctx);
+    llama_perf_context_print(llama->ctx.get());
     llama->is_predicting = false;
 
     auto result = createWriteableMap(env);
@@ -726,7 +727,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     putString(env, result, "stopping_word", llama->stopping_word.c_str());
     putInt(env, result, "tokens_cached", llama->n_past);
 
-    const auto timings_token = llama_perf_context(llama -> ctx);
+    const auto timings_token = llama_perf_context(llama -> ctx.get());
     
     auto timingsResult = createWriteableMap(env);
     putInt(env, timingsResult, "prompt_n", timings_token.n_p_eval);
@@ -770,7 +771,7 @@ Java_com_rnllama_LlamaContext_tokenize(
     const char *text_chars = env->GetStringUTFChars(text, nullptr);
 
     const std::vector<llama_token> toks = common_tokenize(
-        llama->ctx,
+        llama->ctx.get(),
         text_chars,
         false
     );
@@ -797,7 +798,7 @@ Java_com_rnllama_LlamaContext_detokenize(
         toks.push_back(tokens_ptr[i]);
     }
 
-    auto text = rnllama::tokens_to_str(llama->ctx, toks.cbegin(), toks.cend());
+    auto text = rnllama::tokens_to_str(llama->ctx.get(), toks.cbegin(), toks.cend());
 
     env->ReleaseIntArrayElements(tokens, tokens_ptr, 0);
 
@@ -834,7 +835,7 @@ Java_com_rnllama_LlamaContext_embedding(
 
     llama->rewind();
 
-    llama_perf_context_reset(llama->ctx);
+    llama_perf_context_reset(llama->ctx.get());
 
     llama->params.prompt = text_chars;
 
@@ -860,7 +861,7 @@ Java_com_rnllama_LlamaContext_embedding(
 
     auto promptTokens = createWritableArray(env);
     for (const auto &tok : llama->embd) {
-      pushString(env, promptTokens, common_token_to_piece(llama->ctx, tok).c_str());
+      pushString(env, promptTokens, common_token_to_piece(llama->ctx.get(), tok).c_str());
     }
     putArray(env, result, "prompt_tokens", promptTokens);
 
@@ -890,17 +891,17 @@ Java_com_rnllama_LlamaContext_freeContext(
     UNUSED(env);
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
-    if (llama->model) {
-        llama_free_model(llama->model);
+    if (llama->model.get()) {
+        llama_model_free(llama->model.get());
     }
-    if (llama->ctx) {
-        llama_free(llama->ctx);
+    if (llama->ctx.get()) {
+        llama_free(llama->ctx.get());
     }
-    if (llama->ctx_sampling != nullptr)
+    /*if (llama->ctx.get()-> != nullptr)
     {
-        common_sampler_free(llama->ctx_sampling);
-    }
-    context_map.erase((long) llama->ctx);
+        common_sampler_free(llama->ctx.get() -> _sampling);
+    }*/
+    context_map.erase((long) llama->ctx.get());
 }
 
 JNIEXPORT void JNICALL
