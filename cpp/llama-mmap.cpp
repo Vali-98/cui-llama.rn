@@ -286,13 +286,13 @@ struct llama_mmap::impl {
 
         if (prefetch > 0) {
             if (madvise(addr, std::min(file->size(), prefetch), MADV_WILLNEED)) {
-                LLAMA_LOG_WARN("warning: posix_madvise(.., POSIX_MADV_WILLNEED) failed: %s\n",
+                fprintf(stderr, "warning: madvise(.., MADV_WILLNEED) failed: %s\n",
                         strerror(errno));
             }
         }
         if (numa) {
             if (madvise(addr, file->size(), MADV_RANDOM)) {
-                LLAMA_LOG_WARN("warning: posix_madvise(.., POSIX_MADV_RANDOM) failed: %s\n",
+                fprintf(stderr, "warning: madvise(.., MADV_RANDOM) failed: %s\n",
                         strerror(errno));
             }
         }

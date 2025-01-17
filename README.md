@@ -53,12 +53,23 @@ For get a GGUF model or quantize manually, see [`Prepare and Quantize`](https://
 
 ## Usage
 
+Load model info only:
+
+```js
+import { loadLlamaModelInfo } from 'llama.rn'
+
+const modelPath = 'file://<path to gguf model>'
+console.log('Model Info:', await loadLlamaModelInfo(modelPath))
+```
+
+Initialize a Llama context & do completion:
+
 ```js
 import { initLlama } from 'llama.rn'
 
 // Initial a Llama context with the model (may take a while)
 const context = await initLlama({
-  model: 'file://<path to gguf model>',
+  model: modelPath,
   use_mlock: true,
   n_ctx: 2048,
   n_gpu_layers: 1, // > 0: enable Metal on iOS
@@ -317,6 +328,16 @@ Android:
 ## Contributing
 
 See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the repository and the development workflow.
+
+## Apps using `llama.rn`
+
+- [BRICKS](https://bricks.tools): Our product for building interactive signage in simple way. We provide LLM functions as Generator LLM/Assistant.
+- [ChatterUI](https://github.com/Vali-98/ChatterUI): Simple frontend for LLMs built in react-native.
+- [PocketPal AI](https://github.com/a-ghorbani/pocketpal-ai): An app that brings language models directly to your phone.
+
+## Node.js binding
+
+- [llama.node](https://github.com/mybigday/llama.node): An another Node.js binding of `llama.cpp` but made API same as `llama.rn`.
 
 ## License
 

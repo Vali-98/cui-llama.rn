@@ -5,65 +5,35 @@
 #include <iostream>
 #include "common.h"
 #include "ggml.h"
+#include "gguf.h"
 #include "llama.h"
 #include "llama-impl.h"
 #include "sampling.h"
-#include "llama-cpp.h"
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
 
 namespace rnllama {
 
-static std::string lm_gguf_data_to_str(enum lm_gguf_type type, const void * data, int i) {
-    switch (type) {
-        case LM_GGUF_TYPE_UINT8:   return std::to_string(((const uint8_t  *)data)[i]);
-        case LM_GGUF_TYPE_INT8:    return std::to_string(((const int8_t   *)data)[i]);
-        case LM_GGUF_TYPE_UINT16:  return std::to_string(((const uint16_t *)data)[i]);
-        case LM_GGUF_TYPE_INT16:   return std::to_string(((const int16_t  *)data)[i]);
-        case LM_GGUF_TYPE_UINT32:  return std::to_string(((const uint32_t *)data)[i]);
-        case LM_GGUF_TYPE_INT32:   return std::to_string(((const int32_t  *)data)[i]);
-        case LM_GGUF_TYPE_UINT64:  return std::to_string(((const uint64_t *)data)[i]);
-        case LM_GGUF_TYPE_INT64:   return std::to_string(((const int64_t  *)data)[i]);
-        case LM_GGUF_TYPE_FLOAT32: return std::to_string(((const float    *)data)[i]);
-        case LM_GGUF_TYPE_FLOAT64: return std::to_string(((const double   *)data)[i]);
-        case LM_GGUF_TYPE_BOOL:    return ((const bool *)data)[i] ? "true" : "false";
-        default:                   return "unknown type: " + std::to_string(type);
-    }
-}
+const std::vector<lm_ggml_type> kv_cache_types = {
+    LM_GGML_TYPE_F32,
+    LM_GGML_TYPE_F16,
+    LM_GGML_TYPE_BF16,
+    LM_GGML_TYPE_Q8_0,
+    LM_GGML_TYPE_Q4_0,
+    LM_GGML_TYPE_Q4_1,
+    LM_GGML_TYPE_IQ4_NL,
+    LM_GGML_TYPE_Q5_0,
+    LM_GGML_TYPE_Q5_1,
+};
 
-static std::string lm_gguf_kv_to_str(const struct lm_gguf_context * ctx_gguf, int i) {
-    const enum lm_gguf_type type = lm_gguf_get_kv_type(ctx_gguf, i);
-
-    switch (type) {
-        case LM_GGUF_TYPE_STRING:
-            return lm_gguf_get_val_str(ctx_gguf, i);
-        case LM_GGUF_TYPE_ARRAY:
-            {
-                const enum lm_gguf_type arr_type = lm_gguf_get_arr_type(ctx_gguf, i);
-                int arr_n = lm_gguf_get_arr_n(ctx_gguf, i);
-                const void * data = lm_gguf_get_arr_data(ctx_gguf, i);
-                std::stringstream ss;
-                ss << "[";
-                for (int j = 0; j < arr_n; j++) {
-                    if (arr_type == LM_GGUF_TYPE_STRING) {
-                        std::string val = lm_gguf_get_arr_str(ctx_gguf, i, j);
-                        // escape quotes
-                        replace_all(val, "\\", "\\\\");
-                        replace_all(val, "\"", "\\\"");
-                        ss << '"' << val << '"';
-                    } else if (arr_type == LM_GGUF_TYPE_ARRAY) {
-                        ss << "???";
-                    } else {
-                        ss << lm_gguf_data_to_str(arr_type, data, j);
-                    }
-                    if (j < arr_n - 1) {
-                        ss << ", ";
-                    }
-                }
-                ss << "]";
-                return ss.str();
-            }
-        default:
-            return lm_gguf_data_to_str(type, lm_gguf_get_val_data(ctx_gguf, i), 0);
+static lm_ggml_type kv_cache_type_from_str(const std::string & s) {
+    for (const auto & type : kv_cache_types) {
+        if (lm_ggml_type_name(type) == s) {
+            return type;
+        }
     }
+    throw std::runtime_error("Unsupported cache type: " + s);
 }
 
 static void llama_batch_clear(llama_batch *batch) {
@@ -87,16 +57,32 @@ static void llama_batch_add(llama_batch *batch, llama_token id, llama_pos pos, s
 static void log(const char *level, const char *function, int line,
                        const char *format, ...)
 {
-    printf("[%s] %s:%d ", level, function, line);
-
     va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-
-    printf("\n");
+    #if defined(__ANDROID__)
+        char prefix[256];
+        snprintf(prefix, sizeof(prefix), "%s:%d %s", function, line, format);
+        
+        va_start(args, format);
+        android_LogPriority priority;
+        if (strcmp(level, "ERROR") == 0) {
+            priority = ANDROID_LOG_ERROR;
+        } else if (strcmp(level, "WARNING") == 0) {
+            priority = ANDROID_LOG_WARN;
+        } else if (strcmp(level, "INFO") == 0) {
+            priority = ANDROID_LOG_INFO;
+        } else {
+            priority = ANDROID_LOG_DEBUG;
+        }
+        __android_log_vprint(priority, "RNLlama", prefix, args);
+        va_end(args);
+    #else
+        printf("[%s] %s:%d ", level, function, line);
+        va_start(args, format);
+        vprintf(format, args);
+        va_end(args);
+        printf("\n");
+    #endif
 }
-
 static bool rnllama_verbose = false;
 
 #if RNLLAMA_VERBOSE != 1
@@ -215,11 +201,13 @@ struct llama_rn_context
 
     common_params params;
 
-    llama_model_ptr model = nullptr;
+    common_init_result llama_init;
+
+    llama_model *model = nullptr;
     float loading_progress = 0;
     bool is_load_interrupted = false;
 
-    llama_context_ptr ctx = nullptr;
+    llama_context *ctx = nullptr;
     common_sampler *ctx_sampling = nullptr;
 
     int n_ctx;
@@ -231,18 +219,10 @@ struct llama_rn_context
     std::string stopping_word;
     bool incomplete = false;
 
+    std::vector<common_lora_adapter_info> lora;
+
     ~llama_rn_context()
     {
-        if (ctx)
-        {
-            llama_free(ctx.get());
-            ctx = nullptr;
-        }
-        if (model)
-        {
-            llama_model_free(model.get());
-            model = nullptr;
-        }
         if (ctx_sampling != nullptr)
         {
             common_sampler_free(ctx_sampling);
@@ -274,37 +254,33 @@ struct llama_rn_context
         if (ctx_sampling != nullptr) {
             common_sampler_free(ctx_sampling);
         }
-        ctx_sampling = common_sampler_init(model.get(), params.sampling);
+        ctx_sampling = common_sampler_init(model, params.sampling);
         return ctx_sampling != nullptr;
     }
 
     bool loadModel(common_params &params_)
     {
         params = params_;
-        common_init_result result = common_init_from_params(params);
-        model = std::move(result.model);
-        ctx = std::move(result.context);
+        llama_init = common_init_from_params(params);
+        model = llama_init.model.get();
+        ctx = llama_init.context.get();
         if (model == nullptr)
         {
            LOG_ERROR("unable to load model: %s", params_.model.c_str());
            return false;
         }
-        LOG_VERBOSE("getting n_ctx");
-        n_ctx = llama_n_ctx(ctx.get());
+        n_ctx = llama_n_ctx(ctx);
+
+        // We can uncomment for debugging or after this fix: https://github.com/ggerganov/llama.cpp/pull/11101
+        // LOG_INFO("%s\n", common_params_get_system_info(params).c_str());
+       
         return true;
     }
 
     bool validateModelChatTemplate() const {
-        std::vector<char> model_template(2048, 0); // longest known template is about 1200 bytes
-        std::string template_key = "tokenizer.chat_template";
-        int32_t res = llama_model_meta_val_str(model.get(), template_key.c_str(), model_template.data(), model_template.size());
-        if (res >= 0) {
-            llama_chat_message chat[] = {{"user", "test"}};
-            std::string tmpl = std::string(model_template.data(), model_template.size());
-            int32_t chat_res = llama_chat_apply_template(model.get(), tmpl.c_str(), chat, 1, true, nullptr, 0);
-            return chat_res > 0;
-        }
-        return res > 0;
+        llama_chat_message chat[] = {{"user", "test"}};
+        int32_t chat_res = llama_chat_apply_template(model, nullptr, chat, 1, true, nullptr, 0);
+        return chat_res > 0;
     }
 
     void truncatePrompt(std::vector<llama_token> &prompt_tokens) {
@@ -331,7 +307,7 @@ struct llama_rn_context
 
     void loadPrompt()
     {
-        std::vector<llama_token> prompt_tokens = ::common_tokenize(model.get(), params.prompt, true, true);
+        std::vector<llama_token> prompt_tokens = ::common_tokenize(model, params.prompt, true, true);
         num_prompt_tokens = prompt_tokens.size();
 
         // LOG tokens
@@ -359,7 +335,7 @@ struct llama_rn_context
 
         // do Context Shift , may be buggy! TODO: Verify functionality
         if(!params.embedding){
-            purge_missing_tokens(ctx.get(), embd, prompt_tokens, params.n_predict, params.n_ctx);
+            purge_missing_tokens(ctx, embd, prompt_tokens, params.n_predict, params.n_ctx);
         }
 
         // push the prompt into the sampling context (do not apply grammar)
@@ -380,7 +356,7 @@ struct llama_rn_context
         }
 
         // since #3228 we now have to manually manage the KV cache
-        llama_kv_cache_seq_rm(ctx.get(), 0, n_past, -1);
+        llama_kv_cache_seq_rm(ctx, 0, n_past, -1);
 
         LOG_VERBOSE("prompt ingested, n_past: %d, cached: %s, to_eval: %s",
             n_past,
@@ -395,7 +371,7 @@ struct llama_rn_context
     {
         // number of tokens to keep when resetting context
         n_remain = params.n_predict;
-        llama_perf_context_reset(ctx.get());
+        llama_perf_context_reset(ctx);
         is_predicting = true;
     }
 
@@ -411,8 +387,8 @@ struct llama_rn_context
             const int n_left    = n_past - params.n_keep - 1;
             const int n_discard = n_left/2;
 
-            llama_kv_cache_seq_rm (ctx.get(), 0, params.n_keep + 1            , params.n_keep + n_discard + 1);
-            llama_kv_cache_seq_add(ctx.get(), 0, params.n_keep + 1 + n_discard, n_past, -n_discard);
+            llama_kv_cache_seq_rm (ctx, 0, params.n_keep + 1            , params.n_keep + n_discard + 1);
+            llama_kv_cache_seq_add(ctx, 0, params.n_keep + 1 + n_discard, n_past, -n_discard);
 
             for (size_t i = params.n_keep + 1 + n_discard; i < embd.size(); i++)
             {
@@ -438,14 +414,14 @@ struct llama_rn_context
             {
                 n_eval = params.n_batch;
             }
-            if (llama_decode(ctx.get(), llama_batch_get_one(&embd[n_past], n_eval)))
+            if (llama_decode(ctx, llama_batch_get_one(&embd[n_past], n_eval)))
             {
                 
                 LOG_ERROR("failed to eval, n_eval: %d, n_past: %d, n_threads: %d, embd: %s",
                     n_eval,
                     n_past,
                     params.cpuparams.n_threads,
-                    tokens_to_str(ctx.get(), embd.cbegin() + n_past, embd.cend()).c_str()
+                    tokens_to_str(ctx, embd.cbegin() + n_past, embd.cend()).c_str()
                 );
                 has_next_token = false;
                 return result;
@@ -463,23 +439,23 @@ struct llama_rn_context
         if (params.n_predict == 0)
         {
             has_next_token = false;
-            result.tok = llama_token_eos(model.get());
+            result.tok = llama_token_eos(model);
             return result;
         }
 
         {
             // out of user input, sample next token
             std::vector<llama_token_data> candidates;
-            candidates.reserve(llama_n_vocab(model.get()));
+            candidates.reserve(llama_n_vocab(model));
 
-            result.tok = common_sampler_sample(ctx_sampling, ctx.get(), -1);
+            result.tok = common_sampler_sample(ctx_sampling, ctx, -1);
 
             llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling);
 
             const int32_t n_probs = params.sampling.n_probs;
 
             // deprecated
-            /*if (params.sparams.temp <= 0 && n_probs > 0)
+            /*if (params.sampling.temp <= 0 && n_probs > 0)
             {
                 // For llama_sample_token_greedy we need to sort candidates
                 llama_sampler_init_softmax();
@@ -503,7 +479,7 @@ struct llama_rn_context
         // decrement remaining sampling budget
         --n_remain;
 
-        if (!embd.empty() && embd.back() == llama_token_eos(model.get()))
+        if (!embd.empty() && embd.back() == llama_token_eos(model))
         {
             // stopping_word = llama_token_to_piece(ctx, embd.back());
             has_next_token = false;
@@ -552,7 +528,7 @@ struct llama_rn_context
     {
         const completion_token_output token_with_probs = nextToken();
 
-        const std::string token_text = token_with_probs.tok == -1 ? "" : common_token_to_piece(ctx.get(), token_with_probs.tok);
+        const std::string token_text = token_with_probs.tok == -1 ? "" : common_token_to_piece(ctx, token_with_probs.tok);
         generated_text += token_text;
 
         if (params.sampling.n_probs > 0)
@@ -608,7 +584,7 @@ struct llama_rn_context
 
     std::vector<float> getEmbedding(common_params &embd_params)
     {
-        static const int n_embd = llama_n_embd(llama_get_model(ctx.get()));
+        static const int n_embd = llama_n_embd(llama_get_model(ctx));
         if (!embd_params.embedding)
         {
             LOG_WARNING("embedding disabled, embedding: %s", embd_params.embedding);
@@ -616,12 +592,12 @@ struct llama_rn_context
         }
         float *data;
 
-        const enum llama_pooling_type pooling_type = llama_pooling_type(ctx.get());
+        const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
         printf("pooling_type: %d\n", pooling_type);
         if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
-            data = llama_get_embeddings(ctx.get());
+            data = llama_get_embeddings(ctx);
         } else {
-            data = llama_get_embeddings_seq(ctx.get(), 0);
+            data = llama_get_embeddings_seq(ctx, 0);
         }
 
         if (!data) {
@@ -649,7 +625,11 @@ struct llama_rn_context
         double tg_std = 0;
 
         // TODO: move batch into llama_rn_context (related https://github.com/mybigday/llama.rn/issues/30)
-        llama_batch batch = llama_batch_init(512, 0, 1);
+        llama_batch batch = llama_batch_init(
+            std::min(pp, params.n_ubatch), // max n_tokens is limited by n_ubatch
+            0,                         // No embeddings
+            1                          // Single sequence
+        );
 
         for (int i = 0; i < nr; i++)
         {
@@ -663,15 +643,15 @@ struct llama_rn_context
             }
             batch.logits[batch.n_tokens - 1] = 1; // true
 
-            llama_kv_cache_clear(ctx.get());
+            llama_kv_cache_clear(ctx);
 
             const int64_t t_pp_start = llama_time_us();
-            if (llama_decode(ctx.get(), batch) != 0)
+            if (llama_decode(ctx, batch) != 0)
             {
                 LOG_ERROR("llama_decode() failed during prompt", "");
             }
             const int64_t t_pp_end = llama_time_us();
-            llama_kv_cache_clear(ctx.get());
+            llama_kv_cache_clear(ctx);
 
             if (is_interrupted) break;
 
@@ -686,7 +666,7 @@ struct llama_rn_context
                     llama_batch_add(&batch, 0, i, {j}, true);
                 }
 
-                if (llama_decode(ctx.get(), batch) != 0)
+                if (llama_decode(ctx, batch) != 0)
                 {
                     LOG_ERROR("llama_decode() failed during text generation", "");
                 }
@@ -695,7 +675,7 @@ struct llama_rn_context
 
             const int64_t t_tg_end = llama_time_us();
 
-            llama_kv_cache_clear(ctx.get());
+            llama_kv_cache_clear(ctx);
 
             const double t_pp = (t_pp_end - t_pp_start) / 1000000.0;
             const double t_tg = (t_tg_end - t_tg_start) / 1000000.0;
@@ -721,14 +701,14 @@ struct llama_rn_context
             tg_std = 0;
         }
 
-        if (is_interrupted) llama_kv_cache_clear(ctx.get());
+        if (is_interrupted) llama_kv_cache_clear(ctx);
         is_predicting = false;
 
         char model_desc[128];
-        llama_model_desc(model.get(), model_desc, sizeof(model_desc));
+        llama_model_desc(model, model_desc, sizeof(model_desc));
         return std::string("[\"") + model_desc + std::string("\",") +
-            std::to_string(llama_model_size(model.get())) + std::string(",") +
-            std::to_string(llama_model_n_params(model.get())) + std::string(",") +
+            std::to_string(llama_model_size(model)) + std::string(",") +
+            std::to_string(llama_model_n_params(model)) + std::string(",") +
             std::to_string(pp_avg) + std::string(",") +
             std::to_string(pp_std) + std::string(",") +
             std::to_string(tg_avg) + std::string(",") +
@@ -736,7 +716,27 @@ struct llama_rn_context
             std::string("]");
     }
 
-    
+    int applyLoraAdapters(std::vector<common_lora_adapter_info> lora) {
+        for (auto &la : lora) {
+            la.ptr = llama_lora_adapter_init(model, la.path.c_str());
+            if (la.ptr == nullptr) {
+                LOG_ERROR("failed to apply lora adapter '%s'\n", la.path.c_str());
+                return -1;
+            }
+        }
+        this->lora = lora;
+        common_lora_adapters_apply(ctx, lora);
+        return 0;
+    }
+
+    void removeLoraAdapters() {
+        this->lora.clear();
+        common_lora_adapters_apply(ctx, this->lora); // apply empty list
+    }
+
+    std::vector<common_lora_adapter_info> getLoadedLoraAdapters() {
+        return this->lora;
+    }
 // Context Shifting from KoboldCpp <https://github.com/LostRuins/koboldcpp>
 // Implementation obtained with special permission from @concedo
 
@@ -899,6 +899,7 @@ void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context
 }
 
 // End Context Shifting
+
 };
 
 }

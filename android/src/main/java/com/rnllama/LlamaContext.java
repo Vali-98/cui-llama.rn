@@ -108,6 +108,8 @@ public class LlamaContext {
       params.hasKey("n_ctx") ? params.getInt("n_ctx") : 512,
       // int n_batch,
       params.hasKey("n_batch") ? params.getInt("n_batch") : 512,
+      // int n_ubatch,
+      params.hasKey("n_ubatch") ? params.getInt("n_ubatch") : 512,
       // int n_threads,
       params.hasKey("n_threads") ? params.getInt("n_threads") : 0,
       // int n_gpu_layers, // TODO: Support this
@@ -115,9 +117,9 @@ public class LlamaContext {
       // boolean flash_attn,
       params.hasKey("flash_attn") ? params.getBoolean("flash_attn") : false,
       // String cache_type_k,
-      params.hasKey("cache_type_k") ? params.getInt("cache_type_k") : 1,
+      params.hasKey("cache_type_k") ? params.getString("cache_type_k") : "f16",
       // String cache_type_v,
-      params.hasKey("cache_type_v") ? params.getInt("cache_type_v") : 1,
+      params.hasKey("cache_type_v") ? params.getString("cache_type_v") : "f16",
       // boolean use_mlock,
       params.hasKey("use_mlock") ? params.getBoolean("use_mlock") : true,
       // boolean use_mmap,
@@ -128,6 +130,8 @@ public class LlamaContext {
       params.hasKey("lora") ? params.getString("lora") : "",
       // float lora_scaled,
       params.hasKey("lora_scaled") ? (float) params.getDouble("lora_scaled") : 1.0f,
+      // ReadableArray lora_adapters,
+      params.hasKey("lora_list") ? params.getArray("lora_list") : null,
       // float rope_freq_base,
       params.hasKey("rope_freq_base") ? (float) params.getDouble("rope_freq_base") : 0.0f,
       // float rope_freq_scale
@@ -168,7 +172,7 @@ public class LlamaContext {
     WritableMap event = Arguments.createMap();
     event.putInt("contextId", LlamaContext.this.id);
     event.putInt("progress", progress);
-    eventEmitter.emit("@RNLlama_onInitContextProgress", event);
+    eventEmitter.emit("@RNLlama_onContextProgress", event);
   }
 
   private static class LoadProgressCallback {
@@ -273,8 +277,6 @@ public class LlamaContext {
       params.hasKey("mirostat_tau") ? (float) params.getDouble("mirostat_tau") : 5.00f,
       // float mirostat_eta,
       params.hasKey("mirostat_eta") ? (float) params.getDouble("mirostat_eta") : 0.10f,
-      // boolean penalize_nl,
-      params.hasKey("penalize_nl") ? params.getBoolean("penalize_nl") : false,
       // int top_k,
       params.hasKey("top_k") ? params.getInt("top_k") : 40,
       // float top_p,
@@ -357,6 +359,22 @@ public class LlamaContext {
 
   public String bench(int pp, int tg, int pl, int nr) {
     return bench(this.context, pp, tg, pl, nr);
+  }
+
+  public int applyLoraAdapters(ReadableArray loraAdapters) {
+    int result = applyLoraAdapters(this.context, loraAdapters);
+    if (result != 0) {
+      throw new IllegalStateException("Failed to apply lora adapters");
+    }
+    return result;
+  }
+
+  public void removeLoraAdapters() {
+    removeLoraAdapters(this.context);
+  }
+
+  public WritableArray getLoadedLoraAdapters() {
+    return getLoadedLoraAdapters(this.context);
   }
 
   public void release() {
@@ -460,16 +478,18 @@ public class LlamaContext {
     int embd_normalize,
     int n_ctx,
     int n_batch,
+    int n_ubatch,
     int n_threads,
     int n_gpu_layers, // TODO: Support this
     boolean flash_attn,
-    int cache_type_k,
-    int cache_type_v,
+    String cache_type_k,
+    String cache_type_v,
     boolean use_mlock,
     boolean use_mmap,
     boolean vocab_only,
     String lora,
     float lora_scaled,
+    ReadableArray lora_list,
     float rope_freq_base,
     float rope_freq_scale,
     int pooling_type,
@@ -508,7 +528,6 @@ public class LlamaContext {
     float mirostat,
     float mirostat_tau,
     float mirostat_eta,
-    boolean penalize_nl,
     int top_k,
     float top_p,
     float min_p,
@@ -521,7 +540,7 @@ public class LlamaContext {
     double[][] logit_bias,
     float   dry_multiplier,
     float   dry_base,
-    int dry_allowed_length,    
+    int dry_allowed_length,
     int dry_penalty_last_n,
     String[] dry_sequence_breakers,
     PartialCompletionCallback partial_completion_callback
@@ -537,6 +556,9 @@ public class LlamaContext {
     int embd_normalize
   );
   protected static native String bench(long contextPtr, int pp, int tg, int pl, int nr);
+  protected static native int applyLoraAdapters(long contextPtr, ReadableArray loraAdapters);
+  protected static native void removeLoraAdapters(long contextPtr);
+  protected static native WritableArray getLoadedLoraAdapters(long contextPtr);
   protected static native void freeContext(long contextPtr);
   protected static native void logToAndroid();
 }
