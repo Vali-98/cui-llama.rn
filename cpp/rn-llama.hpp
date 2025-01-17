@@ -203,11 +203,11 @@ struct llama_rn_context
 
     common_init_result llama_init;
 
-    llama_model_ptr model = nullptr;
+    llama_model *model = nullptr;
     float loading_progress = 0;
     bool is_load_interrupted = false;
 
-    llama_context_ptr ctx = nullptr;
+    llama_context *ctx = nullptr;
     common_sampler *ctx_sampling = nullptr;
 
     int n_ctx;
@@ -254,7 +254,7 @@ struct llama_rn_context
         if (ctx_sampling != nullptr) {
             common_sampler_free(ctx_sampling);
         }
-        ctx_sampling = common_sampler_init(model.get(), params.sampling);
+        ctx_sampling = common_sampler_init(model, params.sampling);
         return ctx_sampling != nullptr;
     }
 
@@ -307,7 +307,7 @@ struct llama_rn_context
 
     void loadPrompt()
     {
-        std::vector<llama_token> prompt_tokens = ::common_tokenize(model.get(), params.prompt, true, true);
+        std::vector<llama_token> prompt_tokens = ::common_tokenize(model, params.prompt, true, true);
         num_prompt_tokens = prompt_tokens.size();
 
         // LOG tokens
@@ -335,7 +335,7 @@ struct llama_rn_context
 
         // do Context Shift , may be buggy! TODO: Verify functionality
         if(!params.embedding){
-            purge_missing_tokens(ctx.get(), embd, prompt_tokens, params.n_predict, params.n_ctx);
+            purge_missing_tokens(ctx, embd, prompt_tokens, params.n_predict, params.n_ctx);
         }
 
         // push the prompt into the sampling context (do not apply grammar)
@@ -356,7 +356,7 @@ struct llama_rn_context
         }
 
         // since #3228 we now have to manually manage the KV cache
-        llama_kv_cache_seq_rm(ctx.get(), 0, n_past, -1);
+        llama_kv_cache_seq_rm(ctx, 0, n_past, -1);
 
         LOG_VERBOSE("prompt ingested, n_past: %d, cached: %s, to_eval: %s",
             n_past,
@@ -371,7 +371,7 @@ struct llama_rn_context
     {
         // number of tokens to keep when resetting context
         n_remain = params.n_predict;
-        llama_perf_context_reset(ctx.get());
+        llama_perf_context_reset(ctx);
         is_predicting = true;
     }
 
@@ -387,8 +387,8 @@ struct llama_rn_context
             const int n_left    = n_past - params.n_keep - 1;
             const int n_discard = n_left/2;
 
-            llama_kv_cache_seq_rm (ctx.get(), 0, params.n_keep + 1            , params.n_keep + n_discard + 1);
-            llama_kv_cache_seq_add(ctx.get(), 0, params.n_keep + 1 + n_discard, n_past, -n_discard);
+            llama_kv_cache_seq_rm (ctx, 0, params.n_keep + 1            , params.n_keep + n_discard + 1);
+            llama_kv_cache_seq_add(ctx, 0, params.n_keep + 1 + n_discard, n_past, -n_discard);
 
             for (size_t i = params.n_keep + 1 + n_discard; i < embd.size(); i++)
             {
@@ -414,14 +414,14 @@ struct llama_rn_context
             {
                 n_eval = params.n_batch;
             }
-            if (llama_decode(ctx.get(), llama_batch_get_one(&embd[n_past], n_eval)))
+            if (llama_decode(ctx, llama_batch_get_one(&embd[n_past], n_eval)))
             {
                 
                 LOG_ERROR("failed to eval, n_eval: %d, n_past: %d, n_threads: %d, embd: %s",
                     n_eval,
                     n_past,
                     params.cpuparams.n_threads,
-                    tokens_to_str(ctx.get(), embd.cbegin() + n_past, embd.cend()).c_str()
+                    tokens_to_str(ctx, embd.cbegin() + n_past, embd.cend()).c_str()
                 );
                 has_next_token = false;
                 return result;
@@ -439,16 +439,16 @@ struct llama_rn_context
         if (params.n_predict == 0)
         {
             has_next_token = false;
-            result.tok = llama_token_eos(model.get());
+            result.tok = llama_token_eos(model);
             return result;
         }
 
         {
             // out of user input, sample next token
             std::vector<llama_token_data> candidates;
-            candidates.reserve(llama_n_vocab(model.get()));
+            candidates.reserve(llama_n_vocab(model));
 
-            result.tok = common_sampler_sample(ctx_sampling, ctx.get(), -1);
+            result.tok = common_sampler_sample(ctx_sampling, ctx, -1);
 
             llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling);
 
@@ -479,7 +479,7 @@ struct llama_rn_context
         // decrement remaining sampling budget
         --n_remain;
 
-        if (!embd.empty() && embd.back() == llama_token_eos(model.get()))
+        if (!embd.empty() && embd.back() == llama_token_eos(model))
         {
             // stopping_word = llama_token_to_piece(ctx, embd.back());
             has_next_token = false;
@@ -528,7 +528,7 @@ struct llama_rn_context
     {
         const completion_token_output token_with_probs = nextToken();
 
-        const std::string token_text = token_with_probs.tok == -1 ? "" : common_token_to_piece(ctx.get(), token_with_probs.tok);
+        const std::string token_text = token_with_probs.tok == -1 ? "" : common_token_to_piece(ctx, token_with_probs.tok);
         generated_text += token_text;
 
         if (params.sampling.n_probs > 0)
@@ -584,7 +584,7 @@ struct llama_rn_context
 
     std::vector<float> getEmbedding(common_params &embd_params)
     {
-        static const int n_embd = llama_n_embd(llama_get_model(ctx.get()));
+        static const int n_embd = llama_n_embd(llama_get_model(ctx));
         if (!embd_params.embedding)
         {
             LOG_WARNING("embedding disabled, embedding: %s", embd_params.embedding);
@@ -592,12 +592,12 @@ struct llama_rn_context
         }
         float *data;
 
-        const enum llama_pooling_type pooling_type = llama_pooling_type(ctx.get());
+        const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
         printf("pooling_type: %d\n", pooling_type);
         if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
-            data = llama_get_embeddings(ctx.get());
+            data = llama_get_embeddings(ctx);
         } else {
-            data = llama_get_embeddings_seq(ctx.get(), 0);
+            data = llama_get_embeddings_seq(ctx, 0);
         }
 
         if (!data) {
@@ -643,15 +643,15 @@ struct llama_rn_context
             }
             batch.logits[batch.n_tokens - 1] = 1; // true
 
-            llama_kv_cache_clear(ctx.get());
+            llama_kv_cache_clear(ctx);
 
             const int64_t t_pp_start = llama_time_us();
-            if (llama_decode(ctx.get(), batch) != 0)
+            if (llama_decode(ctx, batch) != 0)
             {
                 LOG_ERROR("llama_decode() failed during prompt", "");
             }
             const int64_t t_pp_end = llama_time_us();
-            llama_kv_cache_clear(ctx.get());
+            llama_kv_cache_clear(ctx);
 
             if (is_interrupted) break;
 
@@ -666,7 +666,7 @@ struct llama_rn_context
                     llama_batch_add(&batch, 0, i, {j}, true);
                 }
 
-                if (llama_decode(ctx.get(), batch) != 0)
+                if (llama_decode(ctx, batch) != 0)
                 {
                     LOG_ERROR("llama_decode() failed during text generation", "");
                 }
@@ -675,7 +675,7 @@ struct llama_rn_context
 
             const int64_t t_tg_end = llama_time_us();
 
-            llama_kv_cache_clear(ctx.get());
+            llama_kv_cache_clear(ctx);
 
             const double t_pp = (t_pp_end - t_pp_start) / 1000000.0;
             const double t_tg = (t_tg_end - t_tg_start) / 1000000.0;
@@ -701,14 +701,14 @@ struct llama_rn_context
             tg_std = 0;
         }
 
-        if (is_interrupted) llama_kv_cache_clear(ctx.get());
+        if (is_interrupted) llama_kv_cache_clear(ctx);
         is_predicting = false;
 
         char model_desc[128];
-        llama_model_desc(model.get(), model_desc, sizeof(model_desc));
+        llama_model_desc(model, model_desc, sizeof(model_desc));
         return std::string("[\"") + model_desc + std::string("\",") +
-            std::to_string(llama_model_size(model.get())) + std::string(",") +
-            std::to_string(llama_model_n_params(model.get())) + std::string(",") +
+            std::to_string(llama_model_size(model)) + std::string(",") +
+            std::to_string(llama_model_n_params(model)) + std::string(",") +
             std::to_string(pp_avg) + std::string(",") +
             std::to_string(pp_std) + std::string(",") +
             std::to_string(tg_avg) + std::string(",") +
@@ -737,6 +737,169 @@ struct llama_rn_context
     std::vector<common_lora_adapter_info> getLoadedLoraAdapters() {
         return this->lora;
     }
+// Context Shifting from KoboldCpp <https://github.com/LostRuins/koboldcpp>
+// Implementation obtained with special permission from @concedo
+
+std::vector<int> longest_common_subseq(const std::vector<int> x, const std::vector<int> y){
+     int m = x.size(), n = y.size();
+
+     //int LCSuff[m+1][n+1];
+     std::vector<std::vector<int>> LCSuff(m+1, std::vector<int>(n+1));
+
+     for (int j = 0; j <= n; j++)
+         LCSuff[0][j] = 0;
+     for (int i = 0; i <= m; i++)
+         LCSuff[i][0] = 0;
+
+     for (int i = 1; i <= m; i++)
+     {
+         for (int j = 1; j <= n; j++)
+         {
+             if (x[i - 1] == y[j - 1])
+                 LCSuff[i][j] = LCSuff[i - 1][j - 1] + 1;
+             else
+                 LCSuff[i][j] = 0;
+         }
+     }
+
+     std::vector<int> longest;
+     for (int i = 1; i <= m; i++)
+     {
+         for (int j = 1; j <= n; j++)
+         {
+             if (LCSuff[i][j] > longest.size())
+             {
+                 auto off1 = ((i - LCSuff[i][j] + 1) - 1);
+                 auto off2 = off1 + LCSuff[i][j];
+                 longest.clear();
+                //  std::vector<int>().swap(longest);
+                 longest = std::vector<int>(x.begin() + off1, x.begin() + off2);
+                // x.substr((i - LCSuff[i][j] + 1) - 1, LCSuff[i][j]);
+             }
+         }
+     }
+     return longest;
+ }
+
+bool arr_start_with(const std::vector<int> targetArray, const std::vector<int> searchSeq)
+ {
+     int ss = searchSeq.size();
+     if(targetArray.size()<ss)
+     {
+         return false;
+     }
+     for(int i=0;i<ss;++i)
+     {
+         if(targetArray[i]!=searchSeq[i])
+         {
+             return false;
+         }
+     }
+     return true;
+ }
+
+int arr_find_index_of(const std::vector<int> targetArray, const std::vector<int> searchSeq)
+ {
+     int ss = searchSeq.size();
+     int tas = targetArray.size();
+     if(tas<ss)
+     {
+         return -1;
+     }
+     for(int i=0;i<tas;++i)
+     {
+         int srch = 0;
+         bool fail = false;
+         for(int srch=0;srch<ss;++srch)
+         {
+             if ((i + srch) >= tas || targetArray[i + srch] != searchSeq[srch])
+             {
+                 fail = true;
+                 break;
+             }
+         }
+         if(!fail)
+         {
+             return i;
+         }
+     }
+     return -1;
+ }
+
+void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context_tokens, std::vector<int> &new_context_tokens, const int genamt, const int nctx)
+{
+    //scan from start old and new ctx, until first mismatch found, save as p0
+    //check remaining old and new ctx for longest common subseq, which needs to be at 256 tokens
+    //test: longest common subseq (LCQ) MUST start within 0 tokens from end of memory, otherwise purge fails
+    //if passed, save beginning of LCQ from old ctx as p1
+    //remove all tokens from old ctx between p0 and p1, updating both arrays and kv, then continue as normal
+
+    const int short_fall_threshold = 200 + (nctx/30); //dont trigger shifting if the distance between trimstart and currhead < this
+    const int stack_allowance = 60 + (nctx/50); //in case the end text is slightly modified, be forgiving
+
+    int trimstart = 0;
+    int new_tokens_len = new_context_tokens.size();
+    bool purge_needed = true;
+
+    for (int i = 0; i < current_context_tokens.size(); ++i)
+    {
+        if (current_context_tokens[i] == new_context_tokens[i])
+        {
+            trimstart += 1;
+        }
+        else
+        {
+            break;
+        }
+        if ((i + 2) >= new_tokens_len)
+        {
+            purge_needed = false;
+            break; //no surgery required
+        }
+    }
+
+    
+
+    if(!purge_needed || new_tokens_len < 6 || current_context_tokens.size() < 6 || new_tokens_len - trimstart < short_fall_threshold)
+    {
+        LOG_INFO("Fall Threshold: %d out of %d\n", new_tokens_len - trimstart, short_fall_threshold);
+        return; //no purge is needed
+    }
+
+    //at least this many tokens need to match, otherwise don't bother trimming
+    const int lc_tok_threshold = std::max(std::min((new_tokens_len - trimstart) - (genamt+stack_allowance), (int)(nctx*0.45)), short_fall_threshold - stack_allowance);
+
+    auto curr_ctx_without_memory = std::vector<int>(current_context_tokens.begin() + trimstart, current_context_tokens.end());
+    auto new_ctx_without_memory = std::vector<int>(new_context_tokens.begin() + trimstart, new_context_tokens.end());
+
+    auto shared = longest_common_subseq(curr_ctx_without_memory, new_ctx_without_memory);
+
+    if (shared.size() > lc_tok_threshold && arr_start_with(new_ctx_without_memory, shared)) // enough tokens in common
+    {
+        int found = arr_find_index_of(current_context_tokens,shared);
+        if(found>=0 && found > trimstart)
+        {
+
+            //extract the unwanted tokens out from context and KV
+            int diff = found - trimstart;
+            llama_kv_cache_seq_rm(ctx, 0, trimstart, trimstart + diff);
+            llama_kv_cache_seq_add(ctx, 0, trimstart + diff, -1, -diff);
+
+            for (size_t i = trimstart + diff; i < current_context_tokens.size() - 1; i++)
+            {
+                current_context_tokens[i - diff] = current_context_tokens[i];
+            }
+
+            LOG_INFO("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
+
+            current_context_tokens.resize(current_context_tokens.size() - diff);
+        }
+    }
+
+}
+
+// End Context Shifting
+
 };
 
 }

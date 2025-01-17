@@ -117,9 +117,9 @@ public class LlamaContext {
       // boolean flash_attn,
       params.hasKey("flash_attn") ? params.getBoolean("flash_attn") : false,
       // String cache_type_k,
-      params.hasKey("cache_type_k") ? params.getInt("cache_type_k") : 1,
+      params.hasKey("cache_type_k") ? params.getString("cache_type_k") : "f16",
       // String cache_type_v,
-      params.hasKey("cache_type_v") ? params.getInt("cache_type_v") : 1,
+      params.hasKey("cache_type_v") ? params.getString("cache_type_v") : "f16",
       // boolean use_mlock,
       params.hasKey("use_mlock") ? params.getBoolean("use_mlock") : true,
       // boolean use_mmap,
@@ -172,7 +172,7 @@ public class LlamaContext {
     WritableMap event = Arguments.createMap();
     event.putInt("contextId", LlamaContext.this.id);
     event.putInt("progress", progress);
-    eventEmitter.emit("@RNLlama_onInitContextProgress", event);
+    eventEmitter.emit("@RNLlama_onContextProgress", event);
   }
 
   private static class LoadProgressCallback {
@@ -482,8 +482,8 @@ public class LlamaContext {
     int n_threads,
     int n_gpu_layers, // TODO: Support this
     boolean flash_attn,
-    int cache_type_k,
-    int cache_type_v,
+    String cache_type_k,
+    String cache_type_v,
     boolean use_mlock,
     boolean use_mmap,
     boolean vocab_only,

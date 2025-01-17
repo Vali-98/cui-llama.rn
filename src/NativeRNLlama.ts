@@ -25,11 +25,11 @@ export type NativeContextParams = {
   /**
    * KV cache data type for the K (Experimental in llama.cpp)
    */
-  cache_type_k?: number
+  cache_type_k?: string
   /**
    * KV cache data type for the V (Experimental in llama.cpp)
    */
-  cache_type_v?: number
+  cache_type_v?: string
 
   use_mlock?: boolean
   use_mmap?: boolean
@@ -277,11 +277,6 @@ export interface Spec extends TurboModule {
   tokenizeAsync(contextId: number, text: string): Promise<NativeTokenizeResult>
   tokenizeSync(contextId: number, text: string): NativeTokenizeResult
   getCpuFeatures() : Promise<NativeCPUFeatures>
-  getFormattedChat(
-    contextId: number,
-    messages: NativeLlamaChatMessage[],
-    chatTemplate?: string,
-  ): Promise<string>
   detokenize(contextId: number, tokens: number[]): Promise<string>
   embedding(
     contextId: number,

@@ -46,8 +46,6 @@ set(
     ${RNLLAMA_LIB_DIR}/sgemm.cpp
     ${RNLLAMA_LIB_DIR}/common.cpp
     ${RNLLAMA_LIB_DIR}/rn-llama.hpp
-    ${RNLLAMA_LIB_DIR}/amx/amx.cpp
-    ${RNLLAMA_LIB_DIR}/amx/mmq.cpp
     ${CMAKE_SOURCE_DIR}/jni-utils.h
     ${CMAKE_SOURCE_DIR}/jni.cpp
 )

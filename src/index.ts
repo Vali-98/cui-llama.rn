@@ -65,56 +65,24 @@ type TokenNativeEvent = {
   tokenResult: TokenData
 }
 
-export enum GGML_TYPE {
-  LM_GGML_TYPE_F32     = 0,
-  LM_GGML_TYPE_F16     = 1,
-  LM_GGML_TYPE_Q4_0    = 2,
-  LM_GGML_TYPE_Q4_1    = 3,
-  // LM_GGML_TYPE_Q4_2 = 4, support has been removed
-  // LM_GGML_TYPE_Q4_3 = 5, support has been removed
-  LM_GGML_TYPE_Q5_0    = 6,
-  LM_GGML_TYPE_Q5_1    = 7,
-  LM_GGML_TYPE_Q8_0    = 8,
-  LM_GGML_TYPE_Q8_1    = 9,
-  LM_GGML_TYPE_Q2_K    = 10,
-  LM_GGML_TYPE_Q3_K    = 11,
-  LM_GGML_TYPE_Q4_K    = 12,
-  LM_GGML_TYPE_Q5_K    = 13,
-  LM_GGML_TYPE_Q6_K    = 14,
-  LM_GGML_TYPE_Q8_K    = 15,
-  LM_GGML_TYPE_IQ2_XXS = 16,
-  LM_GGML_TYPE_IQ2_XS  = 17,
-  LM_GGML_TYPE_IQ3_XXS = 18,
-  LM_GGML_TYPE_IQ1_S   = 19,
-  LM_GGML_TYPE_IQ4_NL  = 20,
-  LM_GGML_TYPE_IQ3_S   = 21,
-  LM_GGML_TYPE_IQ2_S   = 22,
-  LM_GGML_TYPE_IQ4_XS  = 23,
-  LM_GGML_TYPE_I8      = 24,
-  LM_GGML_TYPE_I16     = 25,
-  LM_GGML_TYPE_I32     = 26,
-  LM_GGML_TYPE_I64     = 27,
-  LM_GGML_TYPE_F64     = 28,
-  LM_GGML_TYPE_IQ1_M   = 29,
-  LM_GGML_TYPE_BF16    = 30,
-  // LM_GGML_TYPE_Q4_0_4_4 = 31, support has been removed from gguf files
-  // LM_GGML_TYPE_Q4_0_4_8 = 32,
-  // LM_GGML_TYPE_Q4_0_8_8 = 33,
-  LM_GGML_TYPE_TQ1_0   = 34,
-  LM_GGML_TYPE_TQ2_0   = 35,
-  // LM_GGML_TYPE_IQ4_NL_4_4 = 36,
-  // LM_GGML_TYPE_IQ4_NL_4_8 = 37,
-  // LM_GGML_TYPE_IQ4_NL_8_8 = 38,
-  LM_GGML_TYPE_COUNT   = 39,
-};
+export enum CACHE_TYPE  {
+  F16 = 'f16',
+  F32 = 'f32',
+  Q8_0 = 'q8_0',
+  Q4_0 = 'q4_0',
+  Q4_1 = 'q4_1',
+  IQ4_NL = 'iq4_nl',
+  Q5_0 = 'q5_0',
+  Q5_1 = 'q5_1'
+}
 
 
 export type ContextParams = Omit<
   NativeContextParams,
   'cache_type_k' | 'cache_type_v' | 'pooling_type'
 > & {
-  cache_type_k?: GGML_TYPE
-  cache_type_v?: GGML_TYPE
+  cache_type_k?: CACHE_TYPE
+  cache_type_v?: CACHE_TYPE
   pooling_type?: 'none' | 'mean' | 'cls' | 'last' | 'rank'
 }
 
