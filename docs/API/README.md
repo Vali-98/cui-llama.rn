@@ -63,7 +63,7 @@ llama.rn
 
 #### Defined in
 
-[index.ts:84](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L84)
+[index.ts:103](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L103)
 
 ___
 
@@ -73,7 +73,7 @@ ___
 
 #### Defined in
 
-[index.ts:75](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L75)
+[index.ts:94](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L94)
 
 ___
 
@@ -83,7 +83,7 @@ ___
 
 #### Defined in
 
-[index.ts:64](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L64)
+[index.ts:67](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L67)
 
 ___
 
@@ -93,7 +93,7 @@ ___
 
 #### Defined in
 
-[index.ts:73](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L73)
+[index.ts:92](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L92)
 
 ___
 
@@ -121,7 +121,6 @@ ___
 | `n_predict?` | `number` | Set the maximum number of tokens to predict when generating text. **Note:** May exceed the set limit slightly if the last token is a partial multibyte character. When 0,no tokens will be generated but the prompt is evaluated into the cache. Default: `-1`, where `-1` is infinity. |
 | `n_probs?` | `number` | If greater than 0, the response also contains the probabilities of top N tokens for each generated token given the sampling settings. Note that for temperature < 0 the tokens are sampled greedily but token probabilities are still being calculated via a simple softmax of the logits without considering any other sampler settings. Default: `0` |
 | `n_threads?` | `number` | - |
-| `penalize_nl?` | `boolean` | Penalize newline tokens when applying the repeat penalty. Default: `false` |
 | `penalty_freq?` | `number` | Repeat alpha frequency penalty. Default: `0.0`, which is disabled. |
 | `penalty_last_n?` | `number` | Last n tokens to consider for penalizing repetition. Default: `64`, where `0` is disabled and `-1` is ctx-size. |
 | `penalty_present?` | `number` | Repeat alpha presence penalty. Default: `0.0`, which is disabled. |
@@ -138,7 +137,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:50](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L50)
+[NativeRNLlama.ts:60](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L60)
 
 ___
 
@@ -164,7 +163,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:195](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L195)
+[NativeRNLlama.ts:201](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L201)
 
 ___
 
@@ -187,7 +186,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:184](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L184)
+[NativeRNLlama.ts:190](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L190)
 
 ___
 
@@ -204,7 +203,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:179](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L179)
+[NativeRNLlama.ts:185](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L185)
 
 ___
 
@@ -221,7 +220,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:174](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L174)
+[NativeRNLlama.ts:180](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L180)
 
 ___
 
@@ -239,8 +238,9 @@ ___
 | `embedding?` | `boolean` | - |
 | `flash_attn?` | `boolean` | Enable flash attention, only recommended in GPU device (Experimental in llama.cpp) |
 | `is_model_asset?` | `boolean` | - |
-| `lora?` | `string` | - |
-| `lora_scaled?` | `number` | - |
+| `lora?` | `string` | Single LoRA adapter path |
+| `lora_list?` | { `path`: `string` ; `scaled?`: `number`  }[] | LoRA adapter list |
+| `lora_scaled?` | `number` | Single LoRA adapter scale |
 | `model` | `string` | - |
 | `n_batch?` | `number` | - |
 | `n_ctx?` | `number` | - |
@@ -256,7 +256,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:8](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L8)
+[NativeRNLlama.ts:8](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L8)
 
 ___
 
@@ -272,7 +272,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:4](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L4)
+[NativeRNLlama.ts:4](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L4)
 
 ___
 
@@ -288,7 +288,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:215](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L215)
+[NativeRNLlama.ts:221](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L221)
 
 ___
 
@@ -307,7 +307,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:219](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L219)
+[NativeRNLlama.ts:225](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L225)
 
 ___
 
@@ -324,7 +324,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:226](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L226)
+[NativeRNLlama.ts:232](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L232)
 
 ___
 
@@ -340,7 +340,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:211](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/NativeRNLlama.ts#L211)
+[NativeRNLlama.ts:217](https://github.com/mybigday/llama.rn/blob/402a590/src/NativeRNLlama.ts#L217)
 
 ___
 
@@ -356,7 +356,7 @@ ___
 
 #### Defined in
 
-[chat.ts:3](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/chat.ts#L3)
+[chat.ts:3](https://github.com/mybigday/llama.rn/blob/402a590/src/chat.ts#L3)
 
 ___
 
@@ -373,7 +373,7 @@ ___
 
 #### Defined in
 
-[chat.ts:7](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/chat.ts#L7)
+[chat.ts:7](https://github.com/mybigday/llama.rn/blob/402a590/src/chat.ts#L7)
 
 ___
 
@@ -390,7 +390,7 @@ ___
 
 #### Defined in
 
-[index.ts:54](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L54)
+[index.ts:57](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L57)
 
 ## Functions
 
@@ -414,7 +414,7 @@ ___
 
 #### Defined in
 
-[grammar.ts:826](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/grammar.ts#L826)
+[grammar.ts:826](https://github.com/mybigday/llama.rn/blob/402a590/src/grammar.ts#L826)
 
 ___
 
@@ -435,7 +435,7 @@ ___
 
 #### Defined in
 
-[index.ts:251](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L251)
+[index.ts:295](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L295)
 
 ___
 
@@ -455,7 +455,7 @@ ___
 
 #### Defined in
 
-[index.ts:236](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L236)
+[index.ts:280](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L280)
 
 ___
 
@@ -469,7 +469,7 @@ ___
 
 #### Defined in
 
-[index.ts:301](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L301)
+[index.ts:354](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L354)
 
 ___
 
@@ -489,4 +489,4 @@ ___
 
 #### Defined in
 
-[index.ts:222](https://github.com/mybigday/llama.rn/blob/0c04b5e/src/index.ts#L222)
+[index.ts:266](https://github.com/mybigday/llama.rn/blob/402a590/src/index.ts#L266)

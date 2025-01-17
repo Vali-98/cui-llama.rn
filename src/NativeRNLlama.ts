@@ -12,6 +12,7 @@ export type NativeContextParams = {
 
   n_ctx?: number
   n_batch?: number
+  n_ubatch?: number
 
   n_threads?: number
   n_gpu_layers?: number
@@ -34,8 +35,18 @@ export type NativeContextParams = {
   use_mmap?: boolean
   vocab_only?: boolean
 
-  lora?: string // lora_adaptor
+  /**
+   * Single LoRA adapter path
+   */
+  lora?: string
+  /**
+   * Single LoRA adapter scale
+   */
   lora_scaled?: number
+  /**
+   * LoRA adapter list
+   */
+  lora_list?: Array<{ path: string; scaled?: number }>
 
   rope_freq_base?: number
   rope_freq_scale?: number
@@ -115,10 +126,6 @@ export type NativeCompletionParams = {
    * Repeat alpha presence penalty. Default: `0.0`, which is disabled.
    */
   penalty_present?: number
-  /**
-   * Penalize newline tokens when applying the repeat penalty. Default: `false`
-   */
-  // penalize_nl?: boolean
   /**
    * Enable Mirostat sampling, controlling perplexity during text generation. Default: `0`, where `0` is disabled, `1` is Mirostat, and `2` is Mirostat 2.0.
    */
@@ -243,8 +250,16 @@ export interface Spec extends TurboModule {
   setContextLimit(limit: number): Promise<void>
 
   modelInfo(path: string, skip?: string[]): Promise<Object>
-  initContext(contextId: number, params: NativeContextParams): Promise<NativeLlamaContext>
+  initContext(
+    contextId: number,
+    params: NativeContextParams,
+  ): Promise<NativeLlamaContext>
 
+  getFormattedChat(
+    contextId: number,
+    messages: NativeLlamaChatMessage[],
+    chatTemplate?: string,
+  ): Promise<string>
   loadSession(
     contextId: number,
     filepath: string,
@@ -280,6 +295,15 @@ export interface Spec extends TurboModule {
     pl: number,
     nr: number,
   ): Promise<string>
+
+  applyLoraAdapters(
+    contextId: number,
+    loraAdapters: Array<{ path: string; scaled?: number }>,
+  ): Promise<void>
+  removeLoraAdapters(contextId: number): Promise<void>
+  getLoadedLoraAdapters(
+    contextId: number,
+  ): Promise<Array<{ path: string; scaled?: number }>>
 
   releaseContext(contextId: number): Promise<void>
 

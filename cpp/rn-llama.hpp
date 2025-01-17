@@ -5,65 +5,35 @@
 #include <iostream>
 #include "common.h"
 #include "ggml.h"
+#include "gguf.h"
 #include "llama.h"
 #include "llama-impl.h"
 #include "sampling.h"
-#include "llama-cpp.h"
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
 
 namespace rnllama {
 
-static std::string lm_gguf_data_to_str(enum lm_gguf_type type, const void * data, int i) {
-    switch (type) {
-        case LM_GGUF_TYPE_UINT8:   return std::to_string(((const uint8_t  *)data)[i]);
-        case LM_GGUF_TYPE_INT8:    return std::to_string(((const int8_t   *)data)[i]);
-        case LM_GGUF_TYPE_UINT16:  return std::to_string(((const uint16_t *)data)[i]);
-        case LM_GGUF_TYPE_INT16:   return std::to_string(((const int16_t  *)data)[i]);
-        case LM_GGUF_TYPE_UINT32:  return std::to_string(((const uint32_t *)data)[i]);
-        case LM_GGUF_TYPE_INT32:   return std::to_string(((const int32_t  *)data)[i]);
-        case LM_GGUF_TYPE_UINT64:  return std::to_string(((const uint64_t *)data)[i]);
-        case LM_GGUF_TYPE_INT64:   return std::to_string(((const int64_t  *)data)[i]);
-        case LM_GGUF_TYPE_FLOAT32: return std::to_string(((const float    *)data)[i]);
-        case LM_GGUF_TYPE_FLOAT64: return std::to_string(((const double   *)data)[i]);
-        case LM_GGUF_TYPE_BOOL:    return ((const bool *)data)[i] ? "true" : "false";
-        default:                   return "unknown type: " + std::to_string(type);
-    }
-}
+const std::vector<lm_ggml_type> kv_cache_types = {
+    LM_GGML_TYPE_F32,
+    LM_GGML_TYPE_F16,
+    LM_GGML_TYPE_BF16,
+    LM_GGML_TYPE_Q8_0,
+    LM_GGML_TYPE_Q4_0,
+    LM_GGML_TYPE_Q4_1,
+    LM_GGML_TYPE_IQ4_NL,
+    LM_GGML_TYPE_Q5_0,
+    LM_GGML_TYPE_Q5_1,
+};
 
-static std::string lm_gguf_kv_to_str(const struct lm_gguf_context * ctx_gguf, int i) {
-    const enum lm_gguf_type type = lm_gguf_get_kv_type(ctx_gguf, i);
-
-    switch (type) {
-        case LM_GGUF_TYPE_STRING:
-            return lm_gguf_get_val_str(ctx_gguf, i);
-        case LM_GGUF_TYPE_ARRAY:
-            {
-                const enum lm_gguf_type arr_type = lm_gguf_get_arr_type(ctx_gguf, i);
-                int arr_n = lm_gguf_get_arr_n(ctx_gguf, i);
-                const void * data = lm_gguf_get_arr_data(ctx_gguf, i);
-                std::stringstream ss;
-                ss << "[";
-                for (int j = 0; j < arr_n; j++) {
-                    if (arr_type == LM_GGUF_TYPE_STRING) {
-                        std::string val = lm_gguf_get_arr_str(ctx_gguf, i, j);
-                        // escape quotes
-                        replace_all(val, "\\", "\\\\");
-                        replace_all(val, "\"", "\\\"");
-                        ss << '"' << val << '"';
-                    } else if (arr_type == LM_GGUF_TYPE_ARRAY) {
-                        ss << "???";
-                    } else {
-                        ss << lm_gguf_data_to_str(arr_type, data, j);
-                    }
-                    if (j < arr_n - 1) {
-                        ss << ", ";
-                    }
-                }
-                ss << "]";
-                return ss.str();
-            }
-        default:
-            return lm_gguf_data_to_str(type, lm_gguf_get_val_data(ctx_gguf, i), 0);
+static lm_ggml_type kv_cache_type_from_str(const std::string & s) {
+    for (const auto & type : kv_cache_types) {
+        if (lm_ggml_type_name(type) == s) {
+            return type;
+        }
     }
+    throw std::runtime_error("Unsupported cache type: " + s);
 }
 
 static void llama_batch_clear(llama_batch *batch) {
@@ -87,16 +57,32 @@ static void llama_batch_add(llama_batch *batch, llama_token id, llama_pos pos, s
 static void log(const char *level, const char *function, int line,
                        const char *format, ...)
 {
-    printf("[%s] %s:%d ", level, function, line);
-
     va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-
-    printf("\n");
+    #if defined(__ANDROID__)
+        char prefix[256];
+        snprintf(prefix, sizeof(prefix), "%s:%d %s", function, line, format);
+        
+        va_start(args, format);
+        android_LogPriority priority;
+        if (strcmp(level, "ERROR") == 0) {
+            priority = ANDROID_LOG_ERROR;
+        } else if (strcmp(level, "WARNING") == 0) {
+            priority = ANDROID_LOG_WARN;
+        } else if (strcmp(level, "INFO") == 0) {
+            priority = ANDROID_LOG_INFO;
+        } else {
+            priority = ANDROID_LOG_DEBUG;
+        }
+        __android_log_vprint(priority, "RNLlama", prefix, args);
+        va_end(args);
+    #else
+        printf("[%s] %s:%d ", level, function, line);
+        va_start(args, format);
+        vprintf(format, args);
+        va_end(args);
+        printf("\n");
+    #endif
 }
-
 static bool rnllama_verbose = false;
 
 #if RNLLAMA_VERBOSE != 1
@@ -215,6 +201,8 @@ struct llama_rn_context
 
     common_params params;
 
+    common_init_result llama_init;
+
     llama_model_ptr model = nullptr;
     float loading_progress = 0;
     bool is_load_interrupted = false;
@@ -231,18 +219,10 @@ struct llama_rn_context
     std::string stopping_word;
     bool incomplete = false;
 
+    std::vector<common_lora_adapter_info> lora;
+
     ~llama_rn_context()
     {
-        if (ctx)
-        {
-            llama_free(ctx.get());
-            ctx = nullptr;
-        }
-        if (model)
-        {
-            llama_model_free(model.get());
-            model = nullptr;
-        }
         if (ctx_sampling != nullptr)
         {
             common_sampler_free(ctx_sampling);
@@ -281,30 +261,26 @@ struct llama_rn_context
     bool loadModel(common_params &params_)
     {
         params = params_;
-        common_init_result result = common_init_from_params(params);
-        model = std::move(result.model);
-        ctx = std::move(result.context);
+        llama_init = common_init_from_params(params);
+        model = llama_init.model.get();
+        ctx = llama_init.context.get();
         if (model == nullptr)
         {
            LOG_ERROR("unable to load model: %s", params_.model.c_str());
            return false;
         }
-        LOG_VERBOSE("getting n_ctx");
-        n_ctx = llama_n_ctx(ctx.get());
+        n_ctx = llama_n_ctx(ctx);
+
+        // We can uncomment for debugging or after this fix: https://github.com/ggerganov/llama.cpp/pull/11101
+        // LOG_INFO("%s\n", common_params_get_system_info(params).c_str());
+       
         return true;
     }
 
     bool validateModelChatTemplate() const {
-        std::vector<char> model_template(2048, 0); // longest known template is about 1200 bytes
-        std::string template_key = "tokenizer.chat_template";
-        int32_t res = llama_model_meta_val_str(model.get(), template_key.c_str(), model_template.data(), model_template.size());
-        if (res >= 0) {
-            llama_chat_message chat[] = {{"user", "test"}};
-            std::string tmpl = std::string(model_template.data(), model_template.size());
-            int32_t chat_res = llama_chat_apply_template(model.get(), tmpl.c_str(), chat, 1, true, nullptr, 0);
-            return chat_res > 0;
-        }
-        return res > 0;
+        llama_chat_message chat[] = {{"user", "test"}};
+        int32_t chat_res = llama_chat_apply_template(model, nullptr, chat, 1, true, nullptr, 0);
+        return chat_res > 0;
     }
 
     void truncatePrompt(std::vector<llama_token> &prompt_tokens) {
@@ -479,7 +455,7 @@ struct llama_rn_context
             const int32_t n_probs = params.sampling.n_probs;
 
             // deprecated
-            /*if (params.sparams.temp <= 0 && n_probs > 0)
+            /*if (params.sampling.temp <= 0 && n_probs > 0)
             {
                 // For llama_sample_token_greedy we need to sort candidates
                 llama_sampler_init_softmax();
@@ -649,7 +625,11 @@ struct llama_rn_context
         double tg_std = 0;
 
         // TODO: move batch into llama_rn_context (related https://github.com/mybigday/llama.rn/issues/30)
-        llama_batch batch = llama_batch_init(512, 0, 1);
+        llama_batch batch = llama_batch_init(
+            std::min(pp, params.n_ubatch), // max n_tokens is limited by n_ubatch
+            0,                         // No embeddings
+            1                          // Single sequence
+        );
 
         for (int i = 0; i < nr; i++)
         {
@@ -736,169 +716,27 @@ struct llama_rn_context
             std::string("]");
     }
 
-    
-// Context Shifting from KoboldCpp <https://github.com/LostRuins/koboldcpp>
-// Implementation obtained with special permission from @concedo
-
-std::vector<int> longest_common_subseq(const std::vector<int> x, const std::vector<int> y){
-     int m = x.size(), n = y.size();
-
-     //int LCSuff[m+1][n+1];
-     std::vector<std::vector<int>> LCSuff(m+1, std::vector<int>(n+1));
-
-     for (int j = 0; j <= n; j++)
-         LCSuff[0][j] = 0;
-     for (int i = 0; i <= m; i++)
-         LCSuff[i][0] = 0;
-
-     for (int i = 1; i <= m; i++)
-     {
-         for (int j = 1; j <= n; j++)
-         {
-             if (x[i - 1] == y[j - 1])
-                 LCSuff[i][j] = LCSuff[i - 1][j - 1] + 1;
-             else
-                 LCSuff[i][j] = 0;
-         }
-     }
-
-     std::vector<int> longest;
-     for (int i = 1; i <= m; i++)
-     {
-         for (int j = 1; j <= n; j++)
-         {
-             if (LCSuff[i][j] > longest.size())
-             {
-                 auto off1 = ((i - LCSuff[i][j] + 1) - 1);
-                 auto off2 = off1 + LCSuff[i][j];
-                 longest.clear();
-                //  std::vector<int>().swap(longest);
-                 longest = std::vector<int>(x.begin() + off1, x.begin() + off2);
-                // x.substr((i - LCSuff[i][j] + 1) - 1, LCSuff[i][j]);
-             }
-         }
-     }
-     return longest;
- }
-
-bool arr_start_with(const std::vector<int> targetArray, const std::vector<int> searchSeq)
- {
-     int ss = searchSeq.size();
-     if(targetArray.size()<ss)
-     {
-         return false;
-     }
-     for(int i=0;i<ss;++i)
-     {
-         if(targetArray[i]!=searchSeq[i])
-         {
-             return false;
-         }
-     }
-     return true;
- }
-
-int arr_find_index_of(const std::vector<int> targetArray, const std::vector<int> searchSeq)
- {
-     int ss = searchSeq.size();
-     int tas = targetArray.size();
-     if(tas<ss)
-     {
-         return -1;
-     }
-     for(int i=0;i<tas;++i)
-     {
-         int srch = 0;
-         bool fail = false;
-         for(int srch=0;srch<ss;++srch)
-         {
-             if ((i + srch) >= tas || targetArray[i + srch] != searchSeq[srch])
-             {
-                 fail = true;
-                 break;
-             }
-         }
-         if(!fail)
-         {
-             return i;
-         }
-     }
-     return -1;
- }
-
-void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context_tokens, std::vector<int> &new_context_tokens, const int genamt, const int nctx)
-{
-    //scan from start old and new ctx, until first mismatch found, save as p0
-    //check remaining old and new ctx for longest common subseq, which needs to be at 256 tokens
-    //test: longest common subseq (LCQ) MUST start within 0 tokens from end of memory, otherwise purge fails
-    //if passed, save beginning of LCQ from old ctx as p1
-    //remove all tokens from old ctx between p0 and p1, updating both arrays and kv, then continue as normal
-
-    const int short_fall_threshold = 200 + (nctx/30); //dont trigger shifting if the distance between trimstart and currhead < this
-    const int stack_allowance = 60 + (nctx/50); //in case the end text is slightly modified, be forgiving
-
-    int trimstart = 0;
-    int new_tokens_len = new_context_tokens.size();
-    bool purge_needed = true;
-
-    for (int i = 0; i < current_context_tokens.size(); ++i)
-    {
-        if (current_context_tokens[i] == new_context_tokens[i])
-        {
-            trimstart += 1;
-        }
-        else
-        {
-            break;
-        }
-        if ((i + 2) >= new_tokens_len)
-        {
-            purge_needed = false;
-            break; //no surgery required
-        }
-    }
-
-    
-
-    if(!purge_needed || new_tokens_len < 6 || current_context_tokens.size() < 6 || new_tokens_len - trimstart < short_fall_threshold)
-    {
-        LOG_INFO("Fall Threshold: %d out of %d\n", new_tokens_len - trimstart, short_fall_threshold);
-        return; //no purge is needed
-    }
-
-    //at least this many tokens need to match, otherwise don't bother trimming
-    const int lc_tok_threshold = std::max(std::min((new_tokens_len - trimstart) - (genamt+stack_allowance), (int)(nctx*0.45)), short_fall_threshold - stack_allowance);
-
-    auto curr_ctx_without_memory = std::vector<int>(current_context_tokens.begin() + trimstart, current_context_tokens.end());
-    auto new_ctx_without_memory = std::vector<int>(new_context_tokens.begin() + trimstart, new_context_tokens.end());
-
-    auto shared = longest_common_subseq(curr_ctx_without_memory, new_ctx_without_memory);
-
-    if (shared.size() > lc_tok_threshold && arr_start_with(new_ctx_without_memory, shared)) // enough tokens in common
-    {
-        int found = arr_find_index_of(current_context_tokens,shared);
-        if(found>=0 && found > trimstart)
-        {
-
-            //extract the unwanted tokens out from context and KV
-            int diff = found - trimstart;
-            llama_kv_cache_seq_rm(ctx, 0, trimstart, trimstart + diff);
-            llama_kv_cache_seq_add(ctx, 0, trimstart + diff, -1, -diff);
-
-            for (size_t i = trimstart + diff; i < current_context_tokens.size() - 1; i++)
-            {
-                current_context_tokens[i - diff] = current_context_tokens[i];
+    int applyLoraAdapters(std::vector<common_lora_adapter_info> lora) {
+        for (auto &la : lora) {
+            la.ptr = llama_lora_adapter_init(model, la.path.c_str());
+            if (la.ptr == nullptr) {
+                LOG_ERROR("failed to apply lora adapter '%s'\n", la.path.c_str());
+                return -1;
             }
-
-            LOG_INFO("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
-
-            current_context_tokens.resize(current_context_tokens.size() - diff);
         }
+        this->lora = lora;
+        common_lora_adapters_apply(ctx, lora);
+        return 0;
     }
 
-}
+    void removeLoraAdapters() {
+        this->lora.clear();
+        common_lora_adapters_apply(ctx, this->lora); // apply empty list
+    }
 
-// End Context Shifting
+    std::vector<common_lora_adapter_info> getLoadedLoraAdapters() {
+        return this->lora;
+    }
 };
 
 }

@@ -14,13 +14,14 @@
 #include "llama-context.h"
 #include "gguf.h"
 #include "rn-llama.hpp"
+#include "jni-utils.h"
 
 #define UNUSED(x) (void)(x)
 #define TAG "RNLLAMA_ANDROID_JNI"
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,     TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,     TAG, __VA_ARGS__)
-
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR,    TAG, __VA_ARGS__)
 static inline int min(int a, int b) {
     return (a < b) ? a : b;
 }
@@ -129,7 +130,7 @@ static inline void pushString(JNIEnv *env, jobject arr, const char *value) {
 // Method to push WritableMap into WritableArray
 static inline void pushMap(JNIEnv *env, jobject arr, jobject value) {
     jclass mapClass = env->FindClass("com/facebook/react/bridge/WritableArray");
-    jmethodID pushMapMethod = env->GetMethodID(mapClass, "pushMap", "(Lcom/facebook/react/bridge/WritableMap;)V");
+    jmethodID pushMapMethod = env->GetMethodID(mapClass, "pushMap", "(Lcom/facebook/react/bridge/ReadableMap;)V");
 
     env->CallVoidMethod(arr, pushMapMethod, value);
 }
@@ -199,7 +200,7 @@ Java_com_rnllama_LlamaContext_modelInfo(
                 continue;
             }
 
-            const std::string value = rnllama::lm_gguf_kv_to_str(ctx, i);
+            const std::string value = lm_gguf_kv_to_str(ctx, i);
             putString(env, info, key, value.c_str());
         }
     }
@@ -234,6 +235,7 @@ Java_com_rnllama_LlamaContext_initContext(
     jint embd_normalize,
     jint n_ctx,
     jint n_batch,
+    jint n_ubatch,
     jint n_threads,
     jint n_gpu_layers, // TODO: Support this
     jboolean flash_attn,
@@ -244,6 +246,7 @@ Java_com_rnllama_LlamaContext_initContext(
     jboolean vocab_only,
     jstring lora_str,
     jfloat lora_scaled,
+    jobject lora_list,
     jfloat rope_freq_base,
     jfloat rope_freq_scale,
     jint pooling_type,
@@ -263,6 +266,7 @@ Java_com_rnllama_LlamaContext_initContext(
     
     defaultParams.n_ctx = n_ctx;
     defaultParams.n_batch = n_batch;
+    defaultParams.n_ubatch = n_ubatch;
 
     if (pooling_type != -1) {
         defaultParams.pooling_type = static_cast<enum llama_pooling_type>(pooling_type);
@@ -285,18 +289,13 @@ Java_com_rnllama_LlamaContext_initContext(
     // defaultParams.n_gpu_layers = n_gpu_layers;
     defaultParams.flash_attn = flash_attn;
 
-    // const char *cache_type_k_chars = env->GetStringUTFChars(cache_type_k, nullptr);
-    // const char *cache_type_v_chars = env->GetStringUTFChars(cache_type_v, nullptr);
-    defaultParams.cache_type_k = (lm_ggml_type) cache_type_k;
-    defaultParams.cache_type_v = (lm_ggml_type) cache_type_v;
+    const char *cache_type_k_chars = env->GetStringUTFChars(cache_type_k, nullptr);
+    const char *cache_type_v_chars = env->GetStringUTFChars(cache_type_v, nullptr);
+    defaultParams.cache_type_k = rnllama::kv_cache_type_from_str(cache_type_k_chars);
+    defaultParams.cache_type_v = rnllama::kv_cache_type_from_str(cache_type_v_chars);
 
     defaultParams.use_mlock = use_mlock;
     defaultParams.use_mmap = use_mmap;
-
-    const char *lora_chars = env->GetStringUTFChars(lora_str, nullptr);
-    if (lora_chars != nullptr && lora_chars[0] != '\0') {
-        defaultParams.lora_adapters.push_back({lora_chars, lora_scaled});
-    }
 
     defaultParams.rope_freq_base = rope_freq_base;
     defaultParams.rope_freq_scale = rope_freq_scale;
@@ -331,23 +330,55 @@ Java_com_rnllama_LlamaContext_initContext(
     bool is_model_loaded = llama->loadModel(defaultParams);
 
     env->ReleaseStringUTFChars(model_path_str, model_path_chars);
-    env->ReleaseStringUTFChars(lora_str, lora_chars);
-    // env->ReleaseStringUTFChars(cache_type_k, cache_type_k_chars);
-    // env->ReleaseStringUTFChars(cache_type_v, cache_type_v_chars);
+    env->ReleaseStringUTFChars(cache_type_k, cache_type_k_chars);
+    env->ReleaseStringUTFChars(cache_type_v, cache_type_v_chars);
 
     LOGI("[RNLlama] is_model_loaded %s", (is_model_loaded ? "true" : "false"));
     if (is_model_loaded) {
-      if (embedding && llama_model_has_encoder(llama->model.get()) && llama_model_has_decoder(llama->model.get())) {
-        LOGI("[RNLlama] computing embeddings in encoder-decoder models is not supported");
-        llama_free(llama->ctx.get());
-        return -1;
-      }
-      context_map[(long) llama->ctx.get()] = llama;
+        if (embedding && llama_model_has_encoder(llama->model) && llama_model_has_decoder(llama->model)) {
+            LOGI("[RNLlama] computing embeddings in encoder-decoder models is not supported");
+            llama_free(llama->ctx);
+            return -1;
+        }
+        context_map[(long) llama->ctx] = llama;
     } else {
-      llama_free(llama->ctx.get());
+        llama_free(llama->ctx);
     }
 
-    return reinterpret_cast<jlong>(llama->ctx.get());
+    std::vector<common_lora_adapter_info> lora;
+    const char *lora_chars = env->GetStringUTFChars(lora_str, nullptr);
+    if (lora_chars != nullptr && lora_chars[0] != '\0') {
+        common_lora_adapter_info la;
+        la.path = lora_chars;
+        la.scale = lora_scaled;
+        lora.push_back(la);
+    }
+
+    if (lora_list != nullptr) {
+        // lora_adapters: ReadableArray<ReadableMap>
+        int lora_list_size = readablearray::size(env, lora_list);
+        for (int i = 0; i < lora_list_size; i++) {
+            jobject lora_adapter = readablearray::getMap(env, lora_list, i);
+            jstring path = readablemap::getString(env, lora_adapter, "path", nullptr);
+            if (path != nullptr) {
+                const char *path_chars = env->GetStringUTFChars(path, nullptr);
+                common_lora_adapter_info la;
+                la.path = path_chars;
+                la.scale = readablemap::getFloat(env, lora_adapter, "scaled", 1.0f);
+                lora.push_back(la);
+                env->ReleaseStringUTFChars(path, path_chars);
+            }
+        }
+    }
+    env->ReleaseStringUTFChars(lora_str, lora_chars);
+    int result = llama->applyLoraAdapters(lora);
+    if (result != 0) {
+      LOGI("[RNLlama] Failed to apply lora adapters");
+      llama_free(llama->ctx);
+      return -1;
+    }
+
+    return reinterpret_cast<jlong>(llama->ctx);
 }
 
 
@@ -533,7 +564,6 @@ Java_com_rnllama_LlamaContext_doCompletion(
     jfloat mirostat,
     jfloat mirostat_tau,
     jfloat mirostat_eta,
-    jboolean penalize_nl,
     jint top_k,
     jfloat top_p,
     jfloat min_p,
@@ -546,7 +576,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     jobjectArray logit_bias,
     jfloat   dry_multiplier,
     jfloat   dry_base,
-    jint dry_allowed_length,    
+    jint dry_allowed_length,
     jint dry_penalty_last_n,
     jobjectArray dry_sequence_breakers,
     jobject partial_completion_callback
@@ -578,7 +608,6 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.mirostat = mirostat;
     sparams.mirostat_tau = mirostat_tau;
     sparams.mirostat_eta = mirostat_eta;
-    // sparams.penalize_nl = penalize_nl;
     sparams.top_k = top_k;
     sparams.top_p = top_p;
     sparams.min_p = min_p;
@@ -695,7 +724,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
             putString(env, tokenResult, "token", to_send.c_str());
 
             if (llama->params.sampling.n_probs > 0) {
-              const std::vector<llama_token> to_send_toks = common_tokenize(llama->ctx.get(), to_send, false);
+              const std::vector<llama_token> to_send_toks = common_tokenize(llama->ctx, to_send, false);
               size_t probs_pos = std::min(sent_token_probs_index, llama->generated_token_probs.size());
               size_t probs_stop_pos = std::min(sent_token_probs_index + to_send_toks.size(), llama->generated_token_probs.size());
               if (probs_pos < probs_stop_pos) {
@@ -885,23 +914,64 @@ Java_com_rnllama_LlamaContext_bench(
     return env->NewStringUTF(result.c_str());
 }
 
+JNIEXPORT jint JNICALL
+Java_com_rnllama_LlamaContext_applyLoraAdapters(
+    JNIEnv *env, jobject thiz, jlong context_ptr, jobjectArray loraAdapters) {
+    UNUSED(thiz);
+    auto llama = context_map[(long) context_ptr];
+
+    // lora_adapters: ReadableArray<ReadableMap>
+    std::vector<common_lora_adapter_info> lora_adapters;
+    int lora_adapters_size = readablearray::size(env, loraAdapters);
+    for (int i = 0; i < lora_adapters_size; i++) {
+        jobject lora_adapter = readablearray::getMap(env, loraAdapters, i);
+        jstring path = readablemap::getString(env, lora_adapter, "path", nullptr);
+        if (path != nullptr) {
+          const char *path_chars = env->GetStringUTFChars(path, nullptr);
+          env->ReleaseStringUTFChars(path, path_chars);
+          float scaled = readablemap::getFloat(env, lora_adapter, "scaled", 1.0f);
+          common_lora_adapter_info la;
+          la.path = path_chars;
+          la.scale = scaled;
+          lora_adapters.push_back(la);
+        }
+    }
+    return llama->applyLoraAdapters(lora_adapters);
+}
+
+JNIEXPORT void JNICALL
+Java_com_rnllama_LlamaContext_removeLoraAdapters(
+    JNIEnv *env, jobject thiz, jlong context_ptr) {
+    UNUSED(env);
+    UNUSED(thiz);
+    auto llama = context_map[(long) context_ptr];
+    llama->removeLoraAdapters();
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_rnllama_LlamaContext_getLoadedLoraAdapters(
+    JNIEnv *env, jobject thiz, jlong context_ptr) {
+    UNUSED(thiz);
+    auto llama = context_map[(long) context_ptr];
+    auto loaded_lora_adapters = llama->getLoadedLoraAdapters();
+    auto result = createWritableArray(env);
+    for (common_lora_adapter_info &la : loaded_lora_adapters) {
+        auto map = createWriteableMap(env);
+        putString(env, map, "path", la.path.c_str());
+        putDouble(env, map, "scaled", la.scale);
+        pushMap(env, result, map);
+    }
+    return result;
+}
+
 JNIEXPORT void JNICALL
 Java_com_rnllama_LlamaContext_freeContext(
         JNIEnv *env, jobject thiz, jlong context_ptr) {
     UNUSED(env);
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
-    if (llama->model.get()) {
-        llama_model_free(llama->model.get());
-    }
-    if (llama->ctx.get()) {
-        llama_free(llama->ctx.get());
-    }
-    /*if (llama->ctx.get()-> != nullptr)
-    {
-        common_sampler_free(llama->ctx.get() -> _sampling);
-    }*/
-    context_map.erase((long) llama->ctx.get());
+    context_map.erase((long) llama->ctx);
+    delete llama;
 }
 
 JNIEXPORT void JNICALL

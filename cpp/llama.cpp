@@ -8,6 +8,9 @@
 #include "llama-kv-cache.h"
 #include "llama-model-loader.h"
 #include "llama-model.h"
+#include "llama-kv-cache.h"
+#include "llama-model-loader.h"
+#include "llama-model.h"
 
 #include "ggml.h"
 #include "ggml-alloc.h"
