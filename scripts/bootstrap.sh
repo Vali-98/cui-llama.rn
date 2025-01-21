@@ -32,7 +32,7 @@ cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-quants.c ./cpp/ggml-cpu-quants.c
 cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-traits.h ./cpp/ggml-cpu-traits.h
 cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-traits.cpp ./cpp/ggml-cpu-traits.cpp
 
-cp -r ./llama.cpp/ggml/src/ggml-cpu/amx ./cpp/
+# cp -r ./llama.cpp/ggml/src/ggml-cpu/amx ./cpp/
 
 cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.h ./cpp/sgemm.h
 cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp ./cpp/sgemm.cpp
@@ -154,7 +154,6 @@ cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cp
 files_add_lm_prefix=(
   "./cpp/llama-impl.h"
   "./cpp/llama-impl.cpp"
-  "./cpp/llama-impl.cpp"
   "./cpp/llama-vocab.h"
   "./cpp/llama-vocab.cpp"
   "./cpp/llama-grammar.h"
@@ -202,18 +201,13 @@ files_add_lm_prefix=(
   "./cpp/ggml.c"
   "./cpp/gguf.h"
   "./cpp/gguf.cpp"
-  "./cpp/gguf.h"
-  "./cpp/gguf.cpp"
   "./cpp/ggml-impl.h"
   "./cpp/ggml-cpp.h"
   "./cpp/ggml-opt.h"
   "./cpp/ggml-opt.cpp"
   "./cpp/ggml-metal.h"
   "./cpp/ggml-metal.m"
-  "./cpp/llama.h"
   "./cpp/llama-cpp.h"
-  "./cpp/llama.cpp"
-  "./cpp/sampling.cpp"
   "./cpp/ggml-quants.h"
   "./cpp/ggml-quants.c"
   "./cpp/ggml-alloc.h"
@@ -232,15 +226,10 @@ files_add_lm_prefix=(
   "./cpp/ggml-cpu-traits.cpp"
   "./cpp/ggml-cpu-quants.h"
   "./cpp/ggml-cpu-quants.c"
-  "./cpp/ggml-cpu-traits.h"
-  "./cpp/ggml-cpu-traits.cpp"
   "./cpp/ggml-threading.h"
   "./cpp/ggml-threading.cpp"
-  "./cpp/ggml-common.h"
-  "./cpp/sgemm.h"
-  "./cpp/sgemm.h"
-  "./cpp/sgemm.cpp"
 )
+
 
 # Loop through each file and run the sed commands
 OS=$(uname)
@@ -301,7 +290,6 @@ yarn example
 patch -p0 -d ./cpp < ./scripts/llama-mmap.cpp.patch
 # patch -p0 -d ./cpp < ./scripts/ggml-metal.m.patch
 # patch -p0 -d ./cpp < ./scripts/ggml.c.patch
-patch -p0 -d ./cpp < ./scripts/ggml-cpu-aarch64.c.patch
 patch -p0 -d ./cpp < ./scripts/ggml-quants.c.patch
 # patch -p0 -d ./cpp < ./scripts/sgemm.cpp.patch
 
