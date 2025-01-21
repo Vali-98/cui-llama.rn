@@ -1,5 +1,5 @@
-#ifndef LM_GGML_METAL_IMPL
-#define LM_GGML_METAL_IMPL
+#ifndef GGML_METAL_IMPL
+#define GGML_METAL_IMPL
 
 // kernel argument structs
 //
@@ -34,7 +34,7 @@ typedef struct {
     uint64_t nb2;
     uint64_t nb3;
     int32_t  dim;
-} lm_ggml_metal_kargs_concat;
+} ggml_metal_kargs_concat;
 
 typedef struct {
     int32_t  ne00;
@@ -62,7 +62,7 @@ typedef struct {
     uint64_t nb2;
     uint64_t nb3;
     uint64_t offs;
-} lm_ggml_metal_kargs_bin;
+} ggml_metal_kargs_bin;
 
 typedef struct {
     int32_t  ne00;
@@ -81,7 +81,7 @@ typedef struct {
     uint64_t nb1;
     uint64_t nb2;
     uint64_t nb3;
-} lm_ggml_metal_kargs_repeat;
+} ggml_metal_kargs_repeat;
 
 typedef struct {
     int64_t  ne00;
@@ -100,7 +100,7 @@ typedef struct {
     uint64_t nb1;
     uint64_t nb2;
     uint64_t nb3;
-} lm_ggml_metal_kargs_cpy;
+} ggml_metal_kargs_cpy;
 
 typedef struct {
     int64_t  ne10;
@@ -115,7 +115,7 @@ typedef struct {
     uint64_t nb3;
     uint64_t offs;
     bool     inplace;
-} lm_ggml_metal_kargs_set;
+} ggml_metal_kargs_set;
 
 typedef struct {
     int32_t  ne00;
@@ -143,7 +143,7 @@ typedef struct {
     float    attn_factor;
     float    beta_fast;
     float    beta_slow;
-} lm_ggml_metal_kargs_rope;
+} ggml_metal_kargs_rope;
 
 typedef struct {
     int32_t  ne01;
@@ -167,7 +167,7 @@ typedef struct {
     float    m1;
     uint16_t n_head_log2;
     float    logit_softcap;
-} lm_ggml_metal_kargs_flash_attn_ext;
+} ggml_metal_kargs_flash_attn_ext;
 
 typedef struct {
     int32_t  ne00;
@@ -184,7 +184,7 @@ typedef struct {
     int32_t  ne1;
     int16_t  r2;
     int16_t  r3;
-} lm_ggml_metal_kargs_mul_mm;
+} ggml_metal_kargs_mul_mm;
 
 typedef struct {
     int32_t  ne00;
@@ -205,7 +205,7 @@ typedef struct {
     int32_t  ne1;
     int16_t  r2;
     int16_t  r3;
-} lm_ggml_metal_kargs_mul_mv;
+} ggml_metal_kargs_mul_mv;
 
 typedef struct {
     int32_t  ne00;
@@ -229,7 +229,7 @@ typedef struct {
     int16_t  nsg;
     int16_t  nxpsg;
     int16_t  r1ptg;
-} lm_ggml_metal_kargs_mul_mv_ext;
+} ggml_metal_kargs_mul_mv_ext;
 
 typedef struct {
     int32_t  nei0;
@@ -247,7 +247,7 @@ typedef struct {
     uint64_t nb12;
     int32_t  ne0;
     int32_t  ne1;
-} lm_ggml_metal_kargs_mul_mm_id;
+} ggml_metal_kargs_mul_mm_id;
 
 typedef struct {
     int32_t  nei0;
@@ -269,20 +269,20 @@ typedef struct {
     int32_t  ne0;
     int32_t  ne1;
     uint64_t nb1;
-} lm_ggml_metal_kargs_mul_mv_id;
+} ggml_metal_kargs_mul_mv_id;
 
 typedef struct {
     int32_t  ne00;
     int32_t  ne00_4;
     uint64_t nb01;
     float    eps;
-} lm_ggml_metal_kargs_norm;
+} ggml_metal_kargs_norm;
 
 typedef struct {
     int32_t  ne00;
     int32_t  ne00_4;
     uint64_t nb01;
     float    eps;
-} lm_ggml_metal_kargs_rms_norm;
+} ggml_metal_kargs_rms_norm;
 
-#endif // LM_GGML_METAL_IMPL
+#endif // GGML_METAL_IMPL

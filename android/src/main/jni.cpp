@@ -345,10 +345,10 @@ Java_com_rnllama_LlamaContext_initContext(
         llama_free(llama->ctx);
     }
 
-    std::vector<common_lora_adapter_info> lora;
+    std::vector<common_adapter_lora_info> lora;
     const char *lora_chars = env->GetStringUTFChars(lora_str, nullptr);
     if (lora_chars != nullptr && lora_chars[0] != '\0') {
-        common_lora_adapter_info la;
+        common_adapter_lora_info la;
         la.path = lora_chars;
         la.scale = lora_scaled;
         lora.push_back(la);
@@ -362,7 +362,7 @@ Java_com_rnllama_LlamaContext_initContext(
             jstring path = readablemap::getString(env, lora_adapter, "path", nullptr);
             if (path != nullptr) {
                 const char *path_chars = env->GetStringUTFChars(path, nullptr);
-                common_lora_adapter_info la;
+                common_adapter_lora_info la;
                 la.path = path_chars;
                 la.scale = readablemap::getFloat(env, lora_adapter, "scaled", 1.0f);
                 lora.push_back(la);
@@ -409,7 +409,7 @@ Java_com_rnllama_LlamaContext_loadModelDetails(
     for (int i = 0; i < count; i++) {
         char key[256];
         llama_model_meta_key_by_index(llama->model, i, key, sizeof(key));
-        char val[2048];
+        char val[4096];
         llama_model_meta_val_str_by_index(llama->model, i, val, sizeof(val));
 
         putString(env, meta, key, val);
@@ -623,7 +623,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
 
     sparams.logit_bias.clear();
     if (ignore_eos) {
-        sparams.logit_bias[llama_token_eos(llama->model)].bias = -INFINITY;
+        sparams.logit_bias[llama_vocab_eos(llama_model_get_vocab(llama->model))].bias = -INFINITY;
     }
 
     // dry break seq
@@ -642,7 +642,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.dry_sequence_breakers = dry_sequence_breakers_vector;
 
     // logit bias
-    const int n_vocab = llama_n_vocab(llama_get_model(llama->ctx));
+    const int n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(llama->model));
     jsize logit_bias_len = env->GetArrayLength(logit_bias);
 
     for (jsize i = 0; i < logit_bias_len; i++) {
@@ -921,7 +921,7 @@ Java_com_rnllama_LlamaContext_applyLoraAdapters(
     auto llama = context_map[(long) context_ptr];
 
     // lora_adapters: ReadableArray<ReadableMap>
-    std::vector<common_lora_adapter_info> lora_adapters;
+    std::vector<common_adapter_lora_info> lora_adapters;
     int lora_adapters_size = readablearray::size(env, loraAdapters);
     for (int i = 0; i < lora_adapters_size; i++) {
         jobject lora_adapter = readablearray::getMap(env, loraAdapters, i);
@@ -930,7 +930,7 @@ Java_com_rnllama_LlamaContext_applyLoraAdapters(
           const char *path_chars = env->GetStringUTFChars(path, nullptr);
           env->ReleaseStringUTFChars(path, path_chars);
           float scaled = readablemap::getFloat(env, lora_adapter, "scaled", 1.0f);
-          common_lora_adapter_info la;
+          common_adapter_lora_info la;
           la.path = path_chars;
           la.scale = scaled;
           lora_adapters.push_back(la);
@@ -955,7 +955,7 @@ Java_com_rnllama_LlamaContext_getLoadedLoraAdapters(
     auto llama = context_map[(long) context_ptr];
     auto loaded_lora_adapters = llama->getLoadedLoraAdapters();
     auto result = createWritableArray(env);
-    for (common_lora_adapter_info &la : loaded_lora_adapters) {
+    for (common_adapter_lora_info &la : loaded_lora_adapters) {
         auto map = createWriteableMap(env);
         putString(env, map, "path", la.path.c_str());
         putDouble(env, map, "scaled", la.scale);
