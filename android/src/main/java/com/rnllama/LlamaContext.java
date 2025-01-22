@@ -465,7 +465,7 @@ public class LlamaContext {
   public void emitModelProgressUpdate(int progress) {
     WritableMap event = Arguments.createMap();
     event.putInt("progress", progress);
-    eventEmitter.emit("@RNLlama_onModelProgress", event);
+    eventEmitter.emit("@RNLlama_onInitContextProgress", event);
   }
 
   protected static native WritableMap modelInfo(
