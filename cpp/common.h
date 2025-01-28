@@ -534,6 +534,9 @@ struct llama_model * common_load_model_from_hf(
     const std::string & local_path,
     const std::string & hf_token,
     const struct llama_model_params & params);
+std::pair<std::string, std::string> common_get_hf_file(
+    const std::string & hf_repo_with_tag,
+    const std::string & hf_token);
 
 std::pair<std::string, std::string> common_get_hf_file(
     const std::string & hf_repo_with_tag,

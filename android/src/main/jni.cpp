@@ -11,9 +11,8 @@
 #include <unordered_map>
 #include "llama.h"
 #include "llama-impl.h"
-#include "llama-context.h"
-#include "gguf.h"
-#include "rn-llama.hpp"
+#include "ggml.h"
+#include "rn-llama.h"
 #include "jni-utils.h"
 
 #define UNUSED(x) (void)(x)
@@ -421,6 +420,7 @@ Java_com_rnllama_LlamaContext_loadModelDetails(
     llama_model_desc(llama->model, desc, sizeof(desc));
     putString(env, result, "desc", desc);
     putDouble(env, result, "size", llama_model_size(llama->model));
+    putDouble(env, result, "nEmbd", llama_model_n_embd(llama->model));
     putDouble(env, result, "nParams", llama_model_n_params(llama->model));
     putBoolean(env, result, "isChatTemplateSupported", llama->validateModelChatTemplate());
     putMap(env, result, "metadata", meta);
@@ -621,9 +621,12 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.dry_allowed_length = dry_allowed_length;
     sparams.dry_penalty_last_n = dry_penalty_last_n;
 
+    const llama_model * model = llama_get_model(llama->ctx);
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+
     sparams.logit_bias.clear();
     if (ignore_eos) {
-        sparams.logit_bias[llama_vocab_eos(llama_model_get_vocab(llama->model))].bias = -INFINITY;
+        sparams.logit_bias[llama_vocab_eos(vocab)].bias = -INFINITY;
     }
 
     // dry break seq
@@ -642,7 +645,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     sparams.dry_sequence_breakers = dry_sequence_breakers_vector;
 
     // logit bias
-    const int n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(llama->model));
+    const int n_vocab = llama_vocab_n_tokens(vocab);
     jsize logit_bias_len = env->GetArrayLength(logit_bias);
 
     for (jsize i = 0; i < logit_bias_len; i++) {
