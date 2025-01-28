@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.10)
 
 project(llama.rn)
 
+find_program(CCACHE_FOUND ccache)
+if(CCACHE_FOUND)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+endif(CCACHE_FOUND)
+
 set(CMAKE_CXX_STANDARD 17)
 set(RNLLAMA_LIB_DIR ${CMAKE_SOURCE_DIR}/../../../cpp)
 
