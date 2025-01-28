@@ -178,7 +178,7 @@ public class LlamaContext {
     WritableMap event = Arguments.createMap();
     event.putInt("contextId", LlamaContext.this.id);
     event.putInt("progress", progress);
-    eventEmitter.emit("@RNLlama_onContextProgress", event);
+    eventEmitter.emit("@RNLlama_onInitContextProgress", event);
   }
 
   private static class LoadProgressCallback {
