@@ -1,5 +1,6 @@
 #include "log.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
@@ -8,21 +9,15 @@
 #include <thread>
 #include <vector>
 
+#if defined(__ANDROID__) && defined(RNLLAMA_ANDROID_ENABLE_LOGGING)
+#include <android/log.h>
+#endif
+
 int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
 
 void common_log_set_verbosity_thold(int verbosity) {
     common_log_verbosity_thold = verbosity;
 }
-
-#define LOG_COL_DEFAULT "\033[0m"
-#define LOG_COL_BOLD    "\033[1m"
-#define LOG_COL_RED     "\033[31m"
-#define LOG_COL_GREEN   "\033[32m"
-#define LOG_COL_YELLOW  "\033[33m"
-#define LOG_COL_BLUE    "\033[34m"
-#define LOG_COL_MAGENTA "\033[35m"
-#define LOG_COL_CYAN    "\033[36m"
-#define LOG_COL_WHITE   "\033[37m"
 
 static int64_t t_us() {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -65,6 +60,32 @@ struct common_log_entry {
 
     // signals the worker thread to stop
     bool is_end;
+
+    #if defined(__ANDROID__) && defined(RNLLAMA_ANDROID_ENABLE_LOGGING)
+    void android_print() const {
+        int android_log_priority;
+        switch (level) {
+            case LM_GGML_LOG_LEVEL_INFO:
+                android_log_priority = ANDROID_LOG_INFO;
+                break;
+            case LM_GGML_LOG_LEVEL_WARN:
+                android_log_priority = ANDROID_LOG_WARN;
+                break;
+            case LM_GGML_LOG_LEVEL_ERROR:
+                android_log_priority = ANDROID_LOG_ERROR;
+                break;
+            case LM_GGML_LOG_LEVEL_DEBUG:
+                android_log_priority = ANDROID_LOG_DEBUG;
+                break;
+            default:
+                android_log_priority = ANDROID_LOG_DEFAULT;
+                break;
+        }
+
+        const char * tag = "RNLLAMA_LOG_ANDROID";
+        __android_log_print(android_log_priority, tag, "%s", msg.data());
+    }
+    #endif
 
     void print(FILE * file = nullptr) const {
         FILE * fcur = file;
@@ -206,6 +227,7 @@ public:
                 vsnprintf(entry.msg.data(), entry.msg.size(), ss.str().c_str(), args_copy);
             }
 #endif
+            va_end(args_copy);
         }
 
         entry.level = level;
