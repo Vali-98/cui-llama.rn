@@ -52,9 +52,9 @@ set(
     ${RNLLAMA_LIB_DIR}/sgemm.cpp
     ${RNLLAMA_LIB_DIR}/common.cpp
     ${RNLLAMA_LIB_DIR}/chat.cpp
-    ${RNLLAMA_LIB_DIR}/chat-template.hpp
+    ${RNLLAMA_LIB_DIR}/minja/chat-template.hpp
     ${RNLLAMA_LIB_DIR}/json-schema-to-grammar.cpp
-    ${RNLLAMA_LIB_DIR}/minja.hpp
+    ${RNLLAMA_LIB_DIR}/minja/minja.hpp
     ${RNLLAMA_LIB_DIR}/json.hpp
     ${RNLLAMA_LIB_DIR}/rn-llama.cpp
     ${CMAKE_SOURCE_DIR}/jni-utils.h

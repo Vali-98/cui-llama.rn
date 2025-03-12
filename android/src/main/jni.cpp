@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include "json-schema-to-grammar.h"
 #include "llama.h"
+#include "chat.h"
 #include "llama-impl.h"
 #include "ggml.h"
 #include "rn-llama.h"
@@ -445,7 +446,7 @@ Java_com_rnllama_LlamaContext_loadModelDetails(
 
     auto default_caps = createWriteableMap(env);
 
-    auto default_tmpl = llama->templates.template_default.get();
+    auto default_tmpl = llama -> templates -> template_default.get();
     auto default_tmpl_caps = default_tmpl->original_caps();
     putBoolean(env, default_caps, "tools", default_tmpl_caps.supports_tools);
     putBoolean(env, default_caps, "toolCalls", default_tmpl_caps.supports_tool_calls);
@@ -456,7 +457,7 @@ Java_com_rnllama_LlamaContext_loadModelDetails(
     putMap(env, minja, "defaultCaps", default_caps);
 
     putBoolean(env, minja, "toolUse", llama->validateModelChatTemplate(true, "tool_use"));
-    auto tool_use_tmpl = llama->templates.template_tool_use.get();
+    auto tool_use_tmpl = llama-> templates -> template_tool_use.get();
     if (tool_use_tmpl != nullptr) {
       auto tool_use_caps = createWriteableMap(env);
       auto tool_use_tmpl_caps = tool_use_tmpl->original_caps();
@@ -510,15 +511,16 @@ Java_com_rnllama_LlamaContext_getFormattedChatWithJinja(
             parallel_tool_calls,
             tool_choice_chars
         );
-        putString(env, result, "prompt", formatted.prompt.get<std::string>().c_str());
+        putString(env, result, "prompt", formatted.prompt.c_str());
         putInt(env, result, "chat_format", static_cast<int>(formatted.format));
         putString(env, result, "grammar", formatted.grammar.c_str());
         putBoolean(env, result, "grammar_lazy", formatted.grammar_lazy);
         auto grammar_triggers = createWritableArray(env);
         for (const auto &trigger : formatted.grammar_triggers) {
             auto trigger_map = createWriteableMap(env);
-            putString(env, trigger_map, "word", trigger.word.c_str());
-            putBoolean(env, trigger_map, "at_start", trigger.at_start);
+            
+            putString(env, trigger_map, "word", trigger.value.c_str());
+            putBoolean(env, trigger_map, "at_start", trigger.type == COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START);
             pushMap(env, grammar_triggers, trigger_map);
         }
         putArray(env, result, "grammar_triggers", grammar_triggers);
@@ -739,16 +741,16 @@ Java_com_rnllama_LlamaContext_doCompletion(
             auto trigger_map = readablearray::getMap(env, grammar_triggers, i);
             jstring trigger_word = readablemap::getString(env, trigger_map, "word", nullptr);
             jboolean trigger_at_start = readablemap::getBool(env, trigger_map, "at_start", false);
-            trigger.word = env->GetStringUTFChars(trigger_word, nullptr);
-            trigger.at_start = trigger_at_start;
+            trigger.value = env->GetStringUTFChars(trigger_word, nullptr);
+            trigger.type = trigger_at_start ? COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START : COMMON_GRAMMAR_TRIGGER_TYPE_WORD;
 
-            auto ids = common_tokenize(llama->ctx, trigger.word, /* add_special= */ false, /* parse_special= */ true);
+            auto ids = common_tokenize(llama->ctx, trigger.value, /* add_special= */ false, /* parse_special= */ true);
             if (ids.size() == 1) {
-                sparams.grammar_trigger_tokens.push_back(ids[0]);
+                sparams.grammar_triggers.push_back(trigger);
                 sparams.preserved_tokens.insert(ids[0]);
                 continue;
             }
-            sparams.grammar_trigger_words.push_back(trigger);
+            sparams.grammar_triggers.push_back(trigger);
         }
     }
 

@@ -149,10 +149,10 @@ cp ./llama.cpp/common/speculative.cpp ./cpp/speculative.cpp
 cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
 cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp
 
-cp ./llama.cpp/common/chat-template.hpp ./cpp/chat-template.hpp
-cp ./llama.cpp/common/chat.hpp ./cpp/chat.hpp
+cp ./llama.cpp/common/chat.h ./cpp/chat.h
 cp ./llama.cpp/common/chat.cpp ./cpp/chat.cpp
-cp ./llama.cpp/common/minja.hpp ./cpp/minja.hpp
+cp ./llama.cpp/common/minja/minja.hpp ./cpp/minja/minja.hpp
+cp ./llama.cpp/common/minja/chat-template.hpp ./cpp/minja/chat-template.hpp
 cp ./llama.cpp/common/json.hpp ./cpp/json.hpp
 
 # List of files to process
@@ -167,6 +167,8 @@ files_add_lm_prefix=(
   "./cpp/llama-sampling.cpp"
   "./cpp/llama-chat.h"
   "./cpp/llama-chat.cpp"
+  "./cpp/chat.h"
+  "./cpp/chat.cpp"
   "./cpp/llama-mmap.h"
   "./cpp/llama-mmap.cpp"
   "./cpp/llama-context.h"
@@ -201,7 +203,6 @@ files_add_lm_prefix=(
   "./cpp/sgemm.cpp"
   "./cpp/common.h"
   "./cpp/common.cpp"
-  "./cpp/json-schema-to-grammar.h"
   "./cpp/ggml-common.h"
   "./cpp/ggml.h"
   "./cpp/ggml.c"
@@ -234,6 +235,8 @@ files_add_lm_prefix=(
   "./cpp/ggml-cpu-quants.c"
   "./cpp/ggml-threading.h"
   "./cpp/ggml-threading.cpp"
+  "./cpp/minja/chat-template.hpp"
+  "./cpp/minja/minja.hpp"
 )
 
 
@@ -297,9 +300,9 @@ patch -p0 -d ./cpp < ./scripts/patches/ggml-metal.m.patch
 # patch -p0 -d ./cpp < ./scripts/patches/ggml.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/ggml-quants.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/llama-mmap.cpp.patch
-patch -p0 -d ./cpp < ./scripts/patches/chat-template.hpp.patch
-patch -p0 -d ./cpp < ./scripts/patches/chat.hpp.patch
-patch -p0 -d ./cpp < ./scripts/patches/minja.hpp.patch
+patch -p0 -d ./cpp/minja < ./scripts/patches/chat-template.hpp.patch
+# patch -p0 -d ./cpp < ./scripts/patches/chat.h.patch
+patch -p0 -d ./cpp/minja < ./scripts/patches/minja.hpp.patch
 rm -rf ./cpp/*.orig
 
 if [ "$OS" = "Darwin" ]; then

@@ -3,9 +3,9 @@
 
 #include <sstream>
 #include <iostream>
-#include "chat.hpp"
 #include "chat-template.hpp"
 #include "common.h"
+#include "chat.h"
 #include "ggml.h"
 #include "gguf.h"
 #include "llama.h"
@@ -15,7 +15,17 @@
 #include <android/log.h>
 #endif
 
+using json = nlohmann::ordered_json;
+typedef minja::chat_template common_chat_template;
+
+struct common_chat_templates {
+    bool has_explicit_template;
+    std::unique_ptr<common_chat_template> template_default;
+    std::unique_ptr<common_chat_template> template_tool_use;
+};
+
 namespace rnllama {
+
 
 std::string tokens_to_output_formatted_string(const llama_context *ctx, const llama_token token);
 
@@ -65,7 +75,7 @@ struct llama_rn_context {
 
     llama_context *ctx = nullptr;
     common_sampler *ctx_sampling = nullptr;
-    common_chat_templates templates;
+    common_chat_templates_ptr templates = nullptr;
 
     int n_ctx;
 
