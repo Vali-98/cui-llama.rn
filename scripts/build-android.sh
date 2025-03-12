@@ -24,6 +24,9 @@ if uname -a | grep -q "Darwin"; then
   n_cpu=$(sysctl -n hw.logicalcpu)
 elif uname -a | grep -q "Linux"; then
   n_cpu=$(nproc)
+elif uname -a | grep -q "MINGW32_NT\|MINGW64_NT\|MSYS_NT"; then
+  n_cpu=$(wmic cpu get NumberOfLogicalProcessors | awk 'NR==2')
+  n_cpu=$((n_cpu / 2))
 fi
 
 t0=$(date +%s)
