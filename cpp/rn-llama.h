@@ -5,7 +5,6 @@
 #include <iostream>
 #include "chat.h"
 #include "common.h"
-#include "chat.h"
 #include "ggml.h"
 #include "gguf.h"
 #include "llama.h"
@@ -14,15 +13,6 @@
 #if defined(__ANDROID__)
 #include <android/log.h>
 #endif
-
-using json = nlohmann::ordered_json;
-typedef minja::chat_template common_chat_template;
-
-struct common_chat_templates {
-    bool has_explicit_template;
-    std::unique_ptr<common_chat_template> template_default;
-    std::unique_ptr<common_chat_template> template_tool_use;
-};
 
 namespace rnllama {
 

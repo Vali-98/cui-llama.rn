@@ -234,8 +234,6 @@ enum common_reasoning_format {
 
 struct common_params {
 
-    void * progress_callback_user_data        = nullptr;
-    llama_progress_callback progress_callback = nullptr;
     bool vocab_only               = false;
     int32_t n_predict             =    -1; // new tokens to predict
     int32_t n_ctx                 =  4096; // context size
