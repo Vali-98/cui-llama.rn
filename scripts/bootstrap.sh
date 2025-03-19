@@ -135,6 +135,12 @@ cp ./llama.cpp/src/unicode.cpp ./cpp/unicode.cpp
 cp ./llama.cpp/src/unicode-data.h ./cpp/unicode-data.h
 cp ./llama.cpp/src/unicode-data.cpp ./cpp/unicode-data.cpp
 
+cp ./llama.cpp/src/llama-graph.h ./cpp/llama-graph.h
+cp ./llama.cpp/src/llama-graph.cpp ./cpp/llama-graph.cpp
+cp ./llama.cpp/src/llama-io.h ./cpp/llama-io.h
+cp ./llama.cpp/src/llama-io.cpp ./cpp/llama-io.cpp
+cp ./llama.cpp/src/llama-memory.h ./cpp/llama-memory.h
+cp ./llama.cpp/src/llama-memory.cpp ./cpp/llama-memory.cpp
 
 cp ./llama.cpp/common/log.h ./cpp/log.h
 cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
@@ -148,12 +154,13 @@ cp ./llama.cpp/common/speculative.h ./cpp/speculative.h
 cp ./llama.cpp/common/speculative.cpp ./cpp/speculative.cpp
 cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
 cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp
+cp ./llama.cpp/common/json.hpp ./cpp/json.hpp
 
 cp ./llama.cpp/common/chat.h ./cpp/chat.h
 cp ./llama.cpp/common/chat.cpp ./cpp/chat.cpp
+
 cp ./llama.cpp/common/minja/minja.hpp ./cpp/minja/minja.hpp
 cp ./llama.cpp/common/minja/chat-template.hpp ./cpp/minja/chat-template.hpp
-cp ./llama.cpp/common/json.hpp ./cpp/json.hpp
 
 # List of files to process
 files_add_lm_prefix=(
@@ -194,6 +201,12 @@ files_add_lm_prefix=(
   "./cpp/json-schema-to-grammar.h"
   "./cpp/json-schema-to-grammar.cpp"
   "./cpp/json.hpp"
+  "./cpp/llama-graph.h"
+  "./cpp/llama-graph.cpp"
+  "./cpp/llama-io.h"
+  "./cpp/llama-io.cpp"
+  "./cpp/llama-memory.h"
+  "./cpp/llama-memory.cpp"
   "./cpp/log.h"
   "./cpp/log.cpp"
   "./cpp/llama.h"
@@ -293,21 +306,24 @@ echo "Replacement completed successfully!"
 yarn example
 
 # Apply patch
-# patch -p0 -d ./cpp < ./scripts/patches/common.h.patch
-# patch -p0 -d ./cpp < ./scripts/patches/common.cpp.patch
-# patch -p0 -d ./cpp < ./scripts/patches/log.cpp.patch
+patch -p0 -d ./cpp < ./scripts/patches/common.h.patch
+patch -p0 -d ./cpp < ./scripts/patches/common.cpp.patch
+patch -p0 -d ./cpp < ./scripts/patches/chat.h.patch
+patch -p0 -d ./cpp < ./scripts/patches/chat.cpp.patch
+patch -p0 -d ./cpp < ./scripts/patches/log.cpp.patch
 patch -p0 -d ./cpp < ./scripts/patches/ggml-metal.m.patch
 # patch -p0 -d ./cpp < ./scripts/patches/ggml.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/ggml-quants.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/llama-mmap.cpp.patch
-patch -p0 -d ./cpp/minja < ./scripts/patches/chat-template.hpp.patch
-# patch -p0 -d ./cpp < ./scripts/patches/chat.h.patch
-patch -p0 -d ./cpp/minja < ./scripts/patches/minja.hpp.patch
 rm -rf ./cpp/*.orig
 
 if [ "$OS" = "Darwin" ]; then
   # Build metallib (~2.6MB)
   cd llama.cpp/ggml/src/ggml-metal
+
+  # Create a symbolic link to ggml-common.h in the current directory
+  ln -sf ../ggml-common.h .
+
   xcrun --sdk iphoneos metal -c ggml-metal.metal -o ggml-metal.air -DGGML_METAL_USE_BF16=1
   xcrun --sdk iphoneos metallib ggml-metal.air   -o ggml-llama.metallib
   rm ggml-metal.air
@@ -317,6 +333,9 @@ if [ "$OS" = "Darwin" ]; then
   xcrun --sdk iphonesimulator metallib ggml-metal.air   -o ggml-llama.metallib
   rm ggml-metal.air
   mv ./ggml-llama.metallib ../../../../cpp/ggml-llama-sim.metallib
+
+  # Remove the symbolic link
+  rm ggml-common.h
 
   cd -
 

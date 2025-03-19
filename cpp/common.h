@@ -356,6 +356,9 @@ struct common_params {
 
     bool single_turn       = false; // single turn chat conversation
 
+    llama_progress_callback progress_callback = nullptr;
+    void * progress_callback_user_data = nullptr;
+
     lm_ggml_type cache_type_k = LM_GGML_TYPE_F16; // KV cache data type for the K
     lm_ggml_type cache_type_v = LM_GGML_TYPE_F16; // KV cache data type for the V
 
@@ -560,23 +563,6 @@ struct common_init_result     common_init_from_params(common_params & params);
 struct llama_model_params     common_model_params_to_llama  (      common_params & params);
 struct llama_context_params   common_context_params_to_llama(const common_params & params);
 struct lm_ggml_threadpool_params lm_ggml_threadpool_params_from_cpu_params(const cpu_params & params);
-
-struct llama_model * common_load_model_from_url(
-    const std::string & model_url,
-    const std::string & local_path,
-    const std::string & hf_token,
-    const struct llama_model_params & params);
-
-struct llama_model * common_load_model_from_hf(
-    const std::string & repo,
-    const std::string & remote_path,
-    const std::string & local_path,
-    const std::string & hf_token,
-    const struct llama_model_params & params);
-
-std::pair<std::string, std::string> common_get_hf_file(
-    const std::string & hf_repo_with_tag,
-    const std::string & hf_token);
 
 // clear LoRA adapters from context, then apply new list of adapters
 void common_set_adapter_lora(struct llama_context * ctx, std::vector<common_adapter_lora_info> & lora);

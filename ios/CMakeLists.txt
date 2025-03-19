@@ -62,15 +62,18 @@ add_library(rnllama SHARED
     ${SOURCE_DIR}/llama-model-loader.cpp
     ${SOURCE_DIR}/llama-mmap.cpp
     ${SOURCE_DIR}/llama-vocab.cpp
+    ${SOURCE_DIR}/llama-memory.cpp
+    ${SOURCE_DIR}/llama-io.cpp
+    ${SOURCE_DIR}/llama-graph.cpp
     ${SOURCE_DIR}/sampling.cpp
     ${SOURCE_DIR}/unicode-data.cpp
     ${SOURCE_DIR}/unicode.cpp
     ${SOURCE_DIR}/sgemm.cpp
     ${SOURCE_DIR}/common.cpp
     ${SOURCE_DIR}/chat.cpp
-    ${SOURCE_DIR}/chat-template.hpp
     ${SOURCE_DIR}/json-schema-to-grammar.cpp
-    ${SOURCE_DIR}/minja.hpp
+    ${SOURCE_DIR}/minja/minja.hpp
+    ${SOURCE_DIR}/minja/chat-template.hpp
     ${SOURCE_DIR}/json.hpp
     ${SOURCE_DIR}/amx/amx.cpp
     ${SOURCE_DIR}/amx/mmq.cpp
