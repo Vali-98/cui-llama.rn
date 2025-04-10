@@ -19,6 +19,10 @@ set(
     ${RNLLAMA_LIB_DIR}/ggml-alloc.c
     ${RNLLAMA_LIB_DIR}/ggml-backend.cpp
     ${RNLLAMA_LIB_DIR}/ggml-backend-reg.cpp
+    ${RNLLAMA_LIB_DIR}/ops.cpp
+    ${RNLLAMA_LIB_DIR}/unary-ops.cpp
+    ${RNLLAMA_LIB_DIR}/binary-ops.cpp
+    ${RNLLAMA_LIB_DIR}/vec.cpp
     ${RNLLAMA_LIB_DIR}/ggml-cpu.c
     ${RNLLAMA_LIB_DIR}/ggml-cpu.cpp
     ${RNLLAMA_LIB_DIR}/ggml-cpu-aarch64.cpp

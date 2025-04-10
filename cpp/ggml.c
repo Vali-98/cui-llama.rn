@@ -1172,6 +1172,12 @@ int64_t lm_ggml_nrows(const struct lm_ggml_tensor * tensor) {
 }
 
 size_t lm_ggml_nbytes(const struct lm_ggml_tensor * tensor) {
+    for (int i = 0; i < LM_GGML_MAX_DIMS; ++i) {
+        if (tensor->ne[i] <= 0) {
+            return 0;
+        }
+    }
+
     size_t nbytes;
     const size_t blck_size = lm_ggml_blck_size(tensor->type);
     if (blck_size == 1) {
@@ -4382,7 +4388,7 @@ struct lm_ggml_tensor * lm_ggml_flash_attn_ext(
     }
 
     // permute(0, 2, 1, 3)
-    int64_t ne[4] = { q->ne[0], q->ne[2], q->ne[1], q->ne[3] };
+    int64_t ne[4] = { v->ne[0], q->ne[2], q->ne[1], q->ne[3] };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
 
     float params[] = { scale, max_bias, logit_softcap };
