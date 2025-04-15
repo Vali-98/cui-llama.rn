@@ -12,8 +12,6 @@ The following features have been added for Android:
 - Context Shift taken from [kobold.cpp](https://github.com/LostRuins/koboldcpp)
 - Retrieving CPU Features to check for i8mm and dotprod flags
 
-There is no IOS implementation for these features.
-
 Original repo README.md below.
 
 # llama.rn

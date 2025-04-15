@@ -368,7 +368,15 @@ export class LlamaContext {
 }
 
 export async function getCpuFeatures() : Promise<NativeCPUFeatures> {
-  return RNLlama.getCpuFeatures()
+  if(Platform.OS === 'android') {
+    return RNLlama.getCpuFeatures()
+  }
+  console.warn("getCpuFeatures() is an android only feature")
+  return {
+    i8mm: false,
+    armv8: false,
+    dotprod: false,
+  }
 }
 
 export async function toggleNativeLog(enabled: boolean): Promise<void> {

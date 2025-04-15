@@ -139,6 +139,7 @@ export default function App() {
     file: DocumentPickerResponse,
     loraFile: DocumentPickerResponse | null,
   ) => {
+    console.log(file)
     await handleReleaseContext()
     await getModelInfo(file.uri)
     const msgId = addSystemMessage('Initializing context...')

@@ -264,7 +264,7 @@
 #   define LM_GGML_NORETURN _Noreturn
 #endif
 
-#define LM_GGML_ABORT(...) lm_ggml_abort((strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__), __LINE__, __VA_ARGS__)
+#define LM_GGML_ABORT(...) lm_ggml_abort((strrchr(__FILE__, '/' ) ? strrchr(__FILE__, '/' ) + 1 : __FILE__), __LINE__, __VA_ARGS__)
 #define LM_GGML_ASSERT(x) if (!(x)) LM_GGML_ABORT("LM_GGML_ASSERT(%s) failed", #x)
 
 // used to copy the number of elements and stride in bytes of tensors into local variables.

@@ -227,7 +227,7 @@ RCT_EXPORT_METHOD(stopCompletion:(double)contextId
     resolve(nil);
 }
 
-RCT_EXPORT_METHOD(tokenize:(double)contextId
+RCT_EXPORT_METHOD(tokenizeASync:(double)contextId
                   text:(NSString *)text
                   withResolver:(RCTPromiseResolveBlock)resolve
                   withRejecter:(RCTPromiseRejectBlock)reject)
@@ -240,6 +240,19 @@ RCT_EXPORT_METHOD(tokenize:(double)contextId
     NSMutableArray *tokens = [context tokenize:text];
     resolve(@{ @"tokens": tokens });
     [tokens release];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(tokenizeSync:(double)contextId
+                                       text:(NSString *)text)
+{
+   RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+   if (context == nil) {
+          return @{ @"error": @"Context not found" };
+   }
+   NSMutableArray *tokens = [context tokenize:text];
+   NSDictionary *result = @{ @"tokens": tokens };
+   [tokens release];
+   return result;
 }
 
 RCT_EXPORT_METHOD(detokenize:(double)contextId
