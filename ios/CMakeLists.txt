@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(rnllama VERSION 1.0.0 LANGUAGES CXX C)
 
+find_program(CCACHE_FOUND ccache)
+if(CCACHE_FOUND)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
+endif(CCACHE_FOUND)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -36,6 +42,10 @@ add_library(rnllama SHARED
     ${SOURCE_DIR}/ggml-backend-reg.cpp
     ${SOURCE_DIR}/ggml-cpu.c
     ${SOURCE_DIR}/ggml-cpu.cpp
+    ${SOURCE_DIR}/ops.cpp
+    ${SOURCE_DIR}/unary-ops.cpp
+    ${SOURCE_DIR}/binary-ops.cpp
+    ${SOURCE_DIR}/vec.cpp
     ${SOURCE_DIR}/ggml-cpu-aarch64.cpp
     ${SOURCE_DIR}/ggml-cpu-quants.c
     ${SOURCE_DIR}/ggml-cpu-traits.cpp
@@ -75,8 +85,6 @@ add_library(rnllama SHARED
     ${SOURCE_DIR}/minja/minja.hpp
     ${SOURCE_DIR}/minja/chat-template.hpp
     ${SOURCE_DIR}/json.hpp
-    ${SOURCE_DIR}/amx/amx.cpp
-    ${SOURCE_DIR}/amx/mmq.cpp
     ${SOURCE_DIR}/rn-llama.cpp
 )
 
