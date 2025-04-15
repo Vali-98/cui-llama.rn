@@ -189,6 +189,7 @@ files_add_lm_prefix=(
   "./cpp/ggml-opt.cpp"
   "./cpp/ggml-metal.h"
   "./cpp/ggml-metal.m"
+  "./cpp/ggml-metal-impl.h"
   "./cpp/llama-cpp.h"
   "./cpp/ggml-quants.h"
   "./cpp/ggml-quants.c"
@@ -267,12 +268,23 @@ done
 
 
 # Clean up logs to be readable
-sed -i 's|__FILE__|(strrchr(__FILE__, \x27/\x27) ? strrchr(__FILE__, \x27/\x27) + 1 : __FILE__)|g' ./cpp/ggml.h
-sed -i 's/#include <stdio.h>/&\n#include <string.h>/' ./cpp/ggml.h
-sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.c
-sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.cpp
-sed -i 's/#include "common\.h"/#include "cpu-common.h"/' ./cpp/binary-ops.h
-sed -i 's/#include "common\.h"/#include "cpu-common.h"/' ./cpp/unary-ops.h
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  sed -i '' "s|__FILE__|(strrchr(__FILE__, '/' ) ? strrchr(__FILE__, '/' ) + 1 : __FILE__)|g" ./cpp/ggml.h
+  sed -i '' "s/#include <stdio.h>/&\\
+#include <string.h>/" ./cpp/ggml.h
+  sed -i '' '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.c
+  sed -i '' '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.cpp
+  sed -i '' "s/#include \"common\.h\"/#include \"cpu-common.h\"/" ./cpp/binary-ops.h
+  sed -i '' "s/#include \"common\.h\"/#include \"cpu-common.h\"/" ./cpp/unary-ops.h
+
+else
+  sed -i 's|__FILE__|(strrchr(__FILE__, '/' ) ? strrchr(__FILE__, '/' ) + 1 : __FILE__)|g' ./cpp/ggml.h
+  sed -i 's/#include <stdio.h>/&\n#include <string.h>/' ./cpp/ggml.h
+  sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.c
+  sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.cpp
+  sed -i 's/#include "common\.h"/#include "cpu-common.h"/' ./cpp/binary-ops.h
+  sed -i 's/#include "common\.h"/#include "cpu-common.h"/' ./cpp/unary-ops.h
+fi
 # end clean logs
 
 echo "Replacement completed successfully!"
@@ -280,12 +292,12 @@ echo "Replacement completed successfully!"
 yarn example
 
 # Apply patch
-#patch -p0 -d ./cpp < ./scripts/patches/common.h.patch
-#patch -p0 -d ./cpp < ./scripts/patches/common.cpp.patch
+# patch -p0 -d ./cpp < ./scripts/patches/common.h.patch
+# atch -p0 -d ./cpp < ./scripts/patches/common.cpp.patch
 patch -p0 -d ./cpp < ./scripts/patches/chat.h.patch
 patch -p0 -d ./cpp < ./scripts/patches/chat.cpp.patch
 patch -p0 -d ./cpp < ./scripts/patches/log.cpp.patch
-patch -p0 -d ./cpp < ./scripts/patches/ggml-metal.m.patch
+# patch -p0 -d ./cpp < ./scripts/patches/ggml-metal.m.patch
 # patch -p0 -d ./cpp < ./scripts/patches/ggml.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/ggml-quants.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/llama-mmap.cpp.patch
