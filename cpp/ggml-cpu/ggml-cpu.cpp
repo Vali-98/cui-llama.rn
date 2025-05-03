@@ -4,6 +4,7 @@
 #include "ggml-cpu-aarch64.h"
 #include "ggml-cpu-traits.h"
 #include "ggml-impl.h"
+#include "amx/amx.h"
 
 #include <cctype>
 #include <string>

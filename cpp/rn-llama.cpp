@@ -165,6 +165,7 @@ void llama_rn_context::rewind() {
     generated_text.reserve(params.n_ctx);
     generated_token_probs.clear();
     truncated = false;
+    context_full = false;
     stopped_eos = false;
     stopped_word = false;
     stopped_limit = false;
@@ -196,6 +197,9 @@ bool llama_rn_context::loadModel(common_params &params_)
     }
     templates = common_chat_templates_init(model, params.chat_template);
     n_ctx = llama_n_ctx(ctx);
+
+    // Initialize context shift flag
+    LOG_INFO("ctx_shift: %s", params.ctx_shift ? "enabled" : "disabled");
 
     // We can uncomment for debugging or after this fix: https://github.com/ggerganov/llama.cpp/pull/11101
     // LOG_INFO("%s\n", common_params_get_system_info(params).c_str());
@@ -271,11 +275,11 @@ void llama_rn_context::truncatePrompt(std::vector<llama_token> &prompt_tokens) {
 
     new_tokens.insert(new_tokens.end(), prompt_tokens.begin() + params.n_keep + erased_blocks * n_block_size, prompt_tokens.end());
 
-    LOG_VERBOSE("input truncated, n_ctx: %d, n_keep: %d, n_left: %d, new_tokens: %s, num_prompt_tokens: %d",
+    LOG_INFO("input truncated, n_ctx: %d, n_keep: %d, n_left: %d, old_size: %d, new_size: %d",
         n_ctx,
         params.n_keep,
         n_left,
-        tokens_to_str(ctx, new_tokens.cbegin(), new_tokens.cend()).c_str(),
+        prompt_tokens.size(),
         new_tokens.size()
     );
 
@@ -304,18 +308,14 @@ void llama_rn_context::loadPrompt() {
     // if input prompt is too big, truncate like normal
     if (num_prompt_tokens >= (size_t) n_ctx)
     {
+        if (!params.ctx_shift) {
+            context_full = true;
+            return;
+        }
         truncatePrompt(prompt_tokens);
         num_prompt_tokens = prompt_tokens.size();
-
         LM_GGML_ASSERT(num_prompt_tokens < (size_t) n_ctx);
     }
-
-    // do context shifitng
-    if(!params.embedding){
-        purge_missing_tokens(ctx, embd, prompt_tokens, params.n_predict, params.n_ctx);
-    }
-
-
     // push the prompt into the sampling context (do not apply grammar)
     for (auto & token : prompt_tokens)
     {
@@ -358,6 +358,14 @@ completion_token_output llama_rn_context::nextToken()
 
     if (embd.size() >= (size_t)params.n_ctx)
     {
+        if (!params.ctx_shift) {
+            // If context shifting is disabled, stop generation
+            LOG_WARNING("context full, n_ctx: %d, tokens: %d", params.n_ctx, embd.size());
+            has_next_token = false;
+            context_full = true;
+            return result;
+        }
+
         // Shift context
 
         const int n_left    = n_past - params.n_keep - 1;
@@ -373,12 +381,9 @@ completion_token_output llama_rn_context::nextToken()
         embd.resize(embd.size() - n_discard);
 
         n_past -= n_discard;
+        truncated = true;
 
-        LOG_VERBOSE("input truncated, n_ctx: %d, n_keep: %d, n_left: %d, new_tokens: %s",
-            params.n_ctx,
-            params.n_keep,
-            n_left
-        );
+        LOG_VERBOSE("context shifted, new n_past: %d, new size: %d", n_past, embd.size());
     }
 
     bool tg = true;
@@ -711,163 +716,6 @@ void llama_rn_context::removeLoraAdapters() {
 
 std::vector<common_adapter_lora_info> llama_rn_context::getLoadedLoraAdapters() {
     return this->lora;
-}
-std::vector<int> llama_rn_context::longest_common_subseq(const std::vector<int> x, const std::vector<int> y){
-     int m = x.size(), n = y.size();
-
-     //int LCSuff[m+1][n+1];
-     std::vector<std::vector<int>> LCSuff(m+1, std::vector<int>(n+1));
-
-     for (int j = 0; j <= n; j++)
-         LCSuff[0][j] = 0;
-     for (int i = 0; i <= m; i++)
-         LCSuff[i][0] = 0;
-
-     for (int i = 1; i <= m; i++)
-     {
-         for (int j = 1; j <= n; j++)
-         {
-             if (x[i - 1] == y[j - 1])
-                 LCSuff[i][j] = LCSuff[i - 1][j - 1] + 1;
-             else
-                 LCSuff[i][j] = 0;
-         }
-     }
-
-     std::vector<int> longest;
-     for (int i = 1; i <= m; i++)
-     {
-         for (int j = 1; j <= n; j++)
-         {
-             if (LCSuff[i][j] > longest.size())
-             {
-                 auto off1 = ((i - LCSuff[i][j] + 1) - 1);
-                 auto off2 = off1 + LCSuff[i][j];
-                 longest.clear();
-                //  std::vector<int>().swap(longest);
-                 longest = std::vector<int>(x.begin() + off1, x.begin() + off2);
-                // x.substr((i - LCSuff[i][j] + 1) - 1, LCSuff[i][j]);
-             }
-         }
-     }
-     return longest;
- }
-
-bool llama_rn_context::arr_start_with(const std::vector<int> targetArray, const std::vector<int> searchSeq)
- {
-     int ss = searchSeq.size();
-     if(targetArray.size()<ss)
-     {
-         return false;
-     }
-     for(int i=0;i<ss;++i)
-     {
-         if(targetArray[i]!=searchSeq[i])
-         {
-             return false;
-         }
-     }
-     return true;
- }
-
-int llama_rn_context::arr_find_index_of(const std::vector<int> targetArray, const std::vector<int> searchSeq)
- {
-     int ss = searchSeq.size();
-     int tas = targetArray.size();
-     if(tas<ss)
-     {
-         return -1;
-     }
-     for(int i=0;i<tas;++i)
-     {
-         int srch = 0;
-         bool fail = false;
-         for(int srch=0;srch<ss;++srch)
-         {
-             if ((i + srch) >= tas || targetArray[i + srch] != searchSeq[srch])
-             {
-                 fail = true;
-                 break;
-             }
-         }
-         if(!fail)
-         {
-             return i;
-         }
-     }
-     return -1;
- }
-
-void llama_rn_context::purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context_tokens, std::vector<int> &new_context_tokens, const int genamt, const int nctx)
-{
-    //scan from start old and new ctx, until first mismatch found, save as p0
-    //check remaining old and new ctx for longest common subseq, which needs to be at 256 tokens
-    //test: longest common subseq (LCQ) MUST start within 0 tokens from end of memory, otherwise purge fails
-    //if passed, save beginning of LCQ from old ctx as p1
-    //remove all tokens from old ctx between p0 and p1, updating both arrays and kv, then continue as normal
-
-    const int short_fall_threshold = 200 + (nctx/30); //dont trigger shifting if the distance between trimstart and currhead < this
-    const int stack_allowance = 60 + (nctx/50); //in case the end text is slightly modified, be forgiving
-
-    int trimstart = 0;
-    int new_tokens_len = new_context_tokens.size();
-    bool purge_needed = true;
-
-    for (int i = 0; i < current_context_tokens.size(); ++i)
-    {
-        if (current_context_tokens[i] == new_context_tokens[i])
-        {
-            trimstart += 1;
-        }
-        else
-        {
-            break;
-        }
-        if ((i + 2) >= new_tokens_len)
-        {
-            purge_needed = false;
-            break; //no surgery required
-        }
-    }
-
-    
-
-    if(!purge_needed || new_tokens_len < 6 || current_context_tokens.size() < 6 || new_tokens_len - trimstart < short_fall_threshold)
-    {
-        LOG_INFO("Fall Threshold: %d out of %d\n", new_tokens_len - trimstart, short_fall_threshold);
-        return; //no purge is needed
-    }
-
-    //at least this many tokens need to match, otherwise don't bother trimming
-    const int lc_tok_threshold = std::max(std::min((new_tokens_len - trimstart) - (genamt+stack_allowance), (int)(nctx*0.45)), short_fall_threshold - stack_allowance);
-
-    auto curr_ctx_without_memory = std::vector<int>(current_context_tokens.begin() + trimstart, current_context_tokens.end());
-    auto new_ctx_without_memory = std::vector<int>(new_context_tokens.begin() + trimstart, new_context_tokens.end());
-
-    auto shared = longest_common_subseq(curr_ctx_without_memory, new_ctx_without_memory);
-
-    if (shared.size() > lc_tok_threshold && arr_start_with(new_ctx_without_memory, shared)) // enough tokens in common
-    {
-        int found = arr_find_index_of(current_context_tokens,shared);
-        if(found>=0 && found > trimstart)
-        {
-
-            //extract the unwanted tokens out from context and KV
-            int diff = found - trimstart;
-            llama_kv_self_seq_rm(ctx, 0, trimstart, trimstart + diff);
-            llama_kv_self_seq_add(ctx, 0, trimstart + diff, -1, -diff);
-
-            for (size_t i = trimstart + diff; i < current_context_tokens.size() - 1; i++)
-            {
-                current_context_tokens[i - diff] = current_context_tokens[i];
-            }
-
-            LOG_INFO("\n[Context Shifting: Erased %d tokens at position %d]", diff, trimstart + 1);
-
-            current_context_tokens.resize(current_context_tokens.size() - diff);
-        }
-    }
-
 }
 
 }

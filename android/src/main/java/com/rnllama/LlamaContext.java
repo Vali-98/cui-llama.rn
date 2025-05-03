@@ -170,6 +170,8 @@ public class LlamaContext {
       params.hasKey("rope_freq_scale") ? (float) params.getDouble("rope_freq_scale") : 0.0f,
       // int pooling_type,
       params.hasKey("pooling_type") ? params.getInt("pooling_type") : -1,
+      // boolean ctx_shift,
+      params.hasKey("ctx_shift") ? params.getBoolean("ctx_shift") : true,
       // LoadProgressCallback load_progress_callback
       params.hasKey("use_progress_callback") ? new LoadProgressCallback(this) : null
     );
@@ -536,7 +538,7 @@ public class LlamaContext {
     String[] skip
   );
   protected static native long initContext(
-    String model,
+    String model_path,
     String chat_template,
     String reasoning_format,
     boolean embedding,
@@ -558,6 +560,7 @@ public class LlamaContext {
     float rope_freq_base,
     float rope_freq_scale,
     int pooling_type,
+    boolean ctx_shift,
     LoadProgressCallback load_progress_callback
   );
   protected static native void interruptLoad(long contextPtr);

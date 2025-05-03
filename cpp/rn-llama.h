@@ -16,7 +16,6 @@
 
 namespace rnllama {
 
-
 std::string tokens_to_output_formatted_string(const llama_context *ctx, const llama_token token);
 
 std::string tokens_to_str(llama_context *ctx, const std::vector<llama_token>::const_iterator begin, const std::vector<llama_token>::const_iterator end);
@@ -69,6 +68,7 @@ struct llama_rn_context {
 
     int n_ctx;
 
+    bool context_full = false;
     bool truncated = false;
     bool stopped_eos = false;
     bool stopped_word = false;
@@ -107,10 +107,6 @@ struct llama_rn_context {
     int applyLoraAdapters(std::vector<common_adapter_lora_info> lora);
     void removeLoraAdapters();
     std::vector<common_adapter_lora_info> getLoadedLoraAdapters();
-    std::vector<int> longest_common_subseq(const std::vector<int> x, const std::vector<int> y);
-    bool arr_start_with(const std::vector<int> targetArray, const std::vector<int> searchSeq);
-    int arr_find_index_of(const std::vector<int> targetArray, const std::vector<int> searchSeq);
-    void purge_missing_tokens(llama_context * ctx, std::vector<int> &current_context_tokens, std::vector<int> &new_context_tokens, const int genamt, const int nctx);
 };\
 
 // Logging macros
