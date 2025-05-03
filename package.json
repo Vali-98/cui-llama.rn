@@ -1,7 +1,13 @@
 {
+<<<<<<< HEAD
   "name": "cui-llama.rn",
   "version": "1.6.0",
   "description": "Fork of llama.rn for ChatterUI",
+=======
+  "name": "llama.rn",
+  "version": "0.5.9",
+  "description": "React Native binding of llama.cpp",
+>>>>>>> 34193dfd270b54cabc200eb389e79d77b976a70a
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
   "types": "lib/typescript/index.d.ts",

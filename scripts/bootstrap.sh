@@ -21,32 +21,35 @@ cp ./llama.cpp/ggml/include/gguf.h ./cpp/gguf.h
 
 # === ggml/src/ggml-metal ===
 cp ./llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h ./cpp/ggml-metal-impl.h
-cp ./llama.cpp/ggml/src/ggml-metal/ggml-metal.m ./cpp/ggml-metal.m
 
-# === ggml/src/ggml-cpu ===
-cp ./llama.cpp/ggml/src/ggml-cpu/binary-ops.cpp ./cpp/binary-ops.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/binary-ops.h ./cpp/binary-ops.h
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-aarch64.cpp ./cpp/ggml-cpu-aarch64.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-aarch64.h ./cpp/ggml-cpu-aarch64.h
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-impl.h ./cpp/ggml-cpu-impl.h
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-quants.c ./cpp/ggml-cpu-quants.c
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-quants.h ./cpp/ggml-cpu-quants.h
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-traits.cpp ./cpp/ggml-cpu-traits.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-traits.h ./cpp/ggml-cpu-traits.h
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c ./cpp/ggml-cpu.c
-cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp ./cpp/ggml-cpu.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp ./cpp/sgemm.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.h ./cpp/sgemm.h
-cp ./llama.cpp/ggml/src/ggml-cpu/ops.cpp ./cpp/ops.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/ops.h ./cpp/ops.h
-cp ./llama.cpp/ggml/src/ggml-cpu/unary-ops.cpp ./cpp/unary-ops.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/unary-ops.h ./cpp/unary-ops.h
-cp ./llama.cpp/ggml/src/ggml-cpu/vec.cpp ./cpp/vec.cpp
-cp ./llama.cpp/ggml/src/ggml-cpu/vec.h ./cpp/vec.h
-cp ./llama.cpp/ggml/src/ggml-cpu/simd-mappings.h ./cpp/simd-mappings.h
-cp ./llama.cpp/ggml/src/ggml-cpu/common.h ./cpp/cpu-common.h
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c ./cpp/ggml-cpu/ggml-cpu.c
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu.cpp ./cpp/ggml-cpu/ggml-cpu.cpp
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-impl.h ./cpp/ggml-cpu/ggml-cpu-impl.h
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-aarch64.h ./cpp/ggml-cpu/ggml-cpu-aarch64.h
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-aarch64.cpp ./cpp/ggml-cpu/ggml-cpu-aarch64.cpp
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-quants.h ./cpp/ggml-cpu/ggml-cpu-quants.h
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-quants.c ./cpp/ggml-cpu/ggml-cpu-quants.c
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-traits.h ./cpp/ggml-cpu/ggml-cpu-traits.h
+cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu-traits.cpp ./cpp/ggml-cpu/ggml-cpu-traits.cpp
+cp ./llama.cpp/ggml/src/ggml-cpu/common.h ./cpp/ggml-cpu/common.h
 
-# === ggml/src root ===
+cp ./llama.cpp/ggml/src/ggml-cpu/unary-ops.h ./cpp/ggml-cpu/unary-ops.h
+cp ./llama.cpp/ggml/src/ggml-cpu/unary-ops.cpp ./cpp/ggml-cpu/unary-ops.cpp
+cp ./llama.cpp/ggml/src/ggml-cpu/binary-ops.h ./cpp/ggml-cpu/binary-ops.h
+cp ./llama.cpp/ggml/src/ggml-cpu/binary-ops.cpp ./cpp/ggml-cpu/binary-ops.cpp
+cp ./llama.cpp/ggml/src/ggml-cpu/vec.h ./cpp/ggml-cpu/vec.h
+cp ./llama.cpp/ggml/src/ggml-cpu/vec.cpp ./cpp/ggml-cpu/vec.cpp
+cp ./llama.cpp/ggml/src/ggml-cpu/simd-mappings.h ./cpp/ggml-cpu/simd-mappings.h
+cp ./llama.cpp/ggml/src/ggml-cpu/ops.h ./cpp/ggml-cpu/ops.h
+cp ./llama.cpp/ggml/src/ggml-cpu/ops.cpp ./cpp/ggml-cpu/ops.cpp
+
+cp -r ./llama.cpp/ggml/src/ggml-cpu/amx ./cpp/ggml-cpu/
+
+cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.h ./cpp/ggml-cpu/sgemm.h
+cp ./llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp ./cpp/ggml-cpu/sgemm.cpp
+
+cp ./llama.cpp/ggml/src/ggml.c ./cpp/ggml.c
+cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
 cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
 cp ./llama.cpp/ggml/src/ggml-backend-impl.h ./cpp/ggml-backend-impl.h
 cp ./llama.cpp/ggml/src/ggml-backend-reg.cpp ./cpp/ggml-backend-reg.cpp
@@ -174,8 +177,8 @@ files_add_lm_prefix=(
   "./cpp/llama.h"
   "./cpp/llama.cpp"
   "./cpp/sampling.cpp"
-  "./cpp/sgemm.h"
-  "./cpp/sgemm.cpp"
+  "./cpp/ggml-cpu/sgemm.h"
+  "./cpp/ggml-cpu/sgemm.cpp"
   "./cpp/common.h"
   "./cpp/common.cpp"
   "./cpp/ggml-common.h"
@@ -199,32 +202,34 @@ files_add_lm_prefix=(
   "./cpp/ggml-backend.cpp"
   "./cpp/ggml-backend-impl.h"
   "./cpp/ggml-backend-reg.cpp"
-  "./cpp/ggml-cpu-impl.h"
   "./cpp/ggml-cpu.h"
-  "./cpp/ggml-cpu.c"
-  "./cpp/ggml-cpu.cpp"
-  "./cpp/ggml-cpu-aarch64.h"
-  "./cpp/ggml-cpu-aarch64.cpp"
-  "./cpp/ggml-cpu-traits.h"
-  "./cpp/ggml-cpu-traits.cpp"
-  "./cpp/ops.h"
-  "./cpp/ops.cpp"
-  "./cpp/unary-ops.h"
-  "./cpp/unary-ops.cpp"
-  "./cpp/binary-ops.h"
-  "./cpp/binary-ops.cpp"
-  "./cpp/vec.h"
-  "./cpp/vec.cpp"
-  "./cpp/simd-mappings.h"
-  "./cpp/cpu-common.h"
-  "./cpp/ggml-cpu-quants.h"
-  "./cpp/ggml-cpu-quants.c"
+  "./cpp/ggml-cpu/ggml-cpu-impl.h"
+  "./cpp/ggml-cpu/ggml-cpu.c"
+  "./cpp/ggml-cpu/ggml-cpu.cpp"
+  "./cpp/ggml-cpu/ggml-cpu-aarch64.h"
+  "./cpp/ggml-cpu/ggml-cpu-aarch64.cpp"
+  "./cpp/ggml-cpu/ggml-cpu-quants.h"
+  "./cpp/ggml-cpu/ggml-cpu-quants.c"
+  "./cpp/ggml-cpu/ggml-cpu-traits.h"
+  "./cpp/ggml-cpu/ggml-cpu-traits.cpp"
+  "./cpp/ggml-cpu/common.h"
   "./cpp/ggml-threading.h"
   "./cpp/ggml-threading.cpp"
-  "./cpp/minja/chat-template.hpp"
-  "./cpp/minja/minja.hpp"
+  "./cpp/ggml-cpu/amx/amx.h"
+  "./cpp/ggml-cpu/amx/amx.cpp"
+  "./cpp/ggml-cpu/amx/mmq.h"
+  "./cpp/ggml-cpu/amx/mmq.cpp"
+  "./cpp/ggml-cpu/amx/common.h"
+  "./cpp/ggml-cpu/unary-ops.h"
+  "./cpp/ggml-cpu/unary-ops.cpp"
+  "./cpp/ggml-cpu/binary-ops.h"
+  "./cpp/ggml-cpu/binary-ops.cpp"
+  "./cpp/ggml-cpu/vec.h"
+  "./cpp/ggml-cpu/vec.cpp"
+  "./cpp/ggml-cpu/simd-mappings.h"
+  "./cpp/ggml-cpu/ops.h"
+  "./cpp/ggml-cpu/ops.cpp"
 )
-
 
 # Loop through each file and run the sed commands
 OS=$(uname)

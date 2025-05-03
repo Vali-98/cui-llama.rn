@@ -69,6 +69,7 @@ struct llama_rn_context {
 
     int n_ctx;
 
+    bool context_full = false;
     bool truncated = false;
     bool stopped_eos = false;
     bool stopped_word = false;
