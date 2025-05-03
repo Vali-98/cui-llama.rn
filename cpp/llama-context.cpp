@@ -10,7 +10,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <cinttypes>
-#include <cmath>
 
 //
 // llama_context
@@ -469,10 +468,12 @@ lm_ggml_tensor * llama_context::build_rope_shift(
         lm_ggml_tensor * shift,
         lm_ggml_tensor * factors,
               float   freq_base,
-              float   freq_scale) const {
+              float   freq_scale,
+        lm_ggml_backend_buffer * bbuf) const {
     const auto & n_ctx_orig = cparams.n_ctx_orig_yarn;
 
     const auto & yarn_ext_factor  = cparams.yarn_ext_factor;
+    const auto & yarn_attn_factor = cparams.yarn_attn_factor;
     const auto & yarn_beta_fast   = cparams.yarn_beta_fast;
     const auto & yarn_beta_slow   = cparams.yarn_beta_slow;
 
@@ -481,17 +482,23 @@ lm_ggml_tensor * llama_context::build_rope_shift(
     const auto & n_rot     = hparams.n_rot;
     const auto & rope_type = hparams.rope_type;
 
-    // See llm_build_deepseek2() for why attn_factor has to be scaled for YaRN RoPE to work correctly.
-    // See https://github.com/ggerganov/llama.cpp/discussions/7416 for detailed explanation.
-    const float yarn_attn_factor = model.arch == LLM_ARCH_DEEPSEEK2 ? 1.0f / (1.0f + 0.1f * logf(1.0f / freq_scale)) : cparams.yarn_attn_factor;
-
     lm_ggml_tensor * tmp;
 
     if (lm_ggml_is_quantized(cur->type)) {
         // dequantize to f32 -> RoPE -> quantize back
         tmp = lm_ggml_cast(ctx0, cur, LM_GGML_TYPE_F32);
 
-        tmp = lm_ggml_rope_ext(ctx0, tmp,
+        if (bbuf) {
+            for (const auto & backend : backends) {
+                // Figure out which backend KV cache belongs to
+                if (lm_ggml_backend_supports_buft(backend.get(), lm_ggml_backend_buffer_get_type(bbuf))) {
+                    lm_ggml_backend_sched_set_tensor_backend(sched.get(), tmp, backend.get());
+                    break;
+                }
+            }
+        }
+
+        tmp = lm_ggml_rope_ext_inplace(ctx0, tmp,
                 shift, factors, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
                 yarn_ext_factor, yarn_attn_factor, yarn_beta_fast, yarn_beta_slow);
 
@@ -571,7 +578,7 @@ llm_graph_result_ptr llama_context::build_kv_self_shift(
                 lm_ggml_row_size(kv_self->k_l[il]->type, n_embd_k_gqa),
                 0);
 
-        lm_ggml_tensor * cur = build_rope_shift(ctx0, k, inp->k_shift, rope_factors, freq_base_l, freq_scale_l);
+        lm_ggml_tensor * cur = build_rope_shift(ctx0, k, inp->k_shift, rope_factors, freq_base_l, freq_scale_l, kv_self->k_l[il]->buffer);
 
         lm_ggml_build_forward_expand(gf, cur);
     }
@@ -1535,6 +1542,8 @@ int32_t llama_context::output_reserve(int32_t n_outputs) {
 
     // set all ids as invalid (negative)
     std::fill(output_ids.begin(), output_ids.end(), -1);
+
+    lm_ggml_backend_buffer_clear(buf_output.get(), 0);
 
     this->n_outputs     = 0;
     this->n_outputs_max = n_outputs_max;

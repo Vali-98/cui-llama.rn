@@ -39,13 +39,11 @@ enum llm_type {
     LLM_TYPE_770M,
     LLM_TYPE_780M,
     LLM_TYPE_0_5B,
-    LLM_TYPE_0_6B,
     LLM_TYPE_1B,
     LLM_TYPE_1_3B,
     LLM_TYPE_1_4B,
     LLM_TYPE_1_5B,
     LLM_TYPE_1_6B,
-    LLM_TYPE_1_7B,
     LLM_TYPE_1_8B,
     LLM_TYPE_2B,
     LLM_TYPE_2_8B,
@@ -64,7 +62,6 @@ enum llm_type {
     LLM_TYPE_15B,
     LLM_TYPE_16B,
     LLM_TYPE_20B,
-    LLM_TYPE_27B,
     LLM_TYPE_30B,
     LLM_TYPE_32B,
     LLM_TYPE_34B,
@@ -73,7 +70,6 @@ enum llm_type {
     LLM_TYPE_65B,
     LLM_TYPE_70B,
     LLM_TYPE_236B,
-    LLM_TYPE_290B,
     LLM_TYPE_314B,
     LLM_TYPE_671B,
     LLM_TYPE_SMALL,
@@ -88,10 +84,10 @@ enum llm_type {
     LLM_TYPE_16x3_8B,
     LLM_TYPE_10B_128x3_66B,
     LLM_TYPE_57B_A14B,
+    LLM_TYPE_27B,
+    LLM_TYPE_290B,
     LLM_TYPE_17B_16E, // llama4 Scout
     LLM_TYPE_17B_128E, // llama4 Maverick
-    LLM_TYPE_30B_A3B,
-    LLM_TYPE_235B_A22B,
 };
 
 struct llama_layer_posnet {
@@ -175,8 +171,6 @@ struct llama_layer {
     struct lm_ggml_tensor * wq_b      = nullptr;
     struct lm_ggml_tensor * wkv_a_mqa = nullptr;
     struct lm_ggml_tensor * wkv_b     = nullptr;
-    struct lm_ggml_tensor * wk_b      = nullptr;
-    struct lm_ggml_tensor * wv_b      = nullptr;
     struct lm_ggml_tensor * wq_cross  = nullptr;
     struct lm_ggml_tensor * wk_cross  = nullptr;
     struct lm_ggml_tensor * wv_cross  = nullptr;

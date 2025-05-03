@@ -47,6 +47,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
 #endif
 
 // build info
@@ -54,7 +55,6 @@ int LLAMA_BUILD_NUMBER = 0;
 char const *LLAMA_COMMIT = "unknown";
 char const *LLAMA_COMPILER = "unknown";
 char const *LLAMA_BUILD_TARGET = "unknown";
-
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -837,7 +837,7 @@ std::string fs_get_cache_directory() {
     if (getenv("LLAMA_CACHE")) {
         cache_directory = std::getenv("LLAMA_CACHE");
     } else {
-#if defined(__linux__) || defined(__FreeBSD__) || defined(_AIX)
+#ifdef __linux__
         if (std::getenv("XDG_CACHE_HOME")) {
             cache_directory = std::getenv("XDG_CACHE_HOME");
         } else {
@@ -847,9 +847,7 @@ std::string fs_get_cache_directory() {
         cache_directory = std::getenv("HOME") + std::string("/Library/Caches/");
 #elif defined(_WIN32)
         cache_directory = std::getenv("LOCALAPPDATA");
-#else
-#  error Unknown architecture
-#endif
+#endif // __linux__
         cache_directory = ensure_trailing_slash(cache_directory);
         cache_directory += "llama.cpp";
     }
@@ -1036,19 +1034,6 @@ struct common_init_result common_init_from_params(common_params & params) {
     return iparams;
 }
 
-std::string get_model_endpoint() {
-    const char * model_endpoint_env = getenv("MODEL_ENDPOINT");
-    // We still respect the use of environment-variable "HF_ENDPOINT" for backward-compatibility.
-    const char * hf_endpoint_env = getenv("HF_ENDPOINT");
-    const char * endpoint_env = model_endpoint_env ? model_endpoint_env : hf_endpoint_env;
-    std::string model_endpoint = "https://huggingface.co/";
-    if (endpoint_env) {
-        model_endpoint = endpoint_env;
-        if (model_endpoint.back() != '/') model_endpoint += '/';
-    }
-    return model_endpoint;
-}
-
 void common_set_adapter_lora(struct llama_context * ctx, std::vector<common_adapter_lora_info> & lora) {
     llama_clear_adapter_lora(ctx);
     for (auto & la : lora) {
@@ -1091,11 +1076,6 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
     } else {
         LM_GGML_ASSERT(params.tensor_buft_overrides.back().pattern == nullptr && "Tensor buffer overrides not terminated with empty pattern");
         mparams.tensor_buft_overrides = params.tensor_buft_overrides.data();
-    }
-
-    if (params.progress_callback != nullptr) {
-        mparams.progress_callback = params.progress_callback;
-        mparams.progress_callback_user_data = params.progress_callback_user_data;
     }
 
     return mparams;

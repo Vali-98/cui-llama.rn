@@ -27,7 +27,7 @@ bool llama_kv_cache_unified::init(
 
     recurrent = llama_model_is_recurrent(&model);
     v_trans   = !recurrent && !cparams.flash_attn;
-    can_shift = !recurrent;
+    can_shift = !recurrent && model.arch != LLM_ARCH_DEEPSEEK2; // not supported due to MLA
 
     LLAMA_LOG_INFO("%s: kv_size = %d, offload = %d, type_k = '%s', type_v = '%s', n_layer = %d, can_shift = %d\n",
             __func__, kv_size, offload, lm_ggml_type_name(type_k), lm_ggml_type_name(type_v), n_layer, can_shift);

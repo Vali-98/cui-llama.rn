@@ -300,7 +300,7 @@ Java_com_rnllama_LlamaContext_initContext(
     int default_n_threads = max_threads == 4 ? 2 : min(4, max_threads);
     defaultParams.cpuparams.n_threads = n_threads > 0 ? n_threads : default_n_threads;
 
-    // defaultParams.n_gpu_layers = n_gpu_layers;
+    defaultParams.n_gpu_layers = n_gpu_layers;
     defaultParams.flash_attn = flash_attn;
 
     const char *cache_type_k_chars = env->GetStringUTFChars(cache_type_k, nullptr);

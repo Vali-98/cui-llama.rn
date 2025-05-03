@@ -277,18 +277,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   sed -i '' "s|__FILE__|(strrchr(__FILE__, '/' ) ? strrchr(__FILE__, '/' ) + 1 : __FILE__)|g" ./cpp/ggml.h
   sed -i '' "s/#include <stdio.h>/&\\
 #include <string.h>/" ./cpp/ggml.h
-  sed -i '' '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.c
-  sed -i '' '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.cpp
-  sed -i '' "s/#include \"common\.h\"/#include \"cpu-common.h\"/" ./cpp/binary-ops.h
-  sed -i '' "s/#include \"common\.h\"/#include \"cpu-common.h\"/" ./cpp/unary-ops.h
-
 else
   sed -i 's|__FILE__|(strrchr(__FILE__, '/' ) ? strrchr(__FILE__, '/' ) + 1 : __FILE__)|g' ./cpp/ggml.h
   sed -i 's/#include <stdio.h>/&\n#include <string.h>/' ./cpp/ggml.h
-  sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.c
-  sed -i '/#include "amx\/amx.h"/d' ./cpp/ggml-cpu.cpp
-  sed -i 's/#include "common\.h"/#include "cpu-common.h"/' ./cpp/binary-ops.h
-  sed -i 's/#include "common\.h"/#include "cpu-common.h"/' ./cpp/unary-ops.h
 fi
 # end clean logs
 
