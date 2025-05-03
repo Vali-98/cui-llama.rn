@@ -8,7 +8,7 @@ PODS:
     - hermes-engine/Pre-built (= 0.72.3)
   - hermes-engine/Pre-built (0.72.3)
   - libevent (2.1.12)
-  - llama-rn (1.5.0):
+  - llama-rn (1.6.0):
     - hermes-engine
     - RCT-Folly (= 2021.07.22.00)
     - RCTRequired
@@ -1270,7 +1270,7 @@ SPEC CHECKSUMS:
   glog: 04b94705f318337d7ead9e6d17c019bd9b1f6b1b
   hermes-engine: 10fbd3f62405c41ea07e71973ea61e1878d07322
   libevent: 4049cae6c81cdb3654a443be001fb9bdceff7913
-  llama-rn: 5de3dfd681298f85a1aced5747d666c0c45ffb16
+  llama-rn: b1161175a4128eee3bdcd823e161f8e3477459e9
   RCT-Folly: 8dc08ca5a393b48b1c523ab6220dfdcc0fe000ad
   RCTRequired: a2faf4bad4e438ca37b2040cb8f7799baa065c18
   RCTTypeSafety: cb09f3e4747b6d18331a15eb05271de7441ca0b3

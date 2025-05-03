@@ -20,6 +20,7 @@ cp ./llama.cpp/ggml/include/ggml.h ./cpp/ggml.h
 cp ./llama.cpp/ggml/include/gguf.h ./cpp/gguf.h
 
 # === ggml/src/ggml-metal ===
+cp ./llama.cpp/ggml/src/ggml-metal/ggml-metal.m ./cpp/ggml-metal.m
 cp ./llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h ./cpp/ggml-metal-impl.h
 
 cp ./llama.cpp/ggml/src/ggml-cpu/ggml-cpu.c ./cpp/ggml-cpu/ggml-cpu.c
@@ -293,7 +294,7 @@ yarn example
 patch -p0 -d ./cpp < ./scripts/patches/chat.h.patch
 patch -p0 -d ./cpp < ./scripts/patches/chat.cpp.patch
 patch -p0 -d ./cpp < ./scripts/patches/log.cpp.patch
-# patch -p0 -d ./cpp < ./scripts/patches/ggml-metal.m.patch
+patch -p0 -d ./cpp < ./scripts/patches/ggml-metal.m.patch
 # patch -p0 -d ./cpp < ./scripts/patches/ggml.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/ggml-quants.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/llama-mmap.cpp.patch
