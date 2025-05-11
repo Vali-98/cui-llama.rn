@@ -123,21 +123,49 @@ console.log('Result:', textResult.text)
 console.log('Timings:', textResult.timings)
 ```
 
-The binding’s deisgn inspired by [server.cpp](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) example in llama.cpp, so you can map its API to LlamaContext:
+The binding’s deisgn inspired by [server.cpp](https://github.com/ggerganov/llama.cpp/tree/master/examples/server) example in llama.cpp:
 
 - `/completion` and `/chat/completions`: `context.completion(params, partialCompletionCallback)`
 - `/tokenize`: `context.tokenize(content)`
 - `/detokenize`: `context.detokenize(tokens)`
 - `/embedding`: `context.embedding(content)`
-- Other methods
-  - `context.loadSession(path)`
-  - `context.saveSession(path)`
-  - `context.stopCompletion()`
-  - `context.release()`
+- ... Other methods
 
 Please visit the [Documentation](docs/API) for more details.
 
 You can also visit the [example](example) to see how to use it.
+
+## Session (State)
+
+The session file is a binary file that contains the state of the context, it can saves time of prompt processing.
+
+```js
+const context = await initLlama({ ...params })
+
+// After prompt processing or completion ...
+
+// Save the session
+await context.saveSession('<path to save session>')
+
+// Load the session
+await context.loadSession('<path to load session>')
+```
+
+## Embedding
+
+The embedding API is used to get the embedding of a text.
+
+```js
+const context = await initLlama({
+  ...params,
+  embedding: true,
+})
+
+const { embedding } = await context.embedding('Hello, world!')
+```
+
+- You can use model like [nomic-ai/nomic-embed-text-v1.5-GGUF](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF) for better embedding quality.
+- You can use DB like [op-sqlite](https://github.com/OP-Engineering/op-sqlite) with sqlite-vec support to store and search embeddings.
 
 ## Tool Calling
 
@@ -273,7 +301,7 @@ jest.mock('llama.rn', () => require('llama.rn/jest/mock'))
 
 iOS:
 
-- The [Extended Virtual Addressing](https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_developer_kernel_extended-virtual-addressing) capability is recommended to enable on iOS project.
+- The [Extended Virtual Addressing](https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_developer_kernel_extended-virtual-addressing) and [Increased Memory Limit](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.kernel.increased-memory-limit?language=objc) capabilities are recommended to enable on iOS project.
 - Metal:
   - We have tested to know some devices is not able to use Metal (GPU) due to llama.cpp used SIMD-scoped operation, you can check if your device is supported in [Metal feature set tables](https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf), Apple7 GPU will be the minimum requirement.
   - It's also not supported in iOS simulator due to [this limitation](https://developer.apple.com/documentation/metal/developing_metal_apps_that_run_in_simulator#3241609), we used constant buffers more than 14.
