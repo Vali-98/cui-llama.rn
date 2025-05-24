@@ -34,9 +34,12 @@
 - (NSDictionary *)modelInfo;
 - (bool)isModelLoaded;
 - (bool)isPredicting;
+- (bool)initMultimodal:(NSDictionary *)params;
+- (bool)isMultimodalEnabled;
+- (void)releaseMultimodal;
 - (NSDictionary *)completion:(NSDictionary *)params onToken:(void (^)(NSMutableDictionary *tokenResult))onToken;
 - (void)stopCompletion;
-- (NSArray *)tokenize:(NSString *)text;
+- (NSDictionary *)tokenize:(NSString *)text imagePaths:(NSArray *)imagePaths;
 - (NSString *)detokenize:(NSArray *)tokens;
 - (NSDictionary *)embedding:(NSString *)text params:(NSDictionary *)params;
 - (NSDictionary *)getFormattedChatWithJinja:(NSString *)messages

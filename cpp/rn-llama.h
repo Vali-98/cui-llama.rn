@@ -41,6 +41,16 @@ struct completion_token_output
     llama_token tok;
 };
 
+struct llama_rn_context_mtmd;
+
+struct llama_rn_tokenize_result {
+    std::vector<llama_token> tokens;
+    bool has_images = false;
+    std::vector<std::string> bitmap_hashes;
+    std::vector<size_t> chunk_pos; // both text and image
+    std::vector<size_t> chunk_pos_images; // image only
+};
+
 // Main context class
 struct llama_rn_context {
     bool is_predicting = false;
@@ -51,8 +61,9 @@ struct llama_rn_context {
 
     size_t num_prompt_tokens = 0;
     size_t num_tokens_predicted = 0;
-    size_t n_past = 0;
+    llama_pos n_past = 0;
     size_t n_remain = 0;
+    std::vector<std::string> mtmd_bitmap_past_hashes;
 
     std::vector<llama_token> embd;
     common_params params;
@@ -78,6 +89,9 @@ struct llama_rn_context {
 
     std::vector<common_adapter_lora_info> lora;
 
+    llama_rn_context_mtmd *mtmd_wrapper = nullptr;
+    bool has_multimodal = false;
+
     ~llama_rn_context();
 
     void rewind();
@@ -97,8 +111,9 @@ struct llama_rn_context {
       const std::string &chat_template
     ) const;
     void truncatePrompt(std::vector<llama_token> &prompt_tokens);
-    void loadPrompt();
+    void loadPrompt(const std::vector<std::string> &image_paths);
     void beginCompletion();
+    void endCompletion();
     completion_token_output nextToken();
     size_t findStoppingStrings(const std::string &text, const size_t last_token_size, const stop_type type);
     completion_token_output doCompletion();
@@ -107,7 +122,20 @@ struct llama_rn_context {
     int applyLoraAdapters(std::vector<common_adapter_lora_info> lora);
     void removeLoraAdapters();
     std::vector<common_adapter_lora_info> getLoadedLoraAdapters();
-};\
+
+    // Multimodal methods
+    bool initMultimodal(const std::string &mmproj_path, bool use_gpu);
+    bool isMultimodalEnabled() const;
+    void releaseMultimodal();
+
+    // Process multiple images and add them to the context
+    void processImage(
+        const std::string &prompt,
+        const std::vector<std::string> &image_paths
+    );
+
+    llama_rn_tokenize_result tokenize(const std::string &text, const std::vector<std::string> &image_paths);
+};
 
 // Logging macros
 extern bool rnllama_verbose;

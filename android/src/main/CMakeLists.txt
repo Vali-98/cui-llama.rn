@@ -14,6 +14,7 @@ set(RNLLAMA_LIB_DIR ${CMAKE_SOURCE_DIR}/../../../cpp)
 include_directories(
     ${RNLLAMA_LIB_DIR}
     ${RNLLAMA_LIB_DIR}/ggml-cpu
+    ${RNLLAMA_LIB_DIR}/tools/mtmd
 )
 
 set(
@@ -40,6 +41,11 @@ set(
     ${RNLLAMA_LIB_DIR}/gguf.cpp
     ${RNLLAMA_LIB_DIR}/log.cpp
     ${RNLLAMA_LIB_DIR}/llama-impl.cpp
+    # Multimodal support
+    ${RNLLAMA_LIB_DIR}/tools/mtmd/mtmd.cpp
+    ${RNLLAMA_LIB_DIR}/tools/mtmd/mtmd-audio.cpp
+    ${RNLLAMA_LIB_DIR}/tools/mtmd/clip.cpp
+    ${RNLLAMA_LIB_DIR}/tools/mtmd/mtmd-helper.cpp
     ${RNLLAMA_LIB_DIR}/llama-grammar.cpp
     ${RNLLAMA_LIB_DIR}/llama-sampling.cpp
     ${RNLLAMA_LIB_DIR}/llama-vocab.cpp
