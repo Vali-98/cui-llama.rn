@@ -107,6 +107,8 @@ cp ./llama.cpp/src/unicode-data.cpp ./cpp/unicode-data.cpp
 cp ./llama.cpp/src/unicode-data.h ./cpp/unicode-data.h
 cp ./llama.cpp/src/unicode.cpp ./cpp/unicode.cpp
 cp ./llama.cpp/src/unicode.h ./cpp/unicode.h
+cp ./llama.cpp/src/llama-model-saver.h ./cpp/llama-model-saver.h
+cp ./llama.cpp/src/llama-model-saver.cpp ./cpp/llama-model-saver.cpp
 
 # === common ===
 cp ./llama.cpp/common/chat.cpp ./cpp/chat.cpp
@@ -127,6 +129,18 @@ cp ./llama.cpp/common/speculative.h ./cpp/speculative.h
 cp ./llama.cpp/common/minja/chat-template.hpp ./cpp/minja/chat-template.hpp
 cp ./llama.cpp/common/minja/minja.hpp ./cpp/minja/minja.hpp
 
+
+# === mtmd ===
+cp ./llama.cpp/tools/mtmd/mtmd.h ./cpp/tools/mtmd/mtmd.h
+cp ./llama.cpp/tools/mtmd/mtmd.cpp ./cpp/tools/mtmd/mtmd.cpp
+cp ./llama.cpp/tools/mtmd/clip.h ./cpp/tools/mtmd/clip.h
+cp ./llama.cpp/tools/mtmd/clip.cpp ./cpp/tools/mtmd/clip.cpp
+cp ./llama.cpp/tools/mtmd/clip-impl.h ./cpp/tools/mtmd/clip-impl.h
+cp ./llama.cpp/tools/mtmd/mtmd-helper.cpp ./cpp/tools/mtmd/mtmd-helper.cpp
+cp ./llama.cpp/tools/mtmd/mtmd-audio.h ./cpp/tools/mtmd/mtmd-audio.h
+cp ./llama.cpp/tools/mtmd/mtmd-audio.cpp ./cpp/tools/mtmd/mtmd-audio.cpp
+cp ./llama.cpp/tools/mtmd/miniaudio.h ./cpp/tools/mtmd/miniaudio.h
+cp ./llama.cpp/common/stb_image.h ./cpp/tools/mtmd/stb_image.h
 
 # List of files to process
 files_add_lm_prefix=(
@@ -150,6 +164,8 @@ files_add_lm_prefix=(
   "./cpp/llama-kv-cache.cpp"
   "./cpp/llama-model-loader.h"
   "./cpp/llama-model-loader.cpp"
+  "./cpp/llama-model-saver.h"
+  "./cpp/llama-model-saver.cpp"
   "./cpp/llama-model.h"
   "./cpp/llama-model.cpp"
   "./cpp/llama-batch.h"
@@ -230,6 +246,15 @@ files_add_lm_prefix=(
   "./cpp/ggml-cpu/simd-mappings.h"
   "./cpp/ggml-cpu/ops.h"
   "./cpp/ggml-cpu/ops.cpp"
+  # Multimodal files
+  "./cpp/tools/mtmd/mtmd.h"
+  "./cpp/tools/mtmd/mtmd.cpp"
+  "./cpp/tools/mtmd/clip.h"
+  "./cpp/tools/mtmd/clip.cpp"
+  "./cpp/tools/mtmd/clip-impl.h"
+  "./cpp/tools/mtmd/mtmd-helper.cpp"
+  "./cpp/tools/mtmd/mtmd-audio.h"
+  "./cpp/tools/mtmd/mtmd-audio.cpp"
 )
 
 # Loop through each file and run the sed commands

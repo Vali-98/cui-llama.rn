@@ -55,6 +55,26 @@ public class RNLlamaModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
+  public void initMultimodal(double id, final ReadableMap params, final Promise promise) {
+    rnllama.initMultimodal(id, params, promise);
+  }
+
+  @ReactMethod
+  public void isMultimodalEnabled(double id, final Promise promise) {
+    rnllama.isMultimodalEnabled(id, promise);
+  }
+
+  @ReactMethod
+  public void getMultimodalSupport(double id, final Promise promise) {
+    rnllama.getMultimodalSupport(id, promise);
+  }
+
+  @ReactMethod
+  public void releaseMultimodal(double id, final Promise promise) {
+    rnllama.releaseMultimodal(id, promise);
+  }
+
+  @ReactMethod
   public void getFormattedChat(double id, String messages, String chatTemplate, ReadableMap params, Promise promise) {
     rnllama.getFormattedChat(id, messages, chatTemplate, params, promise);
   }
@@ -80,12 +100,12 @@ public class RNLlamaModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
-  public void tokenizeAsync(double id, final String text, final Promise promise) {
+  public void tokenizeAsync(double id, final String text, final ReadableArray image_paths, final Promise promise) {
     rnllama.tokenizeAsync(id, text, promise);
   }
 
   @ReactMethod(isBlockingSynchronousMethod=true)
-  public WritableMap tokenizeSync(double id, final String text) {
+  public WritableMap tokenizeSync(double id, final String text, final ReadableArray image_paths) {
     return rnllama.tokenizeSync(id, text);
   }
 
