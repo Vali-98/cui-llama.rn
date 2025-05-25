@@ -854,11 +854,7 @@ static id<MTLLibrary> lm_ggml_metal_load_library(id<MTLDevice> device, bool use_
     NSBundle * bundle = [NSBundle bundleForClass:[LMGGMLMetalClass class]];
 #endif
 
-#if TARGET_OS_SIMULATOR
-    NSString * path_lib = [bundle pathForResource:@"ggml-llama-sim" ofType:@"metallib"];
-#else
-    NSString * path_lib = [bundle pathForResource:@"ggml-llama" ofType:@"metallib"];
-#endif
+    NSString * path_lib = [bundle pathForResource:@"default" ofType:@"metallib"];
     if (path_lib == nil) {
         // Try to find the resource in the directory where the current binary located.
         NSString * current_binary = [[NSProcessInfo processInfo] arguments][0];

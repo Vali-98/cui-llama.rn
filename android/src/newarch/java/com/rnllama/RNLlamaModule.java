@@ -95,12 +95,12 @@ public class RNLlamaModule extends NativeRNLlamaSpec {
 
   @ReactMethod
   public void tokenizeAsync(double id, final String text, final ReadableArray image_paths, final Promise promise) {
-    rnllama.tokenizeAsync(id, text, promise);
+    rnllama.tokenizeAsync(id, text image_paths, promise);
   }
 
   @ReactMethod(isBlockingSynchronousMethod=true)
   public WritableMap tokenizeSync(double id, final String text, final ReadableArray image_paths) {
-    return rnllama.tokenizeSync(id, text);
+    return rnllama.tokenizeSync(id, text, image_paths);
   }
 
   @ReactMethod

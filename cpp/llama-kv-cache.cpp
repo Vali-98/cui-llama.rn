@@ -1916,6 +1916,8 @@ void llama_kv_cache_recurrent::clear() {
     for (int32_t i = 0; i < (int32_t) size; ++i) {
         cells[i].pos = -1;
         cells[i].seq_id.clear();
+        cells[i].src = -1;
+        cells[i].tail = -1;
     }
     head = 0;
     used = 0;
@@ -2043,6 +2045,7 @@ void llama_kv_cache_recurrent::seq_keep(llama_seq_id seq_id) {
             }
 
             cells[i].pos = -1;
+            cells[i].src = -1;
             cells[i].seq_id.clear();
 
             if (new_head == size){
@@ -2418,7 +2421,7 @@ uint32_t llama_kv_cache_recurrent::cell_max() const {
         }
     }
 
-    return size;
+    return 0;
 }
 
 size_t llama_kv_cache_recurrent::total_size() const {
@@ -2448,269 +2451,6 @@ size_t llama_kv_cache_recurrent::size_v_bytes() const {
     }
 
     return size_v_bytes;
-}
-
-lm_ggml_tensor * llama_kv_cache_unified::build_rope_shift(
-        const llama_cparams & cparams,
-               lm_ggml_context * ctx,
-                lm_ggml_tensor * cur,
-                lm_ggml_tensor * shift,
-                lm_ggml_tensor * factors,
-                      float   freq_base,
-                      float   freq_scale) const {
-    const auto & n_ctx_orig = cparams.n_ctx_orig_yarn;
-
-    const auto & yarn_ext_factor = cparams.yarn_ext_factor;
-    const auto & yarn_beta_fast  = cparams.yarn_beta_fast;
-    const auto & yarn_beta_slow  = cparams.yarn_beta_slow;
-
-    const auto & n_rot     = hparams.n_rot;
-    const auto & rope_type = hparams.rope_type;
-
-    // See llm_build_deepseek2() for why attn_factor has to be scaled for YaRN RoPE to work correctly.
-    // See https://github.com/ggerganov/llama.cpp/discussions/7416 for detailed explanation.
-    const float yarn_attn_factor = model.arch == LLM_ARCH_DEEPSEEK2 ? 1.0f / (1.0f + 0.1f * logf(1.0f / freq_scale)) : cparams.yarn_attn_factor;
-
-    lm_ggml_tensor * tmp;
-
-    if (lm_ggml_is_quantized(cur->type)) {
-        // dequantize to f32 -> RoPE -> quantize back
-        tmp = lm_ggml_cast(ctx, cur, LM_GGML_TYPE_F32);
-
-        tmp = lm_ggml_rope_ext(ctx, tmp,
-                shift, factors, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-                yarn_ext_factor, yarn_attn_factor, yarn_beta_fast, yarn_beta_slow);
-
-        tmp = lm_ggml_cpy(ctx, tmp, cur);
-    } else {
-        // we rotate only the first n_rot dimensions
-        tmp = lm_ggml_rope_ext_inplace(ctx, cur,
-                shift, factors, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-                yarn_ext_factor, yarn_attn_factor, yarn_beta_fast, yarn_beta_slow);
-    }
-
-    return tmp;
-}
-
-class llm_graph_input_k_shift : public llm_graph_input_i {
-public:
-    llm_graph_input_k_shift(const llama_kv_cache_unified * kv_self) : kv_self(kv_self) {}
-    virtual ~llm_graph_input_k_shift() = default;
-
-    void set_input(const llama_ubatch * ubatch) override;
-
-    lm_ggml_tensor * k_shift; // I32 [kv_size]
-
-    const llama_kv_cache_unified * kv_self;
-};
-
-void llm_graph_input_k_shift::set_input(const llama_ubatch * ubatch) {
-    LM_GGML_UNUSED(ubatch);
-
-    if (k_shift) {
-        assert(lm_ggml_backend_buffer_is_host(k_shift->buffer));
-
-        int32_t * data = (int32_t *) k_shift->data;
-
-        for (uint32_t i = 0; i < kv_self->size; ++i) {
-            data[i] = kv_self->cells[i].delta;
-        }
-    }
-}
-
-llm_graph_result_ptr llama_kv_cache_unified::build_graph_shift(
-        const llama_cparams & cparams,
-               lm_ggml_context * ctx,
-                lm_ggml_cgraph * gf) const {
-    auto res = std::make_unique<llm_graph_result>();
-
-    const auto & n_layer = hparams.n_layer;
-
-    const auto & n_embd_head_k = hparams.n_embd_head_k;
-  //const auto & n_embd_head_v = hparams.n_embd_head_v;
-
-    const uint32_t n_ctx_per_seq = cparams.n_ctx / cparams.n_seq_max;
-
-    //LM_GGML_ASSERT(kv_self->size == n_ctx);
-
-    auto inp = std::make_unique<llm_graph_input_k_shift>(this);
-
-    inp->k_shift = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_I32, cparams.n_ctx);
-    lm_ggml_set_input(inp->k_shift);
-
-    for (uint32_t il = 0; il < n_layer; ++il) {
-        const int64_t n_head_kv    = hparams.n_head_kv(il);
-        const int64_t n_embd_k_gqa = hparams.n_embd_k_gqa(il);
-
-        const bool is_swa = hparams.is_swa(il);
-
-        // note: the swa rope params could become part of the cparams in the future
-        //       if we decide to make them configurable, like the non-sliding ones
-        const float freq_base_l  = is_swa ? hparams.rope_freq_base_train_swa  : cparams.rope_freq_base;
-        const float freq_scale_l = is_swa ? hparams.rope_freq_scale_train_swa : cparams.rope_freq_scale;
-
-        lm_ggml_tensor * rope_factors = model.get_rope_factors(n_ctx_per_seq, il);
-
-        lm_ggml_tensor * k =
-            lm_ggml_view_3d(ctx, k_l[il],
-                n_embd_head_k, n_head_kv, size,
-                lm_ggml_row_size(k_l[il]->type, n_embd_head_k),
-                lm_ggml_row_size(k_l[il]->type, n_embd_k_gqa),
-                0);
-
-        lm_ggml_tensor * cur = build_rope_shift(cparams, ctx, k, inp->k_shift, rope_factors, freq_base_l, freq_scale_l);
-
-        lm_ggml_build_forward_expand(gf, cur);
-    }
-
-    res->add_input(std::move(inp));
-
-    return res;
-}
-
-llm_graph_result_ptr llama_kv_cache_unified::build_graph_defrag(
-        const llama_cparams & cparams,
-               lm_ggml_context * ctx,
-                lm_ggml_cgraph * gf) const {
-    auto res = std::make_unique<llm_graph_result>();
-
-    const auto & ids = defrag_info.ids;
-
-#if 0
-    // CPU defrag
-    //
-    // TODO: optimizations are possible:
-    //       - multiple threads
-    //       - avoid copying to the host memory when already there
-    //
-    // likely not worth the effort, as we have lm_ggml_graph based defrag
-    //
-
-    const uint32_t n_embd_k_gqa = hparams.n_embd_k_gqa();
-    const uint32_t n_embd_v_gqa = hparams.n_embd_v_gqa();
-
-    const uint32_t kv_size = size;
-
-    std::vector<uint8_t> buf_k;
-    std::vector<uint8_t> buf_v;
-
-    for (uint32_t il = 0; il < n_layer; ++il) {
-        const size_t k_size_row = lm_ggml_row_size(k_l[il]->type, n_embd_k_gqa);
-        const size_t k_size     = lm_ggml_row_size(k_l[il]->type, n_embd_k_gqa*kv_size);
-
-        const size_t v_size_el = lm_ggml_type_size(v_l[il]->type);
-        const size_t v_size    = lm_ggml_row_size (v_l[il]->type, n_embd_v_gqa*kv_size);
-
-        buf_k.resize(k_size);
-        buf_v.resize(v_size);
-
-        lm_ggml_backend_tensor_get(k_l[il], buf_k.data(), 0, buf_k.size());
-        lm_ggml_backend_tensor_get(v_l[il], buf_v.data(), 0, buf_v.size());
-
-        // batch move [i, i+nm) to [id, id+nm)
-        // note: cells can move only to a lower index
-        for (uint32_t i = 0; i < n_kv; ++i) {
-            const uint32_t id = ids[i];
-
-            if (i == id || id == n_kv) {
-                continue;
-            }
-
-            uint32_t nm = 1;
-
-            while (i + nm < n_kv && ids[i + nm] == id + nm) {
-                nm++;
-            }
-
-            // move keys
-            {
-                const int64_t os =  i*k_size_row;
-                const int64_t od = id*k_size_row;
-
-                memcpy(buf_k.data() + od, buf_k.data() + os, nm*k_size_row);
-            }
-
-            // move values (note: they are transposed)
-            {
-                const int64_t os =  i;
-                const int64_t od = id;
-
-                for (uint32_t j = 0; j < n_embd_v_gqa; ++j) {
-                    memcpy(buf_v.data() + (od + j*kv_size)*v_size_el, buf_v.data() + (os + j*kv_size)*v_size_el, nm*v_size_el);
-                }
-            }
-
-            i += nm - 1;
-        }
-
-        lm_ggml_backend_tensor_set(k_l[il], buf_k.data(), 0, buf_k.size());
-        lm_ggml_backend_tensor_set(v_l[il], buf_v.data(), 0, buf_v.size());
-    }
-#else
-    for (uint32_t i = 0; i < ids.size(); ++i) {
-        const uint32_t id = ids[i];
-
-        if (i == id || id == ids.size()) {
-            continue;
-        }
-
-        uint32_t nm = 1;
-
-        while (i + nm < ids.size() && ids[i + nm] == id + nm) {
-            nm++;
-        }
-
-        for (uint32_t il = 0; il < hparams.n_layer; ++il) { // NOLINT
-            const int64_t n_embd_k_gqa = hparams.n_embd_k_gqa(il);
-            const int64_t n_embd_v_gqa = hparams.n_embd_v_gqa(il);
-
-            lm_ggml_tensor * view_k_src = lm_ggml_view_2d(ctx, k_l[il],
-                    n_embd_k_gqa, nm,
-                    lm_ggml_row_size(k_l[il]->type, n_embd_k_gqa),
-                    lm_ggml_row_size(k_l[il]->type, n_embd_k_gqa*i));
-
-            lm_ggml_tensor * view_k_dst = lm_ggml_view_2d(ctx, k_l[il],
-                    n_embd_k_gqa, nm,
-                    lm_ggml_row_size(k_l[il]->type, n_embd_k_gqa),
-                    lm_ggml_row_size(k_l[il]->type, n_embd_k_gqa*id));
-
-            lm_ggml_tensor * view_v_src;
-            lm_ggml_tensor * view_v_dst;
-
-            if (cparams.flash_attn) {
-                // NOTE: the V cache is not transposed when using flash attention
-                view_v_src = lm_ggml_view_2d(ctx, v_l[il],
-                        n_embd_v_gqa, nm,
-                        lm_ggml_row_size(v_l[il]->type, n_embd_v_gqa),
-                        lm_ggml_row_size(v_l[il]->type, n_embd_v_gqa*i));
-
-                view_v_dst = lm_ggml_view_2d(ctx, v_l[il],
-                        n_embd_v_gqa, nm,
-                        lm_ggml_row_size(v_l[il]->type, n_embd_v_gqa),
-                        lm_ggml_row_size(v_l[il]->type, n_embd_v_gqa*id));
-            } else {
-                view_v_src = lm_ggml_view_2d(ctx, v_l[il],
-                        nm, n_embd_v_gqa,
-                        lm_ggml_row_size(v_l[il]->type, size),
-                        lm_ggml_row_size(v_l[il]->type, i));
-
-                view_v_dst = lm_ggml_view_2d(ctx, v_l[il],
-                        nm, n_embd_v_gqa,
-                        lm_ggml_row_size(v_l[il]->type, size),
-                        lm_ggml_row_size(v_l[il]->type, id));
-            }
-
-            lm_ggml_build_forward_expand(gf, lm_ggml_cpy(ctx, view_k_src, view_k_dst));
-            lm_ggml_build_forward_expand(gf, lm_ggml_cpy(ctx, view_v_src, view_v_dst));
-        }
-
-        i += nm - 1;
-    }
-
-    //LLAMA_LOG_INFO("gf->n_nodes = %d\n", gf->n_nodes);
-#endif
-
-    return res;
 }
 
 void llama_kv_cache_recurrent::state_write(llama_io_write_i & io, llama_seq_id seq_id) const {

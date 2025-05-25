@@ -941,12 +941,7 @@ export default function App() {
         >
           <Text>RELEASE</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={{flex: 1, margin:4, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16}}
-          onPress={handleBench}
-        >
-          <Text>BENCH</Text>
-        </TouchableOpacity>
+     
       </View>
     </SafeAreaProvider>
   )

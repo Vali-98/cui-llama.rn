@@ -322,7 +322,7 @@ public class RNLlama implements LifecycleEventListener {
     tasks.put(task, "stopCompletion-" + contextId);
   }
 
-  public void tokenizeAsync(double id, final String text, , final ReadableArray image_paths, final Promise promise) {
+  public void tokenizeAsync(double id, final String text, final ReadableArray image_paths, final Promise promise) {
     final int contextId = (int) id;
     AsyncTask task = new AsyncTask<Void, Void, WritableMap>() {
       private Exception exception;
