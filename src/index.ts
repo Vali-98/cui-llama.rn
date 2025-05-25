@@ -31,6 +31,11 @@ export type RNLlamaMessagePart = {
   image_url?: {
     url?: string
   }
+  input_audio?: {
+    format: string
+    data?: string
+    url?: string
+  }
 }
 
 export type RNLlamaOAICompatibleMessage = {
@@ -142,7 +147,7 @@ export type CompletionBaseParams = {
   parallel_tool_calls?: object
   tool_choice?: string
   response_format?: CompletionResponseFormat
-  image_paths?: string | string[]
+  media_paths?: string | string[]
 }
 export type CompletionParams = Omit<
   NativeCompletionParams,
@@ -225,7 +230,7 @@ export class LlamaContext {
       tool_choice?: string
     },
   ): Promise<FormattedChatResult | JinjaFormattedChatResult> {
-    const imagePaths: string[] = []
+    const mediaPaths: string[] = []
     const chat = messages.map((msg) => {
       if (Array.isArray(msg.content)) {
         const content = msg.content.map((part) => {
@@ -233,7 +238,25 @@ export class LlamaContext {
           if (part.type === 'image_url') {
             let path = part.image_url?.url || ''
             if (path?.startsWith('file://')) path = path.slice(7)
-            imagePaths.push(path)
+            mediaPaths.push(path)
+            return {
+              type: 'text',
+              text: RNLLAMA_MTMD_DEFAULT_MEDIA_MARKER,
+            }
+          } else if (part.type === 'input_audio') {
+            const { input_audio: audio } = part
+            if (!audio) throw new Error('input_audio is required')
+
+            const { format } = audio
+            if (format != 'wav' && format != 'mp3') {
+              throw new Error(`Unsupported audio format: ${format}`)
+            }
+            if (audio.url) {
+              const path = audio.url.replace(/file:\/\//, '')
+              mediaPaths.push(path)
+            } else if (audio.data) {
+              mediaPaths.push(audio.data)
+            }
             return {
               type: 'text',
               text: RNLLAMA_MTMD_DEFAULT_MEDIA_MARKER,
@@ -273,14 +296,14 @@ export class LlamaContext {
       return {
         type: 'llama-chat',
         prompt: result as string,
-        has_image: imagePaths.length > 0,
-        image_paths: imagePaths,
+        has_media: mediaPaths.length > 0,
+        media_paths: mediaPaths,
       }
     }
     const jinjaResult = result as JinjaFormattedChatResult
     jinjaResult.type = 'jinja'
-    jinjaResult.has_image = imagePaths.length > 0
-    jinjaResult.image_paths = imagePaths
+    jinjaResult.has_media = mediaPaths.length > 0
+    jinjaResult.media_paths = mediaPaths
     return jinjaResult
   }
 
@@ -290,7 +313,7 @@ export class LlamaContext {
    * @param callback Optional callback for token-by-token streaming
    * @returns Promise resolving to the completion result
    *
-   * Note: For multimodal support, you can include an image_paths parameter.
+   * Note: For multimodal support, you can include an media_paths parameter.
    * This will process the images and add them to the context before generating text.
    * Multimodal support must be enabled via initMultimodal() first.
    */
@@ -332,23 +355,23 @@ export class LlamaContext {
           if (!nativeParams.stop) nativeParams.stop = []
           nativeParams.stop.push(...jinjaResult.additional_stops)
         }
-        if (jinjaResult.has_image) {
-          nativeParams.image_paths = jinjaResult.image_paths
+        if (jinjaResult.has_media) {
+          nativeParams.media_paths = jinjaResult.media_paths
         }
       } else if (formattedResult.type === 'llama-chat') {
         const llamaChatResult = formattedResult as FormattedChatResult
         nativeParams.prompt = llamaChatResult.prompt || ''
-        if (llamaChatResult.has_image) {
-          nativeParams.image_paths = llamaChatResult.image_paths
+        if (llamaChatResult.has_media) {
+          nativeParams.media_paths = llamaChatResult.media_paths
         }
       }
     } else {
       nativeParams.prompt = params.prompt || ''
     }
 
-    // If image_paths were explicitly provided or extracted from messages, use them
-    if (!nativeParams.image_paths && params.image_paths) {
-      nativeParams.image_paths = params.image_paths
+    // If media_paths were explicitly provided or extracted from messages, use them
+    if (!nativeParams.media_paths && params.media_paths) {
+      nativeParams.media_paths = params.media_paths
     }
 
     if (nativeParams.response_format && !nativeParams.grammar) {
@@ -387,18 +410,29 @@ export class LlamaContext {
   /**
    * Tokenize text or text with images
    * @param text Text to tokenize
-   * @param params.image_paths Array of image paths to tokenize (if multimodal is enabled)
+   * @param params.media_paths Array of image paths to tokenize (if multimodal is enabled)
    * @returns Promise resolving to the tokenize result
    */
-  tokenize(
+  tokenizeAsync(
     text: string,
     {
-      image_paths: imagePaths,
+      media_paths: mediaPaths,
     }: {
-      image_paths?: string[]
+      media_paths?: string[]
     } = {},
   ): Promise<NativeTokenizeResult> {
-    return RNLlama.tokenize(this.id, text, imagePaths)
+    return RNLlama.tokenizeAsync(this.id, text, mediaPaths)
+  }
+
+  tokenizeSync(
+    text: string,
+    {
+      media_paths: mediaPaths,
+    }: {
+      media_paths?: string[]
+    } = {},
+  ): NativeTokenizeResult {
+    return RNLlama.tokenizeSync(this.id, text, mediaPaths)
   }
 
   detokenize(tokens: number[]): Promise<string> {
@@ -481,6 +515,17 @@ export class LlamaContext {
    */
   async isMultimodalEnabled(): Promise<boolean> {
     return await RNLlama.isMultimodalEnabled(this.id)
+  }
+
+  /**
+   * Check multimodal support
+   * @returns Promise resolving to an object with vision and audio support
+   */
+  async getMultimodalSupport(): Promise<{
+    vision: boolean
+    audio: boolean
+  }> {
+    return await RNLlama.getMultimodalSupport(this.id)
   }
 
   /**
