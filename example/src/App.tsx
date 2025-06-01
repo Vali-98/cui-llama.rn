@@ -176,7 +176,7 @@ export default function App() {
         model: file.uri,
         use_mlock: true,
         lora_list: loraFile ? [{ path: loraFile.uri, scaled: 1.0 }] : undefined, // Or lora: loraFile?.uri,
-
+        n_ctx: 8192,
         // If use deepseek r1 distill
         reasoning_format: 'deepseek',
 

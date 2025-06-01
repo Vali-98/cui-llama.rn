@@ -112,15 +112,7 @@ public class LlamaContext {
       throw new IllegalArgumentException("File is not in GGUF format");
     }
 
-    if ( modelName.startsWith("content://")) {
-    Uri uri = Uri.parse(modelName);
-      try {
-        ParcelFileDescriptor pfd = reactContext.getApplicationContext().getContentResolver().openFileDescriptor(uri, "r");
-        modelName = "" + pfd.getFd();
-      } catch (Exception e) {
-        Log.e(NAME, "Failed to convert to FD!");
-      }
-    }
+    modelName = getContentFileDescriptor(modelName);
     
     // Check if file has GGUF magic numbers
     this.id = id;
@@ -469,6 +461,18 @@ public class LlamaContext {
 
   public void release() {
     freeContext(context);
+  }
+
+  private String getContentFileDescriptor(String modelName) {
+    if (!modelName.startsWith("content://")) return modelName;  
+    Uri uri = Uri.parse(modelName);
+    try {
+      ParcelFileDescriptor pfd = reactContext.getApplicationContext().getContentResolver().openFileDescriptor(uri, "r");
+      return "" + pfd.getFd();
+    } catch (Exception e) {
+      Log.e(NAME, "Failed to convert to FD!");
+    }
+    return modelName;
   }
 
   static {

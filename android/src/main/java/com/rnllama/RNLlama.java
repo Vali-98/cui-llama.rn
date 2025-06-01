@@ -5,6 +5,8 @@ import android.util.Log;
 import android.os.Build;
 import android.os.Handler;
 import android.os.AsyncTask;
+import android.os.ParcelFileDescriptor;
+import android.net.Uri;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -14,6 +16,7 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.Arguments;
+
 
 import java.util.HashMap;
 import java.util.Random;
@@ -68,10 +71,24 @@ public class RNLlama implements LifecycleEventListener {
     promise.resolve(null);
   }
 
+  private String getContentFileDescriptor(String modelName) {
+    if (!modelName.startsWith("content://")) return modelName;  
+    Uri uri = Uri.parse(modelName);
+    try {
+      ParcelFileDescriptor pfd = reactContext.getApplicationContext().getContentResolver().openFileDescriptor(uri, "r");
+      return "" + pfd.getFd();
+    } catch (Exception e) {
+      Log.e(NAME, "Failed to convert to FD!");
+    }
+    return modelName;
+  }
+
   public void modelInfo(final String model, final ReadableArray skip, final Promise promise) {
+    final String modelPath = getContentFileDescriptor(model);
+
     new AsyncTask<Void, Void, WritableMap>() {
       private Exception exception;
-
+  
       @Override
       protected WritableMap doInBackground(Void... voids) {
         try {
@@ -79,7 +96,7 @@ public class RNLlama implements LifecycleEventListener {
           for (int i = 0; i < skip.size(); i++) {
             skipArray[i] = skip.getString(i);
           }
-          return LlamaContext.modelInfo(model, skipArray);
+          return LlamaContext.modelInfo(modelPath, skipArray);
         } catch (Exception e) {
           exception = e;
         }
