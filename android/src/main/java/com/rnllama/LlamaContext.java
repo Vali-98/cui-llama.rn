@@ -443,9 +443,20 @@ public class LlamaContext {
       throw new IllegalArgumentException("mmproj_path is empty");
     }
     File file = new File(mmprojPath);
-    if (!file.exists()) {
+    if (!mmprojPath.startsWith("content") && !file.exists()) {
       throw new IllegalArgumentException("mmproj file does not exist: " + mmprojPath);
     }
+
+    if (mmprojPath.startsWith("content://")) {
+      Uri uri = Uri.parse(mmprojPath);
+      try {
+        ParcelFileDescriptor pfd = this.reactContext.getApplicationContext().getContentResolver().openFileDescriptor(uri, "r");
+        mmprojPath =  "" + pfd.getFd();
+      } catch (Exception e) {
+        Log.e(NAME, "Failed to convert to FD!");
+      }
+    }
+
     return initMultimodal(this.context, mmprojPath, mmprojUseGpu);
   }
 
