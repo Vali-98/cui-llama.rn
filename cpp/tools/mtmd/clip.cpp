@@ -31,6 +31,12 @@
 #include <numeric>
 #include <functional>
 
+// rnllama additions
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 struct clip_logger_state g_logger_state = {LM_GGML_LOG_LEVEL_CONT, clip_log_callback_default, NULL};
 
 enum ffn_op_type {
@@ -2486,6 +2492,55 @@ struct clip_model_loader {
         {
             std::vector<uint8_t> read_buf;
 
+            // rnllama addition - we support usage of file descriptors
+            // Check if fname is an FD number (no '/' characters)
+            bool is_fd = (fname.find('/') == std::string::npos);
+
+            if (is_fd) {
+                // Routine for handling FD
+                int fd = -1;
+                try {
+                    fd = std::stoi(fname); // Convert string to integer FD
+                } catch (const std::invalid_argument& e) {
+                    throw std::runtime_error(string_format("%s: invalid FD number provided: %s\n", __func__, fname.c_str()));
+                } catch (const std::out_of_range& e) {
+                    throw std::runtime_error(string_format("%s: FD number out of range: %s\n", __func__, fname.c_str()));
+                }
+
+                lm_ggml_backend_buffer_type_t buft = lm_ggml_backend_get_default_buffer_type(ctx_clip.backend);
+                ctx_clip.buf.reset(lm_ggml_backend_alloc_ctx_tensors_from_buft(ctx_clip.ctx_data.get(), buft));
+                lm_ggml_backend_buffer_set_usage(ctx_clip.buf.get(), LM_GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+
+                for (auto & t : tensors_to_load) {
+                    lm_ggml_tensor * cur = lm_ggml_get_tensor(ctx_clip.ctx_data.get(), t->name);
+                    const size_t offset = tensor_offset[t->name];
+
+                    if (lseek(fd, offset, SEEK_SET) == (off_t)-1) {
+                        throw std::runtime_error(string_format("%s: failed to seek for tensor %s (FD %d): %s\n", __func__, t->name, fd, strerror(errno)));
+                    }
+
+                    size_t num_bytes = lm_ggml_nbytes(cur);
+                    if (lm_ggml_backend_buft_is_host(buft)) {
+                        // for the CPU and Metal backend, we can read directly into the tensor
+                        ssize_t bytes_read = read(fd, reinterpret_cast<char *>(cur->data), num_bytes);
+                        if (bytes_read == -1 || static_cast<size_t>(bytes_read) != num_bytes) {
+                            throw std::runtime_error(string_format("%s: failed to read for tensor %s (FD %d): %s\n", __func__, t->name, fd, strerror(errno)));
+                        }
+                    } else {
+                        // read into a temporary buffer first, then copy to device memory
+                        read_buf.resize(num_bytes);
+                        ssize_t bytes_read = read(fd, reinterpret_cast<char *>(read_buf.data()), num_bytes);
+                        if (bytes_read == -1 || static_cast<size_t>(bytes_read) != num_bytes) {
+                            throw std::runtime_error(string_format("%s: failed to read for tensor %s (FD %d): %s\n", __func__, t->name, fd, strerror(errno)));
+                        }
+                        lm_ggml_backend_tensor_set(cur, read_buf.data(), 0, num_bytes);
+                    }
+                }
+                // Assuming the FD is managed externally and shouldn't be closed here.
+                LOG_DBG("%s: loaded %zu tensors from FD %s\n", __func__, tensors_to_load.size(), fname.c_str());
+
+            } else {
+            // The original ifstream routine for file paths
             auto fin = std::ifstream(fname, std::ios::binary);
             if (!fin) {
                 throw std::runtime_error(string_format("%s: failed to open %s\n", __func__, fname.c_str()));
@@ -2516,6 +2571,7 @@ struct clip_model_loader {
             fin.close();
 
             LOG_DBG("%s: loaded %zu tensors from %s\n", __func__, tensors_to_load.size(), fname.c_str());
+            }
         }
     }
 
