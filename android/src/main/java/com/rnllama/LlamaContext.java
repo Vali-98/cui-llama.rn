@@ -69,7 +69,11 @@ public class LlamaContext {
     try {
       if (filepath.startsWith("content")) {
         Uri uri = Uri.parse(filepath);
-        reactContext.getApplicationContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+          reactContext.getApplicationContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            Log.w(NAME, "Persistable permission not granted for URI: " + uri);
+        }
         fis = reactContext.getApplicationContext().getContentResolver().openInputStream(uri);
       } else {
         fis = new FileInputStream(filepath);
@@ -107,7 +111,11 @@ public class LlamaContext {
     }
 
     String modelName = params.getString("model");
-    
+
+    if(!isGGUF(modelName, reactContext)) {
+      throw new IllegalArgumentException("File is not in GGUF format");
+    }
+
     if (modelName.startsWith("content://")) {
       Uri uri = Uri.parse(modelName);
       try {
@@ -117,7 +125,6 @@ public class LlamaContext {
         Log.e(NAME, "Failed to convert to FD!");
       }
     }
-    
 
     // Check if file has GGUF magic numbers
     this.id = id;
@@ -442,6 +449,11 @@ public class LlamaContext {
     if (mmprojPath == null || mmprojPath.isEmpty()) {
       throw new IllegalArgumentException("mmproj_path is empty");
     }
+
+    if(!isGGUF(mmprojPath, this.reactContext)) {
+      throw new IllegalArgumentException("File is not in GGUF format");
+    }
+
     File file = new File(mmprojPath);
     if (!mmprojPath.startsWith("content") && !file.exists()) {
       throw new IllegalArgumentException("mmproj file does not exist: " + mmprojPath);

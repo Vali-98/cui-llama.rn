@@ -7,6 +7,7 @@ import android.os.Handler;
 import android.os.AsyncTask;
 import android.os.ParcelFileDescriptor;
 import android.net.Uri;
+import android.content.Intent;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -85,6 +86,15 @@ public class RNLlama implements LifecycleEventListener {
 
   public void modelInfo(final String model, final ReadableArray skip, final Promise promise) {
     final String modelPath = getContentFileDescriptor(model);
+    
+    if (model.startsWith("content")) {
+        Uri uri = Uri.parse(model);
+        try {
+          reactContext.getApplicationContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            Log.w(NAME, "Persistable permission not granted for URI: " + uri);
+        }
+    }
 
     new AsyncTask<Void, Void, WritableMap>() {
       private Exception exception;
