@@ -134,8 +134,6 @@ public class LlamaContext {
       modelName,
       // String chat_template,
       params.hasKey("chat_template") ? params.getString("chat_template") : "",
-      // String reasoning_format,
-      params.hasKey("reasoning_format") ? params.getString("reasoning_format") : "none",
       // boolean embedding,
       params.hasKey("embedding") ? params.getBoolean("embedding") : false,
       // int embd_normalize,
@@ -207,6 +205,7 @@ public class LlamaContext {
     String tools = params.hasKey("tools") ? params.getString("tools") : "";
     Boolean parallelToolCalls = params.hasKey("parallel_tool_calls") ? params.getBoolean("parallel_tool_calls") : false;
     String toolChoice = params.hasKey("tool_choice") ? params.getString("tool_choice") : "";
+    Boolean enableThinking = params.hasKey("enable_thinking") ? params.getBoolean("enable_thinking") : false;
     return getFormattedChatWithJinja(
       this.context,
       messages,
@@ -214,7 +213,8 @@ public class LlamaContext {
       jsonSchema,
       tools,
       parallelToolCalls,
-      toolChoice
+      toolChoice,
+      enableThinking
     );
   }
 
@@ -303,12 +303,25 @@ public class LlamaContext {
       }
     }
 
+    int[] guide_tokens = null;
+    if (params.hasKey("guide_tokens")) {
+      ReadableArray guide_tokens_array = params.getArray("guide_tokens");
+      guide_tokens = new int[guide_tokens_array.size()];
+      for (int i = 0; i < guide_tokens_array.size(); i++) {
+        guide_tokens[i] = (int) guide_tokens_array.getDouble(i);
+      }
+    }
+
     WritableMap result = doCompletion(
       this.context,
       // String prompt,
       params.getString("prompt"),
+      // int[] guide_tokens,
+      guide_tokens,
       // int chat_format,
       params.hasKey("chat_format") ? params.getInt("chat_format") : 0,
+      // String reasoning_format,
+      params.hasKey("reasoning_format") ? params.getString("reasoning_format") : "none",
       // String grammar,
       params.hasKey("grammar") ? params.getString("grammar") : "",
       // String json_schema,
@@ -319,6 +332,8 @@ public class LlamaContext {
       params.hasKey("grammar_triggers") ? params.getArray("grammar_triggers") : null,
       // ReadableArray preserved_tokens,
       params.hasKey("preserved_tokens") ? params.getArray("preserved_tokens") : null,
+      // boolean thinking_forced_open,
+      params.hasKey("thinking_forced_open") ? params.getBoolean("thinking_forced_open") : false,
       // float temperature,
       params.hasKey("temperature") ? (float) params.getDouble("temperature") : 0.7f,
       // int n_threads,
@@ -423,6 +438,27 @@ public class LlamaContext {
     return result;
   }
 
+  public WritableArray getRerank(String query, ReadableArray documents, ReadableMap params) {
+    if (isEmbeddingEnabled(this.context) == false) {
+      throw new IllegalStateException("Embedding is not enabled but required for reranking");
+    }
+
+    // Convert ReadableArray to Java string array
+    String[] documentsArray = new String[documents.size()];
+    for (int i = 0; i < documents.size(); i++) {
+      documentsArray[i] = documents.getString(i);
+    }
+
+    WritableArray result = rerank(
+      this.context,
+      query,
+      documentsArray,
+      // int normalize,
+      params.hasKey("normalize") ? params.getInt("normalize") : -1
+    );
+    return result;
+  }
+
   public String bench(int pp, int tg, int pl, int nr) {
     return bench(this.context, pp, tg, pl, nr);
   }
@@ -485,6 +521,34 @@ public class LlamaContext {
 
   public void releaseMultimodal() {
     releaseMultimodal(this.context);
+  }
+
+  public boolean initVocoder(String vocoderModelPath) {
+    return initVocoder(this.context, vocoderModelPath);
+  }
+
+  public boolean isVocoderEnabled() {
+    return isVocoderEnabled(this.context);
+  }
+
+  public String getFormattedAudioCompletion(String speakerJsonStr, String textToSpeak) {
+    return getFormattedAudioCompletion(this.context, speakerJsonStr, textToSpeak);
+  }
+
+  public WritableArray getAudioCompletionGuideTokens(String textToSpeak) {
+    return getAudioCompletionGuideTokens(this.context, textToSpeak);
+  }
+
+  public WritableArray decodeAudioTokens(ReadableArray tokens) {
+    int[] toks = new int[tokens.size()];
+    for (int i = 0; i < tokens.size(); i++) {
+      toks[i] = (int) tokens.getDouble(i);
+    }
+    return decodeAudioTokens(this.context, toks);
+  }
+
+  public void releaseVocoder() {
+    releaseVocoder(this.context);
   }
 
   public void release() {
@@ -588,7 +652,6 @@ public class LlamaContext {
   protected static native long initContext(
     String model_path,
     String chat_template,
-    String reasoning_format,
     boolean embedding,
     int embd_normalize,
     int n_ctx,
@@ -625,7 +688,8 @@ public class LlamaContext {
     String jsonSchema,
     String tools,
     boolean parallelToolCalls,
-    String toolChoice
+    String toolChoice,
+    boolean enableThinking
   );
   protected static native String getFormattedChat(
     long contextPtr,
@@ -644,12 +708,15 @@ public class LlamaContext {
   protected static native WritableMap doCompletion(
     long context_ptr,
     String prompt,
+    int[] guide_tokens,
     int chat_format,
+    String reasoning_format,
     String grammar,
     String json_schema,
     boolean grammar_lazy,
     ReadableArray grammar_triggers,
     ReadableArray preserved_tokens,
+    boolean thinking_forced_open,
     float temperature,
     int n_threads,
     int n_predict,
@@ -690,6 +757,7 @@ public class LlamaContext {
     String text,
     int embd_normalize
   );
+  protected static native WritableArray rerank(long contextPtr, String query, String[] documents, int normalize);
   protected static native String bench(long contextPtr, int pp, int tg, int pl, int nr);
   protected static native int applyLoraAdapters(long contextPtr, ReadableArray loraAdapters);
   protected static native void removeLoraAdapters(long contextPtr);
@@ -698,4 +766,10 @@ public class LlamaContext {
   protected static native void setupLog(NativeLogCallback logCallback);
   protected static native void unsetLog();
   protected static native void releaseMultimodal(long contextPtr);
+  protected static native boolean isVocoderEnabled(long contextPtr);
+  protected static native String getFormattedAudioCompletion(long contextPtr, String speakerJsonStr, String textToSpeak);
+  protected static native WritableArray getAudioCompletionGuideTokens(long contextPtr, String textToSpeak);
+  protected static native WritableArray decodeAudioTokens(long contextPtr, int[] tokens);
+  protected static native boolean initVocoder(long contextPtr, String vocoderModelPath);
+  protected static native void releaseVocoder(long contextPtr);
 }

@@ -12,8 +12,6 @@ export type NativeContextParams = {
    */
   chat_template?: string
 
-  reasoning_format?: string
-
   is_model_asset?: boolean
   use_progress_callback?: boolean
 
@@ -82,6 +80,10 @@ export type NativeCompletionParams = {
   prompt: string
   n_threads?: number
   /**
+   * Enable Jinja. Default: true if supported by the model
+   */
+  jinja?: boolean
+  /**
    * JSON schema for convert to grammar for structured JSON output.
    * It will be override by grammar if both are set.
    */
@@ -95,6 +97,14 @@ export type NativeCompletionParams = {
    */
   grammar_lazy?: boolean
   /**
+   * Enable thinking if jinja is enabled. Default: true
+   */
+  enable_thinking?: boolean
+  /**
+   * Force thinking to be open. Default: false
+   */
+  thinking_forced_open?: boolean
+  /**
    * Lazy grammar triggers. Default: []
    */
   grammar_triggers?: Array<{
@@ -104,6 +114,7 @@ export type NativeCompletionParams = {
   }>
   preserved_tokens?: Array<string>
   chat_format?: number
+  reasoning_format?: string
   /**
    * Path to an image file to process before generating text.
    * When provided, the image will be processed and added to the context.
@@ -225,6 +236,13 @@ export type NativeCompletionParams = {
    */
   seed?: number
 
+  /**
+   * Guide tokens for the completion.
+   * Help prevent hallucinations by forcing the TTS to use the correct words.
+   * Default: `[]`
+   */
+  guide_tokens?: Array<number>
+
   emit_partial_completion: boolean
 }
 
@@ -285,6 +303,7 @@ export type NativeCompletionResult = {
   timings: NativeCompletionResultTimings
 
   completion_probabilities?: Array<NativeCompletionTokenProb>
+  audio_tokens?: Array<number>
 }
 
 export type NativeTokenizeResult = {
@@ -390,6 +409,7 @@ export type JinjaFormattedChatResult = FormattedChatResult & {
     value: string
     token: number
   }>
+  thinking_forced_open?: boolean
   preserved_tokens?: Array<string>
   additional_stops?: Array<string>
 }
@@ -398,6 +418,15 @@ export type NativeImageProcessingResult = {
   success: boolean
   prompt: string
   error?: string
+}
+
+export type NativeRerankParams = {
+  normalize?: number
+}
+
+export type NativeRerankResult = {
+  score: number
+  index: number
 }
 
 export interface Spec extends TurboModule {
@@ -420,6 +449,7 @@ export interface Spec extends TurboModule {
       tools?: string
       parallel_tool_calls?: string
       tool_choice?: string
+      enable_thinking?: boolean
     },
   ): Promise<JinjaFormattedChatResult | string>
   loadSession(
@@ -445,6 +475,12 @@ export interface Spec extends TurboModule {
     text: string,
     params: NativeEmbeddingParams,
   ): Promise<NativeEmbeddingResult>
+  rerank(
+    contextId: number,
+    query: string,
+    documents: Array<string>,
+    params?: NativeRerankParams,
+  ): Promise<Array<NativeRerankResult>>
   bench(
     contextId: number,
     pp: number,
@@ -485,6 +521,14 @@ export interface Spec extends TurboModule {
   releaseMultimodal(
     contextId: number,
   ): Promise<void>
+
+  // TTS methods
+  initVocoder(contextId: number, vocoderModelPath: string): Promise<boolean>
+  isVocoderEnabled(contextId: number): Promise<boolean>
+  getFormattedAudioCompletion(contextId: number, speakerJsonStr: string, textToSpeak: string): Promise<string>
+  getAudioCompletionGuideTokens(contextId: number, textToSpeak: string): Promise<Array<number>>
+  decodeAudioTokens(contextId: number, tokens: number[]): Promise<Array<number>>
+  releaseVocoder(contextId: number): Promise<void>
 
   releaseContext(contextId: number): Promise<void>
 

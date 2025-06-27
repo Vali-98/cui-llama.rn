@@ -90,13 +90,6 @@
         NSLog(@"chatTemplate: %@", chatTemplate);
     }
 
-    NSString *reasoningFormat = params[@"reasoning_format"];
-    if (reasoningFormat && [reasoningFormat isEqualToString:@"deepseek"]) {
-        defaultParams.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-    } else {
-        defaultParams.reasoning_format = COMMON_REASONING_FORMAT_NONE;
-    }
-
     if (params[@"n_ctx"]) defaultParams.n_ctx = [params[@"n_ctx"] intValue];
     if (params[@"use_mlock"]) defaultParams.use_mlock = [params[@"use_mlock"]boolValue];
 
@@ -362,6 +355,7 @@
     withTools:(NSString *)tools
     withParallelToolCalls:(BOOL)parallelToolCalls
     withToolChoice:(NSString *)toolChoice
+    withEnableThinking:(BOOL)enableThinking
 {
     auto tmpl_str = chatTemplate == nil ? "" : [chatTemplate UTF8String];
 
@@ -372,7 +366,8 @@
         jsonSchema == nil ? "" : [jsonSchema UTF8String],
         tools == nil ? "" : [tools UTF8String],
         parallelToolCalls,
-        toolChoice == nil ? "" : [toolChoice UTF8String]
+        toolChoice == nil ? "" : [toolChoice UTF8String],
+        enableThinking
     );
     result[@"prompt"] = [NSString stringWithUTF8String:chatParams.prompt.c_str()];
     result[@"chat_format"] = @(static_cast<int>(chatParams.format));
@@ -386,6 +381,7 @@
             @"token": @(trigger.token),
         }];
     }
+    result[@"thinking_forced_open"] = @(chatParams.thinking_forced_open);
     result[@"grammar_triggers"] = grammar_triggers;
     NSMutableArray *preserved_tokens = [[NSMutableArray alloc] init];
     for (const auto & token : chatParams.preserved_tokens) {
@@ -581,6 +577,16 @@
         }
     }
 
+    if (params[@"guide_tokens"] && [params[@"guide_tokens"] isKindOfClass:[NSArray class]]) {
+        NSArray *guide_tokens_array = params[@"guide_tokens"];
+        std::vector<llama_token> guide_tokens;
+        guide_tokens.reserve([guide_tokens_array count]);
+        for (NSNumber *token_num in guide_tokens_array) {
+            guide_tokens.push_back([token_num intValue]);
+        }
+        llama->setGuideTokens(guide_tokens);
+    }
+
     if (!llama->initSampling()) {
         @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to initialize sampling" userInfo:nil];
     }
@@ -602,6 +608,9 @@
             llama->loadPrompt({});
         }
     } catch (const std::exception &e) {
+        llama->endCompletion();
+        @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+    } catch (const std::runtime_error& e) {
         llama->endCompletion();
         @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
     }
@@ -680,7 +689,20 @@
     if (!llama->is_interrupted) {
         try {
             auto chat_format = params[@"chat_format"] ? [params[@"chat_format"] intValue] : COMMON_CHAT_FORMAT_CONTENT_ONLY;
-            common_chat_msg message = common_chat_parse(llama->generated_text, static_cast<common_chat_format>(chat_format));
+            common_chat_syntax chat_syntax;
+            chat_syntax.format = static_cast<common_chat_format>(chat_format);
+
+            NSString *reasoningFormat = params[@"reasoning_format"];
+            if (reasoningFormat && [reasoningFormat isEqualToString:@"deepseek"]) {
+                chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+            } else if (reasoningFormat && [reasoningFormat isEqualToString:@"deepseek-legacy"]) {
+                chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK_LEGACY;
+            } else {
+                chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+            }
+            chat_syntax.thinking_forced_open = [params[@"thinking_forced_open"] boolValue];
+
+            common_chat_msg message = common_chat_parse(llama->generated_text, false, chat_syntax);
             if (!message.reasoning_content.empty()) {
                 reasoningContent = [NSString stringWithUTF8String:message.reasoning_content.c_str()];
             }
@@ -716,6 +738,15 @@
     result[@"stopped_limit"] = @(llama->stopped_limit);
     result[@"stopping_word"] = [NSString stringWithUTF8String:llama->stopping_word.c_str()];
     result[@"tokens_cached"] = @(llama->n_past);
+
+    if (llama->isVocoderEnabled() && !llama->audio_tokens.empty()) {
+        NSMutableArray *audioTokens = [[NSMutableArray alloc] init];
+        for (llama_token token : llama->audio_tokens) {
+            [audioTokens addObject:@(token)];
+        }
+        result[@"audio_tokens"] = audioTokens;
+    }
+
     result[@"timings"] = @{
         @"prompt_n": @(timings.n_p_eval),
         @"prompt_ms": @(timings.t_p_eval_ms),
@@ -775,6 +806,8 @@
         return result;
     } catch (const std::exception &e) {
         @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+    } catch (const std::runtime_error& e) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
     }
 }
 
@@ -817,6 +850,9 @@
     } catch (const std::exception &e) {
       llama->endCompletion();
       @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+    } catch (const std::runtime_error& e) {
+      llama->endCompletion();
+      @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
     }
     llama->doCompletion();
 
@@ -836,6 +872,34 @@
 
     llama->endCompletion();
     return resultDict;
+}
+
+- (NSArray *)rerank:(NSString *)query documents:(NSArray<NSString *> *)documents params:(NSDictionary *)params {
+    // Convert NSArray to std::vector
+    std::vector<std::string> documentsVector;
+    for (NSString *doc in documents) {
+        documentsVector.push_back(std::string([doc UTF8String]));
+    }
+
+    NSMutableArray *resultArray = [[NSMutableArray alloc] init];
+
+    try {
+        std::vector<float> scores = llama->rerank(std::string([query UTF8String]), documentsVector);
+
+        // Create result array with score and index
+        for (size_t i = 0; i < scores.size(); i++) {
+            NSMutableDictionary *item = [[NSMutableDictionary alloc] init];
+            item[@"score"] = @(scores[i]);
+            item[@"index"] = @((int)i);
+            [resultArray addObject:item];
+        }
+    } catch (const std::exception &e) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+    } catch (const std::runtime_error& e) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+    }
+
+    return resultArray;
 }
 
 - (NSDictionary *)loadSession:(NSString *)path {
@@ -918,6 +982,45 @@
         }];
     }
     return result;
+}
+
+- (bool)initVocoder:(NSString *)vocoderModelPath {
+    return llama->initVocoder([vocoderModelPath UTF8String]);
+}
+
+- (bool)isVocoderEnabled {
+    return llama->isVocoderEnabled();
+}
+
+- (NSString *)getFormattedAudioCompletion:(NSString *)speakerJsonStr textToSpeak:(NSString *)textToSpeak {
+    std::string speakerStr = speakerJsonStr ? [speakerJsonStr UTF8String] : "";
+    return [NSString stringWithUTF8String:llama->getFormattedAudioCompletion(speakerStr, [textToSpeak UTF8String]).c_str()];
+}
+
+- (NSArray *)getAudioCompletionGuideTokens:(NSString *)textToSpeak {
+    std::vector<llama_token> guide_tokens = llama->getAudioCompletionGuideTokens([textToSpeak UTF8String]);
+    NSMutableArray *result = [[NSMutableArray alloc] init];
+    for (llama_token token : guide_tokens) {
+        [result addObject:@(token)];
+    }
+    return result;
+}
+
+- (NSArray *)decodeAudioTokens:(NSArray *)tokens {
+    std::vector<llama_token> token_vector;
+    for (NSNumber *token in tokens) {
+        token_vector.push_back([token intValue]);
+    }
+    std::vector<float> audio_data = llama->decodeAudioTokens(token_vector);
+    NSMutableArray *result = [[NSMutableArray alloc] init];
+    for (float sample : audio_data) {
+        [result addObject:@(sample)];
+    }
+    return result;
+}
+
+- (void)releaseVocoder {
+    llama->releaseVocoder();
 }
 
 - (void)invalidate {

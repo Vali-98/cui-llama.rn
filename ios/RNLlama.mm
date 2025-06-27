@@ -102,13 +102,21 @@ RCT_EXPORT_METHOD(getFormattedChat:(double)contextId
         if ([params[@"jinja"] boolValue]) {
             NSString *jsonSchema = params[@"json_schema"];
             NSString *tools = params[@"tools"];
-            bool parallelToolCalls = [params[@"parallel_tool_calls"] boolValue];
+            BOOL parallelToolCalls = [params[@"parallel_tool_calls"] boolValue];
             NSString *toolChoice = params[@"tool_choice"];
-            resolve([context getFormattedChatWithJinja:messages withChatTemplate:chatTemplate withJsonSchema:jsonSchema withTools:tools withParallelToolCalls:parallelToolCalls withToolChoice:toolChoice]);
+            BOOL enableThinking = [params[@"enable_thinking"] boolValue];
+            resolve([context getFormattedChatWithJinja:messages
+                withChatTemplate:chatTemplate
+                withJsonSchema:jsonSchema
+                withTools:tools
+                withParallelToolCalls:parallelToolCalls
+                withToolChoice:toolChoice
+                withEnableThinking:enableThinking
+            ]);
         } else {
             resolve([context getFormattedChat:messages withChatTemplate:chatTemplate]);
         }
-    } catch (const nlohmann::json_abi_v3_11_3::detail::parse_error& e) {
+    } catch (const nlohmann::json_abi_v3_12_0::detail::parse_error& e) {
         NSString *errorMessage = [NSString stringWithUTF8String:e.what()];
         reject(@"llama_error", [NSString stringWithFormat:@"JSON parse error in getFormattedChat: %@", errorMessage], nil);
     } catch (const std::exception& e) { // catch cpp exceptions
@@ -297,6 +305,25 @@ RCT_EXPORT_METHOD(embedding:(double)contextId
     }
 }
 
+RCT_EXPORT_METHOD(rerank:(double)contextId
+                  query:(NSString *)query
+                  documents:(NSArray<NSString *> *)documents
+                  params:(NSDictionary *)params
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject) {
+  RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+  if (context == nil) {
+    reject(@"context_not_found", @"Context not found", nil);
+    return;
+  }
+  @try {
+    NSArray *result = [context rerank:query documents:documents params:params];
+    resolve(result);
+  } @catch (NSException *exception) {
+    reject(@"rerank_error", exception.reason, nil);
+  }
+}
+
 RCT_EXPORT_METHOD(bench:(double)contextId
                   pp:(int)pp
                   tg:(int)tg
@@ -431,6 +458,129 @@ RCT_EXPORT_METHOD(releaseMultimodal:(double)contextId
     }
 
     [context releaseMultimodal];
+    resolve(nil);
+}
+
+RCT_EXPORT_METHOD(initVocoder:(double)contextId
+                 withVocoderModelPath:(NSString *)vocoderModelPath
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+    if ([context isPredicting]) {
+        reject(@"llama_error", @"Context is busy", nil);
+        return;
+    }
+
+    @try {
+        bool success = [context initVocoder:vocoderModelPath];
+        resolve(@(success));
+    } @catch (NSException *exception) {
+        reject(@"llama_cpp_error", exception.reason, nil);
+    }
+}
+
+RCT_EXPORT_METHOD(isVocoderEnabled:(double)contextId
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+
+    resolve(@([context isVocoderEnabled]));
+}
+
+RCT_EXPORT_METHOD(getFormattedAudioCompletion:(double)contextId
+                 withSpeakerJsonStr:(NSString *)speakerJsonStr
+                 withTextToSpeak:(NSString *)textToSpeak
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+
+    if (![context isVocoderEnabled]) {
+        reject(@"llama_error", @"Vocoder is not enabled", nil);
+        return;
+    }
+
+    @try {
+        NSString *result = [context getFormattedAudioCompletion:speakerJsonStr textToSpeak:textToSpeak];
+        resolve(result);
+    } @catch (NSException *exception) {
+        reject(@"llama_cpp_error", exception.reason, nil);
+    }
+}
+
+RCT_EXPORT_METHOD(getAudioCompletionGuideTokens:(double)contextId
+                 withTextToSpeak:(NSString *)textToSpeak
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+
+    if (![context isVocoderEnabled]) {
+        reject(@"llama_error", @"Vocoder is not enabled", nil);
+        return;
+    }
+
+    @try {
+        NSArray *guideTokens = [context getAudioCompletionGuideTokens:textToSpeak];
+        resolve(guideTokens);
+    } @catch (NSException *exception) {
+        reject(@"llama_cpp_error", exception.reason, nil);
+    }
+}
+
+RCT_EXPORT_METHOD(decodeAudioTokens:(double)contextId
+                 withTokens:(NSArray *)tokens
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+
+    if (![context isVocoderEnabled]) {
+        reject(@"llama_error", @"Vocoder is not enabled", nil);
+        return;
+    }
+
+    @try {
+        NSArray *audioData = [context decodeAudioTokens:tokens];
+        resolve(audioData);
+    } @catch (NSException *exception) {
+        reject(@"llama_cpp_error", exception.reason, nil);
+    }
+}
+
+RCT_EXPORT_METHOD(releaseVocoder:(double)contextId
+                 withResolver:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    RNLlamaContext *context = llamaContexts[[NSNumber numberWithDouble:contextId]];
+    if (context == nil) {
+        reject(@"llama_error", @"Context not found", nil);
+        return;
+    }
+
+    [context releaseVocoder];
     resolve(nil);
 }
 
