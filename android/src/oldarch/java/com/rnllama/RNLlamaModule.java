@@ -125,6 +125,11 @@ public class RNLlamaModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
+  public void rerank(double id, final String query, final ReadableArray documents, final ReadableMap params, final Promise promise) {
+    rnllama.rerank(id, query, documents, params, promise);
+  }
+
+  @ReactMethod
   public void bench(double id, final double pp, final double tg, final double pl, final double nr, final Promise promise) {
     rnllama.bench(id, pp, tg, pl, nr, promise);
   }
@@ -145,6 +150,35 @@ public class RNLlamaModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
+  public void initVocoder(double id, final String vocoderModelPath, final Promise promise) {
+    rnllama.initVocoder(id, vocoderModelPath, promise);
+  }
+
+  @ReactMethod
+  public void isVocoderEnabled(double id, final Promise promise) {
+    rnllama.isVocoderEnabled(id, promise);
+  }
+
+  @ReactMethod
+  public void getFormattedAudioCompletion(double id, final String speakerJsonStr, final String textToSpeak, final Promise promise) {
+    rnllama.getFormattedAudioCompletion(id, speakerJsonStr, textToSpeak, promise);
+  }
+
+  @ReactMethod
+  public void getAudioCompletionGuideTokens(double id, final String textToSpeak, final Promise promise) {
+    rnllama.getAudioCompletionGuideTokens(id, textToSpeak, promise);
+  }
+
+  @ReactMethod
+  public void decodeAudioTokens(double id, final ReadableArray tokens, final Promise promise) {
+    rnllama.decodeAudioTokens(id, tokens, promise);
+  }
+
+  @ReactMethod
+  public void releaseVocoder(double id, final Promise promise) {
+    rnllama.releaseVocoder(id, promise);
+  }
+
   public void releaseContext(double id, Promise promise) {
     rnllama.releaseContext(id, promise);
   }

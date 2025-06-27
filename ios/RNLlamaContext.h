@@ -43,12 +43,14 @@
 - (NSDictionary *)tokenize:(NSString *)text imagePaths:(NSArray *)imagePaths;
 - (NSString *)detokenize:(NSArray *)tokens;
 - (NSDictionary *)embedding:(NSString *)text params:(NSDictionary *)params;
+- (NSArray *)rerank:(NSString *)query documents:(NSArray<NSString *> *)documents params:(NSDictionary *)params;
 - (NSDictionary *)getFormattedChatWithJinja:(NSString *)messages
     withChatTemplate:(NSString *)chatTemplate
     withJsonSchema:(NSString *)jsonSchema
     withTools:(NSString *)tools
     withParallelToolCalls:(BOOL)parallelToolCalls
-    withToolChoice:(NSString *)toolChoice;
+    withToolChoice:(NSString *)toolChoice
+    withEnableThinking:(BOOL)enableThinking;
 - (NSString *)getFormattedChat:(NSString *)messages withChatTemplate:(NSString *)chatTemplate;
 - (NSDictionary *)loadSession:(NSString *)path;
 - (int)saveSession:(NSString *)path size:(int)size;
@@ -56,6 +58,12 @@
 - (void)applyLoraAdapters:(NSArray *)loraAdapters;
 - (void)removeLoraAdapters;
 - (NSArray *)getLoadedLoraAdapters;
+- (bool)initVocoder:(NSString *)vocoderModelPath;
+- (bool)isVocoderEnabled;
+- (NSString *)getFormattedAudioCompletion:(NSString *)speakerJsonStr textToSpeak:(NSString *)textToSpeak;
+- (NSArray *)getAudioCompletionGuideTokens:(NSString *)textToSpeak;
+- (NSArray *)decodeAudioTokens:(NSArray *)tokens;
+- (void)releaseVocoder;
 - (void)invalidate;
 
 @end
