@@ -1,22 +1,18 @@
 #!/bin/bash -e
 
 git submodule init
-git submodule update --recursive --remote
-
-# cp ./llama.cpp/
+git submodule update --recursive
 
 # ggml api
 cp ./llama.cpp/ggml/include/ggml.h ./cpp/ggml.h
 cp ./llama.cpp/ggml/include/ggml-alloc.h ./cpp/ggml-alloc.h
 cp ./llama.cpp/ggml/include/ggml-backend.h ./cpp/ggml-backend.h
-cp ./llama.cpp/ggml/include/ggml-cpp.h ./cpp/ggml-cpp.h
 cp ./llama.cpp/ggml/include/ggml-cpu.h ./cpp/ggml-cpu.h
-cp ./llama.cpp/ggml/include/ggml-metal.h ./cpp/ggml-metal.h
+cp ./llama.cpp/ggml/include/ggml-cpp.h ./cpp/ggml-cpp.h
 cp ./llama.cpp/ggml/include/ggml-opt.h ./cpp/ggml-opt.h
-cp ./llama.cpp/ggml/include/ggml.h ./cpp/ggml.h
+cp ./llama.cpp/ggml/include/ggml-metal.h ./cpp/ggml-metal.h
 cp ./llama.cpp/ggml/include/gguf.h ./cpp/gguf.h
 
-# === ggml/src/ggml-metal ===
 cp ./llama.cpp/ggml/src/ggml-metal/ggml-metal.m ./cpp/ggml-metal.m
 cp ./llama.cpp/ggml/src/ggml-metal/ggml-metal-impl.h ./cpp/ggml-metal-impl.h
 
@@ -50,17 +46,15 @@ cp -r ./llama.cpp/ggml/src/ggml-cpu/arch/x86 ./cpp/ggml-cpu/arch/
 cp ./llama.cpp/ggml/src/ggml.c ./cpp/ggml.c
 cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
 cp ./llama.cpp/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
+cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
 cp ./llama.cpp/ggml/src/ggml-backend-impl.h ./cpp/ggml-backend-impl.h
 cp ./llama.cpp/ggml/src/ggml-backend-reg.cpp ./cpp/ggml-backend-reg.cpp
-cp ./llama.cpp/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
 cp ./llama.cpp/ggml/src/ggml-common.h ./cpp/ggml-common.h
-cp ./llama.cpp/ggml/src/ggml-impl.h ./cpp/ggml-impl.h
 cp ./llama.cpp/ggml/src/ggml-opt.cpp ./cpp/ggml-opt.cpp
-cp ./llama.cpp/ggml/src/ggml-quants.c ./cpp/ggml-quants.c
 cp ./llama.cpp/ggml/src/ggml-quants.h ./cpp/ggml-quants.h
+cp ./llama.cpp/ggml/src/ggml-quants.c ./cpp/ggml-quants.c
 cp ./llama.cpp/ggml/src/ggml-threading.cpp ./cpp/ggml-threading.cpp
 cp ./llama.cpp/ggml/src/ggml-threading.h ./cpp/ggml-threading.h
-cp ./llama.cpp/ggml/src/ggml.c ./cpp/ggml.c
 cp ./llama.cpp/ggml/src/gguf.cpp ./cpp/gguf.cpp
 
 # llama api
@@ -90,54 +84,43 @@ cp ./llama.cpp/src/llama-memory-recurrent.h ./cpp/llama-memory-recurrent.h
 cp ./llama.cpp/src/llama-memory-recurrent.cpp ./cpp/llama-memory-recurrent.cpp
 cp ./llama.cpp/src/llama-adapter.h ./cpp/llama-adapter.h
 cp ./llama.cpp/src/llama-adapter.cpp ./cpp/llama-adapter.cpp
-cp ./llama.cpp/src/llama-adapter.h ./cpp/llama-adapter.h
-cp ./llama.cpp/src/llama-arch.cpp ./cpp/llama-arch.cpp
 cp ./llama.cpp/src/llama-arch.h ./cpp/llama-arch.h
-cp ./llama.cpp/src/llama-batch.cpp ./cpp/llama-batch.cpp
+cp ./llama.cpp/src/llama-arch.cpp ./cpp/llama-arch.cpp
 cp ./llama.cpp/src/llama-batch.h ./cpp/llama-batch.h
-cp ./llama.cpp/src/llama-chat.cpp ./cpp/llama-chat.cpp
-cp ./llama.cpp/src/llama-chat.h ./cpp/llama-chat.h
-cp ./llama.cpp/src/llama-context.cpp ./cpp/llama-context.cpp
-cp ./llama.cpp/src/llama-context.h ./cpp/llama-context.h
-cp ./llama.cpp/src/llama-cparams.cpp ./cpp/llama-cparams.cpp
+cp ./llama.cpp/src/llama-batch.cpp ./cpp/llama-batch.cpp
 cp ./llama.cpp/src/llama-cparams.h ./cpp/llama-cparams.h
-cp ./llama.cpp/src/llama-grammar.cpp ./cpp/llama-grammar.cpp
-cp ./llama.cpp/src/llama-grammar.h ./cpp/llama-grammar.h
-cp ./llama.cpp/src/llama-graph.cpp ./cpp/llama-graph.cpp
-cp ./llama.cpp/src/llama-graph.h ./cpp/llama-graph.h
-cp ./llama.cpp/src/llama-hparams.cpp ./cpp/llama-hparams.cpp
+cp ./llama.cpp/src/llama-cparams.cpp ./cpp/llama-cparams.cpp
 cp ./llama.cpp/src/llama-hparams.h ./cpp/llama-hparams.h
-cp ./llama.cpp/src/llama-impl.cpp ./cpp/llama-impl.cpp
+cp ./llama.cpp/src/llama-hparams.cpp ./cpp/llama-hparams.cpp
 cp ./llama.cpp/src/llama-impl.h ./cpp/llama-impl.h
-cp ./llama.cpp/src/llama-io.cpp ./cpp/llama-io.cpp
-cp ./llama.cpp/src/llama-io.h ./cpp/llama-io.h
-cp ./llama.cpp/src/llama-kv-cache.cpp ./cpp/llama-kv-cache.cpp
-cp ./llama.cpp/src/llama-kv-cache.h ./cpp/llama-kv-cache.h
-cp ./llama.cpp/src/llama-memory.cpp ./cpp/llama-memory.cpp
-cp ./llama.cpp/src/llama-memory.h ./cpp/llama-memory.h
-cp ./llama.cpp/src/llama-mmap.cpp ./cpp/llama-mmap.cpp
-cp ./llama.cpp/src/llama-mmap.h ./cpp/llama-mmap.h
-cp ./llama.cpp/src/llama-model-loader.cpp ./cpp/llama-model-loader.cpp
-cp ./llama.cpp/src/llama-model-loader.h ./cpp/llama-model-loader.h
-cp ./llama.cpp/src/llama-model.cpp ./cpp/llama-model.cpp
-cp ./llama.cpp/src/llama-model.h ./cpp/llama-model.h
-cp ./llama.cpp/src/llama-sampling.cpp ./cpp/llama-sampling.cpp
-cp ./llama.cpp/src/llama-sampling.h ./cpp/llama-sampling.h
-cp ./llama.cpp/src/llama-vocab.cpp ./cpp/llama-vocab.cpp
-cp ./llama.cpp/src/llama-vocab.h ./cpp/llama-vocab.h
-cp ./llama.cpp/src/llama.cpp ./cpp/llama.cpp
-cp ./llama.cpp/src/unicode-data.cpp ./cpp/unicode-data.cpp
-cp ./llama.cpp/src/unicode-data.h ./cpp/unicode-data.h
-cp ./llama.cpp/src/unicode.cpp ./cpp/unicode.cpp
-cp ./llama.cpp/src/unicode.h ./cpp/unicode.h
-cp ./llama.cpp/src/llama-model-saver.h ./cpp/llama-model-saver.h
-cp ./llama.cpp/src/llama-model-saver.cpp ./cpp/llama-model-saver.cpp
+cp ./llama.cpp/src/llama-impl.cpp ./cpp/llama-impl.cpp
 
-# === common ===
-cp ./llama.cpp/common/chat.cpp ./cpp/chat.cpp
-cp ./llama.cpp/common/chat.h ./cpp/chat.h
-cp ./llama.cpp/common/common.cpp ./cpp/common.cpp
+cp ./llama.cpp/src/llama-vocab.h ./cpp/llama-vocab.h
+cp ./llama.cpp/src/llama-vocab.cpp ./cpp/llama-vocab.cpp
+cp ./llama.cpp/src/llama-grammar.h ./cpp/llama-grammar.h
+cp ./llama.cpp/src/llama-grammar.cpp ./cpp/llama-grammar.cpp
+cp ./llama.cpp/src/llama-sampling.h ./cpp/llama-sampling.h
+cp ./llama.cpp/src/llama-sampling.cpp ./cpp/llama-sampling.cpp
+
+cp ./llama.cpp/src/unicode.h ./cpp/unicode.h
+cp ./llama.cpp/src/unicode.cpp ./cpp/unicode.cpp
+cp ./llama.cpp/src/unicode-data.h ./cpp/unicode-data.h
+cp ./llama.cpp/src/unicode-data.cpp ./cpp/unicode-data.cpp
+
+cp ./llama.cpp/src/llama-graph.h ./cpp/llama-graph.h
+cp ./llama.cpp/src/llama-graph.cpp ./cpp/llama-graph.cpp
+cp ./llama.cpp/src/llama-io.h ./cpp/llama-io.h
+cp ./llama.cpp/src/llama-io.cpp ./cpp/llama-io.cpp
+cp ./llama.cpp/src/llama-memory.h ./cpp/llama-memory.h
+cp ./llama.cpp/src/llama-memory.cpp ./cpp/llama-memory.cpp
+
+cp ./llama.cpp/common/log.h ./cpp/log.h
+cp ./llama.cpp/common/log.cpp ./cpp/log.cpp
 cp ./llama.cpp/common/common.h ./cpp/common.h
+cp ./llama.cpp/common/common.cpp ./cpp/common.cpp
+cp ./llama.cpp/common/sampling.h ./cpp/sampling.h
+cp ./llama.cpp/common/sampling.cpp ./cpp/sampling.cpp
+cp ./llama.cpp/common/json-schema-to-grammar.h ./cpp/json-schema-to-grammar.h
 cp ./llama.cpp/common/json-schema-to-grammar.cpp ./cpp/json-schema-to-grammar.cpp
 cp ./llama.cpp/common/json-partial.h ./cpp/json-partial.h
 cp ./llama.cpp/common/json-partial.cpp ./cpp/json-partial.cpp
@@ -170,7 +153,6 @@ rm -rf ./cpp/tools/mtmd/stb
 cp -r ./llama.cpp/vendor/miniaudio ./cpp/tools/mtmd/miniaudio
 cp -r ./llama.cpp/vendor/stb ./cpp/tools/mtmd/stb
 
-# List of files to process
 files_add_lm_prefix=(
   # ggml api
   "./cpp/ggml-common.h"
@@ -185,7 +167,6 @@ files_add_lm_prefix=(
   "./cpp/ggml-metal.h"
   "./cpp/ggml-metal.m"
   "./cpp/ggml-metal-impl.h"
-  "./cpp/llama-cpp.h"
   "./cpp/ggml-quants.h"
   "./cpp/ggml-quants.c"
   "./cpp/ggml-alloc.h"
