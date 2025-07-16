@@ -54,7 +54,6 @@ public:
 
     uint32_t get_n_tokens()  const;
     uint32_t get_n_outputs() const;
-    uint32_t get_n_used()    const;
 
     // the array of output indices in the order they were encountered during the ubatch splitting
     std::vector<int32_t> & get_out_ids();
@@ -70,8 +69,7 @@ public:
     llama_ubatch split_simple(uint32_t n_ubatch);
 
     // make ubatches of equal-length sequences sets
-    // if sequential == true, the tokens in the ubatch will have increasing sequential sequence ids
-    llama_ubatch split_equal(uint32_t n_ubatch, bool sequential);
+    llama_ubatch split_equal(uint32_t n_ubatch);
 
     // sequence-set-wise split - each ubatch contains a single sequence-set
     llama_ubatch split_seq(uint32_t n_ubatch);
@@ -114,9 +112,6 @@ private:
     using pos_set_t = std::set<llama_pos>;
     using seq_cpl_t = std::vector<bool>;
 
-    // helper flag to quickly determine if there are any coupled sequences in the batch
-    bool has_cpl;
-
     std::vector<pos_set_t> seq_pos; // seq_pos[s]: the set of positions in sequence s
     std::vector<seq_cpl_t> seq_cpl; // seq_cpl[s0][s1]: if sequence s0 is coupled to sequence s1
 
@@ -129,8 +124,6 @@ private:
 
     // batch indices of the output
     std::vector<int32_t> out_ids;
-
-    uint32_t n_used;
 
     // used[i] indicates if token i has already been used in a previous ubatch
     std::vector<bool> used;

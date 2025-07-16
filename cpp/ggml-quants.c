@@ -568,14 +568,14 @@ static float make_qkx2_quants(int n, int nmax, const float * LM_GGML_RESTRICT x,
     }
     float iscale = nmax/(max - min);
     float scale = 1/iscale;
-    float best_error = 0;
+    float best_mad = 0;
     for (int i = 0; i < n; ++i) {
         int l = nearest_int(iscale*(x[i] - min));
         L[i] = MAX(0, MIN(nmax, l));
         float diff = scale * L[i] + min - x[i];
         diff = use_mad ? fabsf(diff) : diff * diff;
         float w = weights[i];
-        best_error += w * diff;
+        best_mad += w * diff;
     }
     if (nstep < 1) {
         *the_min = -min;
@@ -601,18 +601,18 @@ static float make_qkx2_quants(int n, int nmax, const float * LM_GGML_RESTRICT x,
                 this_min = 0;
                 this_scale = sum_xl / sum_l2;
             }
-            float cur_error = 0;
+            float mad = 0;
             for (int i = 0; i < n; ++i) {
                 float diff = this_scale * Laux[i] + this_min - x[i];
                 diff = use_mad ? fabsf(diff) : diff * diff;
                 float w = weights[i];
-                cur_error += w * diff;
+                mad += w * diff;
             }
-            if (cur_error < best_error) {
+            if (mad < best_mad) {
                 for (int i = 0; i < n; ++i) {
                     L[i] = Laux[i];
                 }
-                best_error = cur_error;
+                best_mad = mad;
                 scale = this_scale;
                 min = this_min;
             }

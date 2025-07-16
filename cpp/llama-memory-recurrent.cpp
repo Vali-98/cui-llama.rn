@@ -363,40 +363,30 @@ llama_pos llama_memory_recurrent::seq_pos_max(llama_seq_id seq_id) const {
 }
 
 llama_memory_context_ptr llama_memory_recurrent::init_batch(llama_batch_allocr & balloc, uint32_t n_ubatch, bool embd_all) {
-    do {
-        balloc.split_reset();
+    std::vector<llama_ubatch> ubatches;
 
-        std::vector<llama_ubatch> ubatches;
-        while (true) {
-            llama_ubatch ubatch;
+    while (true) {
+        llama_ubatch ubatch;
 
-            if (embd_all) {
-                // if all tokens are output, split by sequence
-                ubatch = balloc.split_seq(n_ubatch);
-            } else {
-                ubatch = balloc.split_equal(n_ubatch, false);
-            }
-
-            if (ubatch.n_tokens == 0) {
-                break;
-            }
-
-            ubatches.push_back(std::move(ubatch)); // NOLINT
+        if (embd_all) {
+            // if all tokens are output, split by sequence
+            ubatch = balloc.split_seq(n_ubatch);
+        } else {
+            ubatch = balloc.split_equal(n_ubatch);
         }
 
-        if (balloc.get_n_used() < balloc.get_n_tokens()) {
-            // failed to find a suitable split
+        if (ubatch.n_tokens == 0) {
             break;
         }
 
-        if (!prepare(ubatches)) {
-            break;
-        }
+        ubatches.push_back(std::move(ubatch)); // NOLINT
+    }
 
-        return std::make_unique<llama_memory_recurrent_context>(this, std::move(ubatches));
-    } while (false);
+    if (!prepare(ubatches)) {
+        return std::make_unique<llama_memory_recurrent_context>(LLAMA_MEMORY_STATUS_FAILED_PREPARE);
+    }
 
-    return std::make_unique<llama_memory_recurrent_context>(LLAMA_MEMORY_STATUS_FAILED_PREPARE);
+    return std::make_unique<llama_memory_recurrent_context>(this, std::move(ubatches));
 }
 
 llama_memory_context_ptr llama_memory_recurrent::init_full() {
@@ -1076,15 +1066,7 @@ bool llama_memory_recurrent_context::next() {
 }
 
 bool llama_memory_recurrent_context::apply() {
-    assert(!llama_memory_status_is_fail(status));
-
-    // no ubatches -> this is an update
-    if (ubatches.empty()) {
-        // recurrent cache never performs updates
-        assert(status == LLAMA_MEMORY_STATUS_NO_UPDATE);
-
-        return true;
-    }
+    assert(status == LLAMA_MEMORY_STATUS_SUCCESS);
 
     mem->find_slot(ubatches[i_next]);
 

@@ -105,30 +105,10 @@ public:
         res.resize(n);
 
         for (uint32_t j = 0; j < n; ++j) {
-            const auto idx = i + j;
+            res.pos[j] = pos[i + j];
+            res.seq[j] = seq[i + j];
 
-            res.pos[j] = pos[idx];
-            res.seq[j] = seq[idx];
-
-            assert(shift[idx] == 0);
-        }
-
-        return res;
-    }
-
-    // copy the state of cells [idxs[0], idxs[1], ..., idxs[idxs.size() - 1])
-    llama_kv_cells_unified cp(const std::vector<uint32_t> & idxs) const {
-        llama_kv_cells_unified res;
-
-        res.resize(idxs.size());
-
-        for (uint32_t j = 0; j < idxs.size(); ++j) {
-            const auto idx = idxs[j];
-
-            res.pos[j] = pos[idx];
-            res.seq[j] = seq[idx];
-
-            assert(shift[idx] == 0);
+            assert(shift[i + j] == 0);
         }
 
         return res;
@@ -139,58 +119,26 @@ public:
         assert(i + other.pos.size() <= pos.size());
 
         for (uint32_t j = 0; j < other.pos.size(); ++j) {
-            const auto idx = i + j;
-
-            if (pos[idx] == -1 && other.pos[j] != -1) {
+            if (pos[i + j] == -1 && other.pos[j] != -1) {
                 used.insert(i + j);
             }
 
-            if (pos[idx] != -1 && other.pos[j] == -1) {
+            if (pos[i + j] != -1 && other.pos[j] == -1) {
                 used.erase(i + j);
             }
 
-            if (pos[idx] != -1) {
+            if (pos[i + j] != -1) {
                 seq_pos_rm(i + j);
             }
 
-            pos[idx] = other.pos[j];
-            seq[idx] = other.seq[j];
+            pos[i + j] = other.pos[j];
+            seq[i + j] = other.seq[j];
 
-            if (pos[idx] != -1) {
+            if (pos[i + j] != -1) {
                 seq_pos_add(i + j);
             }
 
-            assert(shift[idx] == 0);
-        }
-    }
-
-    // set the state of cells [idxs[0], idxs[1], ..., idxs[idxs.size() - 1])
-    void set(const std::vector<uint32_t> & idxs, const llama_kv_cells_unified & other) {
-        assert(idxs.size() == other.pos.size());
-
-        for (uint32_t j = 0; j < other.pos.size(); ++j) {
-            const auto idx = idxs[j];
-
-            if (pos[idx] == -1 && other.pos[j] != -1) {
-                used.insert(idx);
-            }
-
-            if (pos[idx] != -1 && other.pos[j] == -1) {
-                used.erase(idx);
-            }
-
-            if (pos[idx] != -1) {
-                seq_pos_rm(idx);
-            }
-
-            pos[idx] = other.pos[j];
-            seq[idx] = other.seq[j];
-
-            if (pos[idx] != -1) {
-                seq_pos_add(idx);
-            }
-
-            assert(shift[idx] == 0);
+            assert(shift[i + j] == 0);
         }
     }
 

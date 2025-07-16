@@ -113,25 +113,20 @@ llama_memory_context_ptr llama_kv_cache_unified_iswa::init_batch(llama_batch_all
             ubatches.push_back(std::move(ubatch)); // NOLINT
         }
 
-        if (balloc.get_n_used() < balloc.get_n_tokens()) {
-            // failed to find a suitable split
+        auto heads_base = kv_base->prepare(ubatches);
+        if (heads_base.empty()) {
             break;
         }
 
-        auto sinfos_base = kv_base->prepare(ubatches);
-        if (sinfos_base.empty()) {
+        auto heads_swa = kv_swa->prepare(ubatches);
+        if (heads_swa.empty()) {
             break;
         }
 
-        auto sinfos_swa = kv_swa->prepare(ubatches);
-        if (sinfos_swa.empty()) {
-            break;
-        }
-
-        assert(sinfos_base.size() == sinfos_swa.size());
+        assert(heads_base.size() == heads_swa.size());
 
         return std::make_unique<llama_kv_cache_unified_iswa_context>(
-                this, std::move(sinfos_base), std::move(sinfos_swa), std::move(ubatches));
+                this, std::move(heads_base), std::move(heads_swa), std::move(ubatches));
     } while (false);
 
     // if it fails, try equal split
@@ -140,7 +135,7 @@ llama_memory_context_ptr llama_kv_cache_unified_iswa::init_batch(llama_batch_all
 
         std::vector<llama_ubatch> ubatches;
         while (true) {
-            auto ubatch = balloc.split_equal(n_ubatch, false);
+            auto ubatch = balloc.split_equal(n_ubatch);
 
             if (ubatch.n_tokens == 0) {
                 break;
@@ -149,25 +144,20 @@ llama_memory_context_ptr llama_kv_cache_unified_iswa::init_batch(llama_batch_all
             ubatches.push_back(std::move(ubatch)); // NOLINT
         }
 
-        if (balloc.get_n_used() < balloc.get_n_tokens()) {
-            // failed to find a suitable split
+        auto heads_base = kv_base->prepare(ubatches);
+        if (heads_base.empty()) {
             break;
         }
 
-        auto sinfos_base = kv_base->prepare(ubatches);
-        if (sinfos_base.empty()) {
+        auto heads_swa = kv_swa->prepare(ubatches);
+        if (heads_swa.empty()) {
             break;
         }
 
-        auto sinfos_swa = kv_swa->prepare(ubatches);
-        if (sinfos_swa.empty()) {
-            break;
-        }
-
-        assert(sinfos_base.size() == sinfos_swa.size());
+        assert(heads_base.size() == heads_swa.size());
 
         return std::make_unique<llama_kv_cache_unified_iswa_context>(
-                this, std::move(sinfos_base), std::move(sinfos_swa), std::move(ubatches));
+                this, std::move(heads_base), std::move(heads_swa), std::move(ubatches));
     } while (false);
 
     // TODO: if we fail again, we should attempt different splitting strategies
@@ -230,13 +220,13 @@ llama_kv_cache_unified_iswa_context::llama_kv_cache_unified_iswa_context(
 
 llama_kv_cache_unified_iswa_context::llama_kv_cache_unified_iswa_context(
         llama_kv_cache_unified_iswa * kv,
-        slot_info_vec_t sinfos_base,
-        slot_info_vec_t sinfos_swa,
+        std::vector<uint32_t> heads_base,
+        std::vector<uint32_t> heads_swa,
         std::vector<llama_ubatch> ubatches) :
     ubatches(std::move(ubatches)),
     // note: here we copy the ubatches. not sure if this is ideal
-    ctx_base(new llama_kv_cache_unified_context(kv->get_base(), std::move(sinfos_base), this->ubatches)),
-    ctx_swa (new llama_kv_cache_unified_context(kv->get_swa (), std::move(sinfos_swa),  this->ubatches)),
+    ctx_base(new llama_kv_cache_unified_context(kv->get_base(), std::move(heads_base), this->ubatches)),
+    ctx_swa (new llama_kv_cache_unified_context(kv->get_swa (), std::move(heads_swa),  this->ubatches)),
     status(llama_memory_status_combine(ctx_base->get_status(), ctx_swa->get_status())) {
 }
 
@@ -256,7 +246,7 @@ bool llama_kv_cache_unified_iswa_context::next() {
 }
 
 bool llama_kv_cache_unified_iswa_context::apply() {
-    assert(!llama_memory_status_is_fail(status));
+    assert(status == LLAMA_MEMORY_STATUS_SUCCESS);
 
     bool res = true;
 

@@ -39,7 +39,6 @@ enum llm_type {
     LLM_TYPE_475M,
     LLM_TYPE_770M,
     LLM_TYPE_780M,
-    LLM_TYPE_0_3B,
     LLM_TYPE_0_5B,
     LLM_TYPE_0_6B,
     LLM_TYPE_1B,
@@ -94,7 +93,6 @@ enum llm_type {
     LLM_TYPE_57B_A14B,
     LLM_TYPE_17B_16E, // llama4 Scout
     LLM_TYPE_17B_128E, // llama4 Maverick
-    LLM_TYPE_A13B,
     LLM_TYPE_30B_A3B,
     LLM_TYPE_235B_A22B,
     LLM_TYPE_E2B,
@@ -173,7 +171,6 @@ struct llama_layer {
     struct lm_ggml_tensor * ffn_sub_norm    = nullptr;
     struct lm_ggml_tensor * attn_norm_cross = nullptr;
     struct lm_ggml_tensor * attn_norm_enc   = nullptr;
-    struct lm_ggml_tensor * ssm_norm        = nullptr;
 
     // attention
     struct lm_ggml_tensor * wq        = nullptr;
