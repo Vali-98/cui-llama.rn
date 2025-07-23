@@ -3309,9 +3309,6 @@ static void lm_ggml_compute_forward_rms_norm_f32(
 
                 const float scale = 1.0f/sqrtf(mean + eps);
 
-                // if you hit this, likely you got an inf somewhere earlier
-                assert(scale > 0.0f);
-
                 lm_ggml_vec_scale_f32(ne00, y, scale);
             }
         }
@@ -3940,11 +3937,9 @@ static void lm_ggml_compute_forward_scale_f32(
     LM_GGML_ASSERT(lm_ggml_is_contiguous(dst));
     LM_GGML_ASSERT(lm_ggml_are_same_shape(src0, dst));
 
-    float s; // scale factor
-    float b; // bias
-
-    memcpy(&s, (float *) dst->op_params + 0, sizeof(float));
-    memcpy(&b, (float *) dst->op_params + 1, sizeof(float));
+    // scale factor
+    float v;
+    memcpy(&v, dst->op_params, sizeof(float));
 
     const int ith = params->ith;
     const int nth = params->nth;
@@ -3963,22 +3958,12 @@ static void lm_ggml_compute_forward_scale_f32(
 
     const size_t nb1 = dst->nb[1];
 
-    if (b == 0.0f) {
-        for (int i1 = ir0; i1 < ir1; i1++) {
-            if (dst->data != src0->data) {
-                // src0 is same shape as dst => same indices
-                // TODO: add x parameter to lm_ggml_vec_scale_f32 and remove this memcpy
-                memcpy((char *)dst->data + i1*nb1, (char *)src0->data + i1*nb01, nc * sizeof(float));
-            }
-            lm_ggml_vec_scale_f32(nc, (float *) ((char *) dst->data + i1*nb1), s);
+    for (int i1 = ir0; i1 < ir1; i1++) {
+        if (dst->data != src0->data) {
+            // src0 is same shape as dst => same indices
+            memcpy((char *)dst->data + i1*nb1, (char *)src0->data + i1*nb01, nc * sizeof(float));
         }
-    } else {
-        for (int i1 = ir0; i1 < ir1; i1++) {
-            lm_ggml_vec_mad1_f32(nc,
-                (float *) ((char *) dst->data  + i1*nb1),
-                (float *) ((char *) src0->data + i1*nb1),
-                s, b);
-        }
+        lm_ggml_vec_scale_f32(nc, (float *) ((char *) dst->data + i1*nb1), v);
     }
 }
 
