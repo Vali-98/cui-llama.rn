@@ -55,6 +55,12 @@ static struct lm_ggml_backend_metal_device_context {
     bool has_residency_sets;
     bool has_bfloat;
     bool use_bfloat;
+    bool use_fusion;
+
+    int debug_fusion;
+
+    // how many times a given op was fused
+    uint64_t fuse_cnt[LM_GGML_OP_COUNT];
 
     size_t max_size;
 
@@ -69,6 +75,9 @@ static struct lm_ggml_backend_metal_device_context {
     /*.has_residency_sets      =*/ false,
     /*.has_bfloat              =*/ false,
     /*.use_bfloat              =*/ false,
+    /*.use_fusion              =*/ true,
+    /*.debug_fusion            =*/ 0,
+    /*.fuse_cnt                =*/ { 0 },
     /*.max_size                =*/ 0,
     /*.name                    =*/ "",
 };
@@ -83,16 +92,14 @@ static id<MTLDevice> lm_ggml_backend_metal_device_acq(struct lm_ggml_backend_met
 
     if (ctx->mtl_device == nil) {
         ctx->mtl_device = MTLCreateSystemDefaultDevice();
-    }
 
-    if (ctx->mtl_device) {
         ctx->has_simdgroup_reduction  = [ctx->mtl_device supportsFamily:MTLGPUFamilyApple7];
         ctx->has_simdgroup_reduction |= [ctx->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];
 
         ctx->has_simdgroup_mm = [ctx->mtl_device supportsFamily:MTLGPUFamilyApple7];
 
 #if defined(LM_GGML_METAL_HAS_RESIDENCY_SETS)
-        ctx->has_residency_sets = getenv("LM_GGML_METAL_NO_RESIDENCY") == NULL;
+        ctx->has_residency_sets = getenv("LM_GGML_METAL_NO_RESIDENCY") == nil;
 #endif
 
         ctx->has_bfloat  = [ctx->mtl_device supportsFamily:MTLGPUFamilyMetal3_GGML];
@@ -103,6 +110,14 @@ static id<MTLDevice> lm_ggml_backend_metal_device_acq(struct lm_ggml_backend_met
 #else
         ctx->use_bfloat = false;
 #endif
+        ctx->use_fusion = getenv("LM_GGML_METAL_FUSION_DISABLE") == nil;
+
+        {
+            const char * val = getenv("LM_GGML_METAL_FUSION_DEBUG");
+            ctx->debug_fusion = val ? atoi(val) : 0;
+        }
+
+        memset(ctx->fuse_cnt, 0, sizeof(ctx->fuse_cnt));
 
         ctx->max_size = ctx->mtl_device.maxBufferLength;
 
@@ -122,6 +137,18 @@ static void lm_ggml_backend_metal_device_rel(struct lm_ggml_backend_metal_device
     ctx->mtl_device_ref_count--;
 
     if (ctx->mtl_device_ref_count == 0) {
+        if (ctx->debug_fusion > 0) {
+            fprintf(stderr, "%s: fusion stats:\n", __func__);
+            for (int i = 0; i < LM_GGML_OP_COUNT; i++) {
+                if (ctx->fuse_cnt[i] == 0) {
+                    continue;
+                }
+
+                // note: cannot use lm_ggml_log here
+                fprintf(stderr, "%s: - %s: %" PRIu64 "\n", __func__, lm_ggml_op_name((enum lm_ggml_op) i), ctx->fuse_cnt[i]);
+            }
+        }
+
         if (ctx->mtl_lock) {
             [ctx->mtl_lock release];
             ctx->mtl_lock = nil;
@@ -147,13 +174,27 @@ struct lm_ggml_metal_kernel {
 
 enum lm_ggml_metal_kernel_type {
     LM_GGML_METAL_KERNEL_TYPE_ADD,
-    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_2,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_3,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_4,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_5,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_6,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_7,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_8,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_2,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_3,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_4,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_5,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_6,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_7,
+    LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_8,
     LM_GGML_METAL_KERNEL_TYPE_SUB,
-    LM_GGML_METAL_KERNEL_TYPE_SUB_ROW,
+    LM_GGML_METAL_KERNEL_TYPE_SUB_ROW_C4,
     LM_GGML_METAL_KERNEL_TYPE_MUL,
-    LM_GGML_METAL_KERNEL_TYPE_MUL_ROW,
+    LM_GGML_METAL_KERNEL_TYPE_MUL_ROW_C4,
     LM_GGML_METAL_KERNEL_TYPE_DIV,
-    LM_GGML_METAL_KERNEL_TYPE_DIV_ROW,
+    LM_GGML_METAL_KERNEL_TYPE_DIV_ROW_C4,
     LM_GGML_METAL_KERNEL_TYPE_REPEAT_F32,
     LM_GGML_METAL_KERNEL_TYPE_REPEAT_F16,
     LM_GGML_METAL_KERNEL_TYPE_REPEAT_I32,
@@ -173,6 +214,12 @@ enum lm_ggml_metal_kernel_type {
     LM_GGML_METAL_KERNEL_TYPE_SILU,
     LM_GGML_METAL_KERNEL_TYPE_SILU_4,
     LM_GGML_METAL_KERNEL_TYPE_ELU,
+    LM_GGML_METAL_KERNEL_TYPE_ABS,
+    LM_GGML_METAL_KERNEL_TYPE_SGN,
+    LM_GGML_METAL_KERNEL_TYPE_STEP,
+    LM_GGML_METAL_KERNEL_TYPE_HARDSWISH,
+    LM_GGML_METAL_KERNEL_TYPE_HARDSIGMOID,
+    LM_GGML_METAL_KERNEL_TYPE_EXP,
     LM_GGML_METAL_KERNEL_TYPE_SOFT_MAX_F16,
     LM_GGML_METAL_KERNEL_TYPE_SOFT_MAX_F16_4,
     LM_GGML_METAL_KERNEL_TYPE_SOFT_MAX_F32,
@@ -202,12 +249,24 @@ enum lm_ggml_metal_kernel_type {
     LM_GGML_METAL_KERNEL_TYPE_GET_ROWS_IQ4_NL,
     LM_GGML_METAL_KERNEL_TYPE_GET_ROWS_IQ4_XS,
     LM_GGML_METAL_KERNEL_TYPE_GET_ROWS_I32,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_F32,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_F16,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_BF16,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q8_0,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q4_0,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q4_1,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q5_0,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q5_1,
+    LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_IQ4_NL,
     LM_GGML_METAL_KERNEL_TYPE_RMS_NORM,
+    LM_GGML_METAL_KERNEL_TYPE_RMS_NORM_MUL,
+    LM_GGML_METAL_KERNEL_TYPE_RMS_NORM_MUL_ADD,
     LM_GGML_METAL_KERNEL_TYPE_L2_NORM,
     LM_GGML_METAL_KERNEL_TYPE_GROUP_NORM,
     LM_GGML_METAL_KERNEL_TYPE_NORM,
     LM_GGML_METAL_KERNEL_TYPE_SSM_CONV_F32,
     LM_GGML_METAL_KERNEL_TYPE_SSM_SCAN_F32,
+    LM_GGML_METAL_KERNEL_TYPE_SSM_SCAN_F32_GROUP,
     LM_GGML_METAL_KERNEL_TYPE_RWKV_WKV6_F32,
     LM_GGML_METAL_KERNEL_TYPE_RWKV_WKV7_F32,
     LM_GGML_METAL_KERNEL_TYPE_MUL_MV_F32_F32,
@@ -517,6 +576,11 @@ enum lm_ggml_metal_kernel_type {
     LM_GGML_METAL_KERNEL_TYPE_SIN,
     LM_GGML_METAL_KERNEL_TYPE_COS,
     LM_GGML_METAL_KERNEL_TYPE_NEG,
+    LM_GGML_METAL_KERNEL_TYPE_REGLU,
+    LM_GGML_METAL_KERNEL_TYPE_GEGLU,
+    LM_GGML_METAL_KERNEL_TYPE_SWIGLU,
+    LM_GGML_METAL_KERNEL_TYPE_GEGLU_ERF,
+    LM_GGML_METAL_KERNEL_TYPE_GEGLU_QUICK,
     LM_GGML_METAL_KERNEL_TYPE_SUM_ROWS,
     LM_GGML_METAL_KERNEL_TYPE_MEAN,
     LM_GGML_METAL_KERNEL_TYPE_POOL_2D_AVG_F32,
@@ -1114,13 +1178,27 @@ static struct lm_ggml_backend_metal_context * lm_ggml_metal_init(lm_ggml_backend
         // simd_sum and simd_max requires MTLGPUFamilyApple7
 
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD,                             add,                             true);
-        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW,                         add_row,                         true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_2,                      add_fuse_2,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_3,                      add_fuse_3,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_4,                      add_fuse_4,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_5,                      add_fuse_5,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_6,                      add_fuse_6,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_7,                      add_fuse_7,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_8,                      add_fuse_8,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4,                      add_row_c4,                      true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_2,               add_row_c4_fuse_2,               true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_3,               add_row_c4_fuse_3,               true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_4,               add_row_c4_fuse_4,               true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_5,               add_row_c4_fuse_5,               true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_6,               add_row_c4_fuse_6,               true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_7,               add_row_c4_fuse_7,               true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_8,               add_row_c4_fuse_8,               true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SUB,                             sub,                             true);
-        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SUB_ROW,                         sub_row,                         true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SUB_ROW_C4,                      sub_row_c4,                      true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_MUL,                             mul,                             true);
-        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_MUL_ROW,                         mul_row,                         true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_MUL_ROW_C4,                      mul_row_c4,                      true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_DIV,                             div,                             true);
-        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_DIV_ROW,                         div_row,                         true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_DIV_ROW_C4,                      div_row_c4,                      true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_REPEAT_F32,                      repeat_f32,                      true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_REPEAT_F16,                      repeat_f16,                      true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_REPEAT_I32,                      repeat_i32,                      true);
@@ -1140,6 +1218,12 @@ static struct lm_ggml_backend_metal_context * lm_ggml_metal_init(lm_ggml_backend
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SILU,                            silu,                            true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SILU_4,                          silu_4,                          true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ELU,                             elu,                             true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ABS,                             abs,                             true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SGN,                             sgn,                             true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_STEP,                            step,                            true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_HARDSWISH,                       hardswish,                       true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_HARDSIGMOID,                     hardsigmoid,                     true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_EXP,                             exp,                             true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SOFT_MAX_F16,                    soft_max_f16,                    has_simdgroup_reduction);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SOFT_MAX_F16_4,                  soft_max_f16_4,                  has_simdgroup_reduction);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SOFT_MAX_F32,                    soft_max_f32,                    has_simdgroup_reduction);
@@ -1169,12 +1253,24 @@ static struct lm_ggml_backend_metal_context * lm_ggml_metal_init(lm_ggml_backend
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_GET_ROWS_IQ4_NL,                 get_rows_iq4_nl,                 true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_GET_ROWS_IQ4_XS,                 get_rows_iq4_xs,                 true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_GET_ROWS_I32,                    get_rows_i32,                    true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_F32,                    set_rows_f32,                    true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_F16,                    set_rows_f16,                    true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_BF16,                   set_rows_bf16,                   use_bfloat);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q8_0,                   set_rows_q8_0,                   true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q4_0,                   set_rows_q4_0,                   true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q4_1,                   set_rows_q4_1,                   true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q5_0,                   set_rows_q5_0,                   true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q5_1,                   set_rows_q5_1,                   true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_IQ4_NL,                 set_rows_iq4_nl,                 true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_RMS_NORM,                        rms_norm,                        has_simdgroup_reduction);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_RMS_NORM_MUL,                    rms_norm_mul,                    has_simdgroup_reduction);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_RMS_NORM_MUL_ADD,                rms_norm_mul_add,                has_simdgroup_reduction);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_L2_NORM,                         l2_norm,                         has_simdgroup_reduction);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_GROUP_NORM,                      group_norm,                      has_simdgroup_reduction);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_NORM,                            norm,                            true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SSM_CONV_F32,                    ssm_conv_f32,                    true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SSM_SCAN_F32,                    ssm_scan_f32,                    true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SSM_SCAN_F32_GROUP,              ssm_scan_f32_group,              true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_RWKV_WKV6_F32,                   rwkv_wkv6_f32,                   true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_RWKV_WKV7_F32,                   rwkv_wkv7_f32,                   true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_MUL_MV_F32_F32,                  mul_mv_f32_f32,                  has_simdgroup_reduction);
@@ -1484,6 +1580,11 @@ static struct lm_ggml_backend_metal_context * lm_ggml_metal_init(lm_ggml_backend
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SIN,                             sin,                             true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_COS,                             cos,                             true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_NEG,                             neg,                             true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_REGLU,                           reglu,                           true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_GEGLU,                           geglu,                           true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SWIGLU,                          swiglu,                          true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_GEGLU_ERF,                       geglu_erf,                       true);
+        LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_GEGLU_QUICK,                     geglu_quick,                     true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_SUM_ROWS,                        sum_rows,                        true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_MEAN,                            mean,                            true);
         LM_GGML_METAL_ADD_KERNEL(LM_GGML_METAL_KERNEL_TYPE_ARGMAX,                          argmax,                          true);
@@ -1635,6 +1736,10 @@ static bool lm_ggml_metal_supports_op(const struct lm_ggml_backend_metal_device_
     const bool use_bfloat              = ctx_dev->use_bfloat;
 
     if (!use_bfloat) {
+        if (op->type == LM_GGML_TYPE_BF16) {
+            return false;
+        }
+
         for (size_t i = 0, n = 3; i < n; ++i) {
             if (op->src[i] != NULL && op->src[i]->type == LM_GGML_TYPE_BF16) {
                 return false;
@@ -1654,8 +1759,25 @@ static bool lm_ggml_metal_supports_op(const struct lm_ggml_backend_metal_device_
                 case LM_GGML_UNARY_OP_SILU:
                 case LM_GGML_UNARY_OP_ELU:
                 case LM_GGML_UNARY_OP_NEG:
+                case LM_GGML_UNARY_OP_ABS:
+                case LM_GGML_UNARY_OP_SGN:
+                case LM_GGML_UNARY_OP_STEP:
+                case LM_GGML_UNARY_OP_HARDSWISH:
+                case LM_GGML_UNARY_OP_HARDSIGMOID:
+                case LM_GGML_UNARY_OP_EXP:
                     return lm_ggml_is_contiguous(op->src[0]) && op->src[0]->type == LM_GGML_TYPE_F32;
                 default:
+                    return false;
+            }
+        case LM_GGML_OP_GLU:
+            switch (lm_ggml_get_glu_op(op)) {
+                case LM_GGML_GLU_OP_REGLU:
+                case LM_GGML_GLU_OP_GEGLU:
+                case LM_GGML_GLU_OP_SWIGLU:
+                case LM_GGML_GLU_OP_GEGLU_ERF:
+                case LM_GGML_GLU_OP_GEGLU_QUICK:
+                    return lm_ggml_is_contiguous_1(op->src[0]) && op->src[0]->type == LM_GGML_TYPE_F32;
+               default:
                     return false;
             }
         case LM_GGML_OP_NONE:
@@ -1688,7 +1810,7 @@ static bool lm_ggml_metal_supports_op(const struct lm_ggml_backend_metal_device_
         case LM_GGML_OP_MEAN:
         case LM_GGML_OP_SOFT_MAX:
         case LM_GGML_OP_GROUP_NORM:
-            return has_simdgroup_reduction && lm_ggml_is_contiguous(op->src[0]);
+            return has_simdgroup_reduction && lm_ggml_is_contiguous_rows(op->src[0]);
         case LM_GGML_OP_RMS_NORM:
         case LM_GGML_OP_L2_NORM:
             return has_simdgroup_reduction && (op->ne[0] % 4 == 0 && lm_ggml_is_contiguous_1(op->src[0]));
@@ -1804,12 +1926,33 @@ static bool lm_ggml_metal_supports_op(const struct lm_ggml_backend_metal_device_
             {
                 return op->ne[3] == 1;
             }
+        case LM_GGML_OP_SET_ROWS:
+            {
+                if (op->src[0]->type != LM_GGML_TYPE_F32) {
+                    return false;
+                }
+
+                switch (op->type) {
+                    case LM_GGML_TYPE_F32:
+                    case LM_GGML_TYPE_F16:
+                    case LM_GGML_TYPE_BF16:
+                    case LM_GGML_TYPE_Q8_0:
+                    case LM_GGML_TYPE_Q4_0:
+                    case LM_GGML_TYPE_Q4_1:
+                    case LM_GGML_TYPE_Q5_0:
+                    case LM_GGML_TYPE_Q5_1:
+                    case LM_GGML_TYPE_IQ4_NL:
+                        return true;
+                    default:
+                        return false;
+                };
+            }
         default:
             return false;
     }
 }
 
-static bool lm_ggml_metal_encode_node(
+static int lm_ggml_metal_encode_node(
                         lm_ggml_backend_t   backend,
                                    int   idx,
           id<MTLComputeCommandEncoder>   encoder,
@@ -1819,7 +1962,10 @@ static bool lm_ggml_metal_encode_node(
 
     struct lm_ggml_cgraph * gf = ctx->gf;
 
-    struct lm_ggml_tensor * node = lm_ggml_graph_node(gf, idx);
+    enum lm_ggml_op ops[8];
+
+    struct lm_ggml_tensor ** nodes = lm_ggml_graph_nodes(gf) + idx;
+    struct lm_ggml_tensor *  node  = nodes[0];
 
     //LM_GGML_LOG_INFO("%s: encoding node %3d, op = %8s\n", __func__, idx, lm_ggml_op_name(node->op));
 
@@ -1829,7 +1975,7 @@ static bool lm_ggml_metal_encode_node(
     struct lm_ggml_tensor * dst  = node;
 
     if (lm_ggml_is_empty(dst)) {
-        return true;
+        return 1;
     }
 
     switch (dst->op) {
@@ -1840,7 +1986,7 @@ static bool lm_ggml_metal_encode_node(
         case LM_GGML_OP_PERMUTE:
             {
                 // noop -> next node
-            } return true;
+            } return 1;
         default:
             {
             } break;
@@ -1906,6 +2052,8 @@ static bool lm_ggml_metal_encode_node(
     id<MTLBuffer> id_src1 = src1 ? lm_ggml_metal_get_buffer(src1, &offs_src1) : nil;
     id<MTLBuffer> id_src2 = src2 ? lm_ggml_metal_get_buffer(src2, &offs_src2) : nil;
     id<MTLBuffer> id_dst  = dst  ? lm_ggml_metal_get_buffer(dst,  &offs_dst)  : nil;
+
+    int n_fuse = 1;
 
 #if 0
     LM_GGML_LOG_INFO("%s: op - %s\n", __func__, lm_ggml_op_name(dst->op));
@@ -1978,36 +2126,14 @@ static bool lm_ggml_metal_encode_node(
                 LM_GGML_ASSERT(src0t == LM_GGML_TYPE_F32);
                 LM_GGML_ASSERT(src1t == LM_GGML_TYPE_F32);
 
+                LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(src0));
+                LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(src1));
+
                 const size_t offs = 0;
 
                 bool bcast_row = false;
 
                 id<MTLComputePipelineState> pipeline = nil;
-
-                if (lm_ggml_nelements(src1) == ne10 && lm_ggml_is_contiguous(src1) && ne00 % 4 == 0 && ne10 % 4 == 0) {
-                    LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
-
-                    // src1 is a row
-                    LM_GGML_ASSERT(ne11 == 1);
-
-                    switch (dst->op) {
-                        case LM_GGML_OP_ADD: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW].pipeline; break;
-                        case LM_GGML_OP_SUB: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SUB_ROW].pipeline; break;
-                        case LM_GGML_OP_MUL: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_MUL_ROW].pipeline; break;
-                        case LM_GGML_OP_DIV: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_DIV_ROW].pipeline; break;
-                        default: LM_GGML_ABORT("fatal error");
-                    }
-
-                    bcast_row = true;
-                } else {
-                    switch (dst->op) {
-                        case LM_GGML_OP_ADD: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD].pipeline; break;
-                        case LM_GGML_OP_SUB: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SUB].pipeline; break;
-                        case LM_GGML_OP_MUL: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_MUL].pipeline; break;
-                        case LM_GGML_OP_DIV: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_DIV].pipeline; break;
-                        default: LM_GGML_ABORT("fatal error");
-                    }
-                }
 
                 lm_ggml_metal_kargs_bin args = {
                     /*.ne00 =*/ ne00,
@@ -2035,12 +2161,117 @@ static bool lm_ggml_metal_encode_node(
                     /*.nb2  =*/ nb2,
                     /*.nb3  =*/ nb3,
                     /*.offs =*/ offs,
+                    /*.o1   =*/ { offs_src1 },
                 };
+
+                // c[0] = add(a,    b[0])
+                // c[1] = add(c[0], b[1])
+                // c[2] = add(c[1], b[2])
+                // ...
+                if (ctx_dev->use_fusion) {
+                    ops[0] = LM_GGML_OP_ADD;
+                    ops[1] = LM_GGML_OP_ADD;
+                    ops[2] = LM_GGML_OP_ADD;
+                    ops[3] = LM_GGML_OP_ADD;
+                    ops[4] = LM_GGML_OP_ADD;
+                    ops[5] = LM_GGML_OP_ADD;
+                    ops[6] = LM_GGML_OP_ADD;
+                    ops[7] = LM_GGML_OP_ADD;
+
+                    size_t offs_fuse;
+                    id<MTLBuffer> id_fuse;
+
+                    for (n_fuse = 0; n_fuse <= 6; ++n_fuse) {
+                        if (!lm_ggml_can_fuse(gf, idx + n_fuse, ops + n_fuse, 2)) {
+                            break;
+                        }
+
+                        if (nodes[n_fuse] != nodes[n_fuse + 1]->src[0]) {
+                            break;
+                        }
+
+                        // b[0] === b[1] === ...
+                        if (!lm_ggml_are_same_layout(nodes[n_fuse]->src[1], nodes[n_fuse + 1]->src[1])) {
+                            break;
+                        }
+
+                        // only fuse nodes if src1 is in the same Metal buffer
+                        id_fuse = lm_ggml_metal_get_buffer(nodes[n_fuse + 1]->src[1], &offs_fuse);
+                        if (id_fuse != id_src1) {
+                            break;
+                        }
+
+                        ctx_dev->fuse_cnt[nodes[n_fuse + 1]->op]++;
+
+                        args.o1[n_fuse + 1] = offs_fuse;
+                    }
+
+                    ++n_fuse;
+
+                    if (ctx_dev->debug_fusion > 1 && n_fuse > 1) {
+                        LM_GGML_LOG_DEBUG("%s: fuse: ADD x %d\n", __func__, n_fuse);
+                    }
+                }
+
+                if (lm_ggml_nelements(src1) == ne10 && lm_ggml_is_contiguous(src1) && ne00 % 4 == 0 && ne10 % 4 == 0) {
+                    LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
+
+                    // src1 is a row
+                    LM_GGML_ASSERT(ne11 == 1);
+
+                    switch (dst->op) {
+                        case LM_GGML_OP_ADD:
+                            {
+                                switch (n_fuse) {
+                                    case 1: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4       ].pipeline; break;
+                                    case 2: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_2].pipeline; break;
+                                    case 3: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_3].pipeline; break;
+                                    case 4: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_4].pipeline; break;
+                                    case 5: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_5].pipeline; break;
+                                    case 6: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_6].pipeline; break;
+                                    case 7: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_7].pipeline; break;
+                                    case 8: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_ROW_C4_FUSE_8].pipeline; break;
+                                    default: LM_GGML_ABORT("fatal error");
+                                }
+                            } break;
+                        case LM_GGML_OP_SUB: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SUB_ROW_C4].pipeline; break;
+                        case LM_GGML_OP_MUL: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_MUL_ROW_C4].pipeline; break;
+                        case LM_GGML_OP_DIV: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_DIV_ROW_C4].pipeline; break;
+                        default: LM_GGML_ABORT("fatal error");
+                    }
+
+                    bcast_row = true;
+                } else {
+                    switch (dst->op) {
+                        case LM_GGML_OP_ADD:
+                            {
+                                switch (n_fuse) {
+                                    case 1: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD       ].pipeline; break;
+                                    case 2: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_2].pipeline; break;
+                                    case 3: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_3].pipeline; break;
+                                    case 4: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_4].pipeline; break;
+                                    case 5: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_5].pipeline; break;
+                                    case 6: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_6].pipeline; break;
+                                    case 7: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_7].pipeline; break;
+                                    case 8: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ADD_FUSE_8].pipeline; break;
+                                    default: LM_GGML_ABORT("fatal error");
+                                }
+                            } break;
+                        case LM_GGML_OP_SUB: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SUB].pipeline; break;
+                        case LM_GGML_OP_MUL: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_MUL].pipeline; break;
+                        case LM_GGML_OP_DIV: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_DIV].pipeline; break;
+                        default: LM_GGML_ABORT("fatal error");
+                    }
+                }
+
+                if (n_fuse > 1) {
+                    id_dst = lm_ggml_metal_get_buffer(nodes[n_fuse - 1], &offs_dst);
+                }
 
                 [encoder setComputePipelineState:pipeline];
                 [encoder setBytes:&args length:sizeof(args) atIndex:0];
                 [encoder setBuffer:id_src0 offset:offs_src0 atIndex:1];
-                [encoder setBuffer:id_src1 offset:offs_src1 atIndex:2];
+                [encoder setBuffer:id_src1 offset:0         atIndex:2];
                 [encoder setBuffer:id_dst  offset:offs_dst  atIndex:3];
 
                 if (bcast_row) {
@@ -2048,7 +2279,11 @@ static bool lm_ggml_metal_encode_node(
 
                     [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
                 } else {
-                    const int nth = MIN((int) pipeline.maxTotalThreadsPerThreadgroup, ne0);
+                    int nth = 32;
+
+                    while (16*nth < ne0 && nth < (int) pipeline.maxTotalThreadsPerThreadgroup) {
+                        nth *= 2;
+                    }
 
                     [encoder dispatchThreadgroups:MTLSizeMake(ne01, ne02, ne03) threadsPerThreadgroup:MTLSizeMake(nth, 1, 1)];
                 }
@@ -2173,12 +2408,13 @@ static bool lm_ggml_metal_encode_node(
                     /*.nb2  =*/ pnb2,
                     /*.nb3  =*/ pnb3,
                     /*.offs =*/ offs,
+                    /*.o1   =*/ { offs_src1},
                 };
 
                 [encoder setComputePipelineState:pipeline];
                 [encoder setBytes:&args length:sizeof(args) atIndex:0];
                 [encoder setBuffer:id_src0 offset:offs_src0 atIndex:1];
-                [encoder setBuffer:id_src1 offset:offs_src1 atIndex:2];
+                [encoder setBuffer:id_src1 offset:0         atIndex:2];
                 [encoder setBuffer:id_dst  offset:offs_dst  atIndex:3];
 
                 const int nth = MIN((int) pipeline.maxTotalThreadsPerThreadgroup, ne00);
@@ -2190,7 +2426,9 @@ static bool lm_ggml_metal_encode_node(
                 LM_GGML_ASSERT(lm_ggml_is_contiguous(src0));
 
                 float scale;
-                memcpy(&scale, dst->op_params, sizeof(scale));
+                float bias;
+                memcpy(&scale, ((const int32_t *) dst->op_params) + 0, sizeof(float));
+                memcpy(&bias,  ((const int32_t *) dst->op_params) + 1, sizeof(float));
 
                 int64_t n = lm_ggml_nelements(dst);
 
@@ -2207,6 +2445,7 @@ static bool lm_ggml_metal_encode_node(
                 [encoder setBuffer:id_src0   offset:offs_src0 atIndex:0];
                 [encoder setBuffer:id_dst    offset:offs_dst  atIndex:1];
                 [encoder setBytes:&scale length:sizeof(scale) atIndex:2];
+                [encoder setBytes:&bias  length:sizeof(bias)  atIndex:3];
 
                 [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
             } break;
@@ -2370,11 +2609,145 @@ static bool lm_ggml_metal_encode_node(
 
                     [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
                 } break;
+                case LM_GGML_UNARY_OP_ABS:
+                {
+                    id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_ABS].pipeline;
+
+                    [encoder setComputePipelineState:pipeline];
+                    [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                    [encoder setBuffer:id_dst  offset:offs_dst  atIndex:1];
+
+                    const int64_t n = lm_ggml_nelements(dst);
+
+                    [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                } break;
+                case LM_GGML_UNARY_OP_SGN:
+                {
+                    id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SGN].pipeline;
+
+                    [encoder setComputePipelineState:pipeline];
+                    [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                    [encoder setBuffer:id_dst  offset:offs_dst  atIndex:1];
+
+                    const int64_t n = lm_ggml_nelements(dst);
+
+                    [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                } break;
+                case LM_GGML_UNARY_OP_STEP:
+                {
+                    id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_STEP].pipeline;
+
+                    [encoder setComputePipelineState:pipeline];
+                    [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                    [encoder setBuffer:id_dst  offset:offs_dst  atIndex:1];
+
+                    const int64_t n = lm_ggml_nelements(dst);
+
+                    [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                } break;
+                case LM_GGML_UNARY_OP_HARDSWISH:
+                {
+                    id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_HARDSWISH].pipeline;
+
+                    [encoder setComputePipelineState:pipeline];
+                    [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                    [encoder setBuffer:id_dst  offset:offs_dst  atIndex:1];
+
+                    const int64_t n = lm_ggml_nelements(dst);
+
+                    [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                } break;
+                case LM_GGML_UNARY_OP_HARDSIGMOID:
+                {
+                    id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_HARDSIGMOID].pipeline;
+
+                    [encoder setComputePipelineState:pipeline];
+                    [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                    [encoder setBuffer:id_dst  offset:offs_dst  atIndex:1];
+
+                    const int64_t n = lm_ggml_nelements(dst);
+
+                    [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                } break;
+                case LM_GGML_UNARY_OP_EXP:
+                {
+                    id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_EXP].pipeline;
+
+                    [encoder setComputePipelineState:pipeline];
+                    [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                    [encoder setBuffer:id_dst  offset:offs_dst  atIndex:1];
+
+                    const int64_t n = lm_ggml_nelements(dst);
+
+                    [encoder dispatchThreadgroups:MTLSizeMake(n, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                } break;
                 default:
                 {
                     LM_GGML_LOG_WARN("%s: node %3d, op = %8s not implemented\n", __func__, idx, lm_ggml_op_name(dst->op));
                     LM_GGML_ABORT("fatal error");
                 }
+            } break;
+        case LM_GGML_OP_GLU:
+            {
+                LM_GGML_ASSERT(lm_ggml_is_contiguous_1(src0));
+
+                if (src1) {
+                    LM_GGML_ASSERT(lm_ggml_are_same_shape(src0, src1));
+                }
+
+                id<MTLComputePipelineState> pipeline = nil;
+
+                switch (lm_ggml_get_glu_op(node)) {
+                    case LM_GGML_GLU_OP_REGLU:
+                        pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_REGLU].pipeline;
+                        break;
+                    case LM_GGML_GLU_OP_GEGLU:
+                        pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_GEGLU].pipeline;
+                        break;
+                    case LM_GGML_GLU_OP_SWIGLU:
+                        pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SWIGLU].pipeline;
+                        break;
+                    case LM_GGML_GLU_OP_GEGLU_ERF:
+                        pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_GEGLU_ERF].pipeline;
+                        break;
+                    case LM_GGML_GLU_OP_GEGLU_QUICK:
+                        pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_GEGLU_QUICK].pipeline;
+                        break;
+                    default:
+                        LM_GGML_ABORT("fatal error");
+                }
+
+                const int32_t swp = ((const int32_t *) dst->op_params)[1];
+
+                const int32_t i00 = swp ? ne0 : 0;
+                const int32_t i10 = swp ? 0 : ne0;
+
+                lm_ggml_metal_kargs_glu args = {
+                    /*.ne00 =*/ ne00,
+                    /*.nb01 =*/ nb01,
+                    /*.ne10 =*/ src1 ? ne10 : ne00,
+                    /*.nb11 =*/ src1 ? nb11 : nb01,
+                    /*.ne0  =*/ ne0,
+                    /*.nb1  =*/ nb1,
+                    /*.i00  =*/ src1 ? 0 : i00,
+                    /*.i10  =*/ src1 ? 0 : i10,
+                };
+
+                [encoder setComputePipelineState:pipeline];
+                [encoder setBuffer:id_src0 offset:offs_src0 atIndex:0];
+                if (src1) {
+                    [encoder setBuffer:id_src1 offset:offs_src1 atIndex:1];
+                } else {
+                    [encoder setBuffer:id_src0 offset:offs_src0 atIndex:1];
+                }
+                [encoder setBuffer:id_dst  offset:offs_dst  atIndex:2];
+                [encoder setBytes:&args length:sizeof(args) atIndex:3];
+
+                const int64_t nrows = lm_ggml_nrows(src0);
+
+                const int32_t nth = MIN((int) pipeline.maxTotalThreadsPerThreadgroup, ne00/2);
+
+                [encoder dispatchThreadgroups:MTLSizeMake(nrows, 1, 1) threadsPerThreadgroup:MTLSizeMake(nth, 1, 1)];
             } break;
         case LM_GGML_OP_SQR:
             {
@@ -2530,10 +2903,7 @@ static bool lm_ggml_metal_encode_node(
                 memcpy(&scale,    ((const int32_t *) dst->op_params) + 0, sizeof(scale));
                 memcpy(&max_bias, ((const int32_t *) dst->op_params) + 1, sizeof(max_bias));
 
-                const int64_t nrows_x = lm_ggml_nrows(src0);
-                const int64_t nrows_y = src0->ne[1];
-
-                const uint32_t n_head      = nrows_x/nrows_y;
+                const uint32_t n_head      = src0->ne[2];
                 const uint32_t n_head_log2 = 1u << (uint32_t) floorf(log2f((float) n_head));
 
                 const float m0 = powf(2.0f, -(max_bias       ) / n_head_log2);
@@ -2546,7 +2916,7 @@ static bool lm_ggml_metal_encode_node(
                 id<MTLBuffer> h_src0 = h_src0 = lm_ggml_metal_mem_pool_alloc(mem_pool, lm_ggml_nbytes(src0));
                 if (!h_src0) {
                     LM_GGML_LOG_ERROR("%s: failed to allocate buffer from memory pool, size = %zu\n", __func__, lm_ggml_nbytes(src0));
-                    return false;
+                    return 0;
                 }
 
                 offs_src0 = 0;
@@ -2593,6 +2963,18 @@ static bool lm_ggml_metal_encode_node(
                     /*.ne00        =*/ ne00,
                     /*.ne01        =*/ ne01,
                     /*.ne02        =*/ ne02,
+                    /*.nb01        =*/ nb01,
+                    /*.nb02        =*/ nb02,
+                    /*.nb03        =*/ nb03,
+                    /*.ne11        =*/ ne11,
+                    /*.ne12        =*/ ne12,
+                    /*.ne13        =*/ ne13,
+                    /*.nb11        =*/ nb11,
+                    /*.nb12        =*/ nb12,
+                    /*.nb13        =*/ nb13,
+                    /*.nb1         =*/ nb1,
+                    /*.nb2         =*/ nb2,
+                    /*.nb3         =*/ nb3,
                     /*.scale       =*/ scale,
                     /*.max_bias    =*/ max_bias,
                     /*.m0          =*/ m0,
@@ -2612,7 +2994,7 @@ static bool lm_ggml_metal_encode_node(
 
                 [encoder setThreadgroupMemoryLength:32*sizeof(float) atIndex:0];
 
-                [encoder dispatchThreadgroups:MTLSizeMake(ne01*ne02*ne03, 1, 1) threadsPerThreadgroup:MTLSizeMake(nth, 1, 1)];
+                [encoder dispatchThreadgroups:MTLSizeMake(ne01, ne02, ne03) threadsPerThreadgroup:MTLSizeMake(nth, 1, 1)];
             } break;
         case LM_GGML_OP_DIAG_MASK_INF:
             {
@@ -2686,71 +3068,91 @@ static bool lm_ggml_metal_encode_node(
                 struct lm_ggml_tensor * src3 = node->src[3];
                 struct lm_ggml_tensor * src4 = node->src[4];
                 struct lm_ggml_tensor * src5 = node->src[5];
+                struct lm_ggml_tensor * src6 = node->src[6];
 
                 LM_GGML_ASSERT(src3);
                 LM_GGML_ASSERT(src4);
                 LM_GGML_ASSERT(src5);
+                LM_GGML_ASSERT(src6);
 
                 size_t offs_src3 = 0;
                 size_t offs_src4 = 0;
                 size_t offs_src5 = 0;
+                size_t offs_src6 = 0;
 
                 id<MTLBuffer> id_src3 = src3 ? lm_ggml_metal_get_buffer(src3, &offs_src3) : nil;
                 id<MTLBuffer> id_src4 = src4 ? lm_ggml_metal_get_buffer(src4, &offs_src4) : nil;
                 id<MTLBuffer> id_src5 = src5 ? lm_ggml_metal_get_buffer(src5, &offs_src5) : nil;
+                id<MTLBuffer> id_src6 = src6 ? lm_ggml_metal_get_buffer(src6, &offs_src6) : nil;
 
-                const int64_t  ne30 = src3->ne[0]; LM_GGML_UNUSED(ne30);
+                const int64_t  ne30 = src3->ne[0];
                 const int64_t  ne31 = src3->ne[1]; LM_GGML_UNUSED(ne31);
 
-                const uint64_t nb30 = src3->nb[0];
+                const uint64_t nb30 = src3->nb[0]; LM_GGML_UNUSED(nb30);
                 const uint64_t nb31 = src3->nb[1];
 
                 const int64_t  ne40 = src4->ne[0]; LM_GGML_UNUSED(ne40);
-                const int64_t  ne41 = src4->ne[1]; LM_GGML_UNUSED(ne41);
+                const int64_t  ne41 = src4->ne[1];
                 const int64_t  ne42 = src4->ne[2]; LM_GGML_UNUSED(ne42);
+                const int64_t  ne43 = src4->ne[3]; LM_GGML_UNUSED(ne43);
 
-                const uint64_t nb40 = src4->nb[0];
+                const uint64_t nb40 = src4->nb[0]; LM_GGML_UNUSED(nb40);
                 const uint64_t nb41 = src4->nb[1];
                 const uint64_t nb42 = src4->nb[2];
+                const uint64_t nb43 = src4->nb[3];
 
                 const int64_t  ne50 = src5->ne[0]; LM_GGML_UNUSED(ne50);
                 const int64_t  ne51 = src5->ne[1]; LM_GGML_UNUSED(ne51);
                 const int64_t  ne52 = src5->ne[2]; LM_GGML_UNUSED(ne52);
+                const int64_t  ne53 = src5->ne[3]; LM_GGML_UNUSED(ne53);
 
-                const uint64_t nb50 = src5->nb[0];
+                const uint64_t nb50 = src5->nb[0]; LM_GGML_UNUSED(nb50);
                 const uint64_t nb51 = src5->nb[1];
                 const uint64_t nb52 = src5->nb[2];
+                const uint64_t nb53 = src5->nb[3];
+
+                const int64_t  ne60 = src6->ne[0]; LM_GGML_UNUSED(ne60);
+
+                const uint64_t nb60 = src6->nb[0]; LM_GGML_UNUSED(nb60);
 
                 const int64_t d_state      = ne00;
                 const int64_t d_inner      = ne01;
-                const int64_t n_seq_tokens = ne11;
-                const int64_t n_seqs       = ne02;
+                const int64_t n_head       = ne02;
+                const int64_t n_group      = ne41;
+                const int64_t n_seq_tokens = ne12;
+                const int64_t n_seqs       = ne13;
 
-                id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SSM_SCAN_F32].pipeline;
+                id<MTLComputePipelineState> pipeline = nil;
+
+                if (ne30 == 1) {
+                    // Mamba-2
+                    pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SSM_SCAN_F32_GROUP].pipeline;
+                } else {
+                    pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SSM_SCAN_F32].pipeline;
+                }
 
                 lm_ggml_metal_kargs_ssm_scan args = {
-                    /*.d_state =*/ d_state,
-                    /*.d_inner =*/ d_inner,
+                    /*.d_state      =*/ d_state,
+                    /*.d_inner      =*/ d_inner,
+                    /*.n_head       =*/ n_head,
+                    /*.n_group      =*/ n_group,
                     /*.n_seq_tokens =*/ n_seq_tokens,
-                    /*.n_seqs =*/ n_seqs,
-                    /*.nb00 =*/ nb00,
-                    /*.nb01 =*/ nb01,
-                    /*.nb02 =*/ nb02,
-                    /*.nb10 =*/ nb10,
-                    /*.nb11 =*/ nb11,
-                    /*.nb12 =*/ nb12,
-                    /*.nb13 =*/ nb13,
-                    /*.nb20 =*/ nb20,
-                    /*.nb21 =*/ nb21,
-                    /*.nb22 =*/ nb22,
-                    /*.nb30 =*/ nb30,
-                    /*.nb31 =*/ nb31,
-                    /*.nb40 =*/ nb40,
-                    /*.nb41 =*/ nb41,
-                    /*.nb42 =*/ nb42,
-                    /*.nb50 =*/ nb50,
-                    /*.nb51 =*/ nb51,
-                    /*.nb52 =*/ nb52,
+                    /*.n_seqs       =*/ n_seqs,
+                    /*.nb01         =*/ nb01,
+                    /*.nb02         =*/ nb02,
+                    /*.nb03         =*/ nb03,
+                    /*.nb11         =*/ nb11,
+                    /*.nb12         =*/ nb12,
+                    /*.nb13         =*/ nb13,
+                    /*.nb21         =*/ nb21,
+                    /*.nb22         =*/ nb22,
+                    /*.nb31         =*/ nb31,
+                    /*.nb41         =*/ nb41,
+                    /*.nb42         =*/ nb42,
+                    /*.nb43         =*/ nb43,
+                    /*.nb51         =*/ nb51,
+                    /*.nb52         =*/ nb52,
+                    /*.nb53         =*/ nb53,
                 };
 
                 [encoder setComputePipelineState:pipeline];
@@ -2760,10 +3162,17 @@ static bool lm_ggml_metal_encode_node(
                 [encoder setBuffer:id_src3 offset:offs_src3 atIndex:3];
                 [encoder setBuffer:id_src4 offset:offs_src4 atIndex:4];
                 [encoder setBuffer:id_src5 offset:offs_src5 atIndex:5];
-                [encoder setBuffer:id_dst  offset:offs_dst  atIndex:6];
-                [encoder setBytes:&args    length:sizeof(args) atIndex:7];
+                [encoder setBuffer:id_src6 offset:offs_src6 atIndex:6];
+                [encoder setBuffer:id_dst  offset:offs_dst  atIndex:7];
+                [encoder setBytes:&args    length:sizeof(args) atIndex:8];
 
-                [encoder dispatchThreadgroups:MTLSizeMake(d_inner, n_seqs, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                if (ne30 == 1) {
+                    // Mamba-2
+                    [encoder dispatchThreadgroups:MTLSizeMake(d_inner, n_head, n_seqs) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                } else {
+                    LM_GGML_ASSERT(d_inner == 1);
+                    [encoder dispatchThreadgroups:MTLSizeMake(n_head, n_seqs, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
+                }
             } break;
         case LM_GGML_OP_RWKV_WKV6:
             {
@@ -3383,7 +3792,7 @@ static bool lm_ggml_metal_encode_node(
                     id<MTLBuffer> h_src1 = lm_ggml_metal_mem_pool_alloc(mem_pool, s_src1);
                     if (!h_src1) {
                         LM_GGML_LOG_ERROR("%s: failed to allocate buffer from memory pool, size = %zu\n", __func__, s_src1);
-                        return false;
+                        return 0;
                     }
 
                     const int64_t neh0 = ne0;
@@ -3399,7 +3808,7 @@ static bool lm_ggml_metal_encode_node(
                     id<MTLBuffer> h_dst = lm_ggml_metal_mem_pool_alloc(mem_pool, s_dst);
                     if (!h_dst) {
                         LM_GGML_LOG_ERROR("%s: failed to allocate buffer from memory pool, size = %zu\n", __func__, s_dst);
-                        return false;
+                        return 0;
                     }
 
                     // tokens per expert
@@ -3407,7 +3816,7 @@ static bool lm_ggml_metal_encode_node(
                     id<MTLBuffer> h_tpe = lm_ggml_metal_mem_pool_alloc(mem_pool, s_tpe);
                     if (!h_tpe) {
                         LM_GGML_LOG_ERROR("%s: failed to allocate buffer from memory pool, size = %zu\n", __func__, s_tpe);
-                        return false;
+                        return 0;
                     }
 
                     // id map
@@ -3416,7 +3825,7 @@ static bool lm_ggml_metal_encode_node(
                     id<MTLBuffer> h_ids = lm_ggml_metal_mem_pool_alloc(mem_pool, s_ids);
                     if (!h_ids) {
                         LM_GGML_LOG_ERROR("%s: failed to allocate buffer from memory pool, size = %zu\n", __func__, s_ids);
-                        return false;
+                        return 0;
                     }
 
                     {
@@ -3777,22 +4186,166 @@ static bool lm_ggml_metal_encode_node(
                 };
 
                 [encoder setComputePipelineState:pipeline];
-                [encoder setBuffer:id_src0     offset:offs_src0 atIndex:0];
-                [encoder setBuffer:id_src1     offset:offs_src1 atIndex:1];
-                [encoder setBuffer:id_dst      offset:offs_dst  atIndex:2];
-                [encoder setBytes:&args length:sizeof(args) atIndex:3];
+                [encoder setBytes:&args    length:sizeof(args) atIndex:0];
+                [encoder setBuffer:id_src0 offset:offs_src0    atIndex:1];
+                [encoder setBuffer:id_src1 offset:offs_src1    atIndex:2];
+                [encoder setBuffer:id_dst  offset:offs_dst     atIndex:3];
 
                 [encoder dispatchThreadgroups:MTLSizeMake(ne10, ne11, 1) threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+            } break;
+        case LM_GGML_OP_SET_ROWS:
+            {
+                id<MTLComputePipelineState> pipeline = nil;
+
+                switch (dst->type) {
+                    case LM_GGML_TYPE_F32:    pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_F32   ].pipeline; break;
+                    case LM_GGML_TYPE_F16:    pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_F16   ].pipeline; break;
+                    case LM_GGML_TYPE_BF16:   pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_BF16  ].pipeline; break;
+                    case LM_GGML_TYPE_Q8_0:   pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q8_0  ].pipeline; break;
+                    case LM_GGML_TYPE_Q4_0:   pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q4_0  ].pipeline; break;
+                    case LM_GGML_TYPE_Q4_1:   pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q4_1  ].pipeline; break;
+                    case LM_GGML_TYPE_Q5_0:   pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q5_0  ].pipeline; break;
+                    case LM_GGML_TYPE_Q5_1:   pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_Q5_1  ].pipeline; break;
+                    case LM_GGML_TYPE_IQ4_NL: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_SET_ROWS_IQ4_NL].pipeline; break;
+                    default: LM_GGML_ABORT("not implemented");
+                }
+
+                const int32_t nk0 = ne0/lm_ggml_blck_size(dst->type);
+
+                int nth = 32; // SIMD width
+
+                while (nth < nk0 && nth < (int) pipeline.maxTotalThreadsPerThreadgroup) {
+                    nth *= 2;
+                }
+
+                int nrptg = 1;
+                if (nth > nk0) {
+                    nrptg = (nth + nk0 - 1)/nk0;
+                    nth   = nk0;
+
+                    if (nrptg*nth > (int) pipeline.maxTotalThreadsPerThreadgroup) {
+                        nrptg--;
+                    }
+                }
+
+                nth = MIN(nth, nk0);
+
+                lm_ggml_metal_kargs_set_rows args = {
+                    /*.nk0  =*/ nk0,
+                    /*.ne01 =*/ ne01,
+                    /*.nb01 =*/ nb01,
+                    /*.nb02 =*/ nb02,
+                    /*.nb03 =*/ nb03,
+                    /*.ne11 =*/ ne11,
+                    /*.ne12 =*/ ne12,
+                    /*.nb10 =*/ nb10,
+                    /*.nb11 =*/ nb11,
+                    /*.nb12 =*/ nb12,
+                    /*.nb1  =*/ nb1,
+                    /*.nb2  =*/ nb2,
+                    /*.nb3  =*/ nb3,
+                };
+
+                [encoder setComputePipelineState:pipeline];
+                [encoder setBytes:&args    length:sizeof(args) atIndex:0];
+                [encoder setBuffer:id_src0 offset:offs_src0    atIndex:1];
+                [encoder setBuffer:id_src1 offset:offs_src1    atIndex:2];
+                [encoder setBuffer:id_dst  offset:offs_dst     atIndex:3];
+
+                [encoder dispatchThreadgroups:MTLSizeMake((ne01 + nrptg - 1)/nrptg, ne02, ne03) threadsPerThreadgroup:MTLSizeMake(nth, nrptg, 1)];
             } break;
         case LM_GGML_OP_RMS_NORM:
             {
                 LM_GGML_ASSERT(ne00 % 4 == 0);
-                LM_GGML_ASSERT(lm_ggml_is_contiguous_1(src0));
+                LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(src0));
 
                 float eps;
                 memcpy(&eps, dst->op_params, sizeof(float));
 
-                id<MTLComputePipelineState> pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_RMS_NORM].pipeline;
+                lm_ggml_metal_kargs_rms_norm args = {
+                    /*.ne00   =*/ ne00,
+                    /*.ne00_4 =*/ ne00/4,
+                    /*.nb1    =*/ nb1,
+                    /*.nb2    =*/ nb2,
+                    /*.nb3    =*/ nb3,
+                    /*.eps    =*/ eps,
+                    /*.nef1   =*/ { ne01 },
+                    /*.nef2   =*/ { ne02 },
+                    /*.nef3   =*/ { ne03 },
+                    /*.nbf1   =*/ { nb01 },
+                    /*.nbf2   =*/ { nb02 },
+                    /*.nbf3   =*/ { nb03 },
+                };
+
+                size_t offs_fuse[2] = { 0, 0 };
+                id<MTLBuffer> id_fuse[2] = { id_src0, id_src0 };
+
+                // d[0] = rms_norm(a)
+                // d[1] = mul(d[0], b)
+                // d[2] = add(d[1], c)
+                if (ctx_dev->use_fusion) {
+                    ops[0] = LM_GGML_OP_RMS_NORM;
+                    ops[1] = LM_GGML_OP_MUL;
+                    ops[2] = LM_GGML_OP_ADD;
+
+                    for (n_fuse = 0; n_fuse <= 1; ++n_fuse) {
+                        if (!lm_ggml_can_fuse(gf, idx + n_fuse, ops + n_fuse, 2)) {
+                            break;
+                        }
+
+                        if (nodes[n_fuse] != nodes[n_fuse + 1]->src[0]) {
+                            break;
+                        }
+
+                        if (nodes[n_fuse + 1]->src[1]->ne[0] != node->ne[0]) {
+                            break;
+                        }
+
+                        if (!lm_ggml_is_contiguous_rows(nodes[n_fuse + 1]->src[1])) {
+                            break;
+                        }
+
+                        if (nodes[n_fuse + 1]->type != LM_GGML_TYPE_F32) {
+                            break;
+                        }
+
+                        ctx_dev->fuse_cnt[nodes[n_fuse + 1]->op]++;
+
+                        id_fuse[n_fuse] = lm_ggml_metal_get_buffer(nodes[n_fuse + 1]->src[1], &offs_fuse[n_fuse]);
+
+                        args.nef1[n_fuse + 1] = nodes[n_fuse + 1]->src[1]->ne[1];
+                        args.nef2[n_fuse + 1] = nodes[n_fuse + 1]->src[1]->ne[2];
+                        args.nef3[n_fuse + 1] = nodes[n_fuse + 1]->src[1]->ne[3];
+
+                        args.nbf1[n_fuse + 1] = nodes[n_fuse + 1]->src[1]->nb[1];
+                        args.nbf2[n_fuse + 1] = nodes[n_fuse + 1]->src[1]->nb[2];
+                        args.nbf3[n_fuse + 1] = nodes[n_fuse + 1]->src[1]->nb[3];
+                    }
+
+                    ++n_fuse;
+
+                    if (ctx_dev->debug_fusion > 1 && n_fuse > 1) {
+                        if (n_fuse == 2) {
+                            LM_GGML_LOG_DEBUG("%s: fuse: RMS_NORM + MUL\n", __func__);
+                        }
+                        if (n_fuse == 3) {
+                            LM_GGML_LOG_DEBUG("%s: fuse: RMS_NORM + MUL + ADD\n", __func__);
+                        }
+                    }
+                }
+
+                if (n_fuse > 1) {
+                    id_dst = lm_ggml_metal_get_buffer(nodes[n_fuse - 1], &offs_dst);
+                }
+
+                id<MTLComputePipelineState> pipeline;
+
+                switch (n_fuse) {
+                    case 1: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_RMS_NORM        ].pipeline; break;
+                    case 2: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_RMS_NORM_MUL    ].pipeline; break;
+                    case 3: pipeline = ctx->kernels[LM_GGML_METAL_KERNEL_TYPE_RMS_NORM_MUL_ADD].pipeline; break;
+                    default: LM_GGML_ABORT("unsupported n_fuse = %d\n", n_fuse);
+                }
 
                 int nth = 32; // SIMD width
 
@@ -3803,23 +4356,16 @@ static bool lm_ggml_metal_encode_node(
                 nth = MIN(nth, (int) pipeline.maxTotalThreadsPerThreadgroup);
                 nth = MIN(nth, ne00/4);
 
-                lm_ggml_metal_kargs_rms_norm args = {
-                    /*.ne00   =*/ ne00,
-                    /*.ne00_4 =*/ ne00/4,
-                    /*.nb01   =*/ nb01,
-                    /*.eps    =*/ eps,
-                };
-
                 [encoder setComputePipelineState:pipeline];
-                [encoder setBytes:&args length:sizeof(args) atIndex:0];
-                [encoder setBuffer:id_src0 offset:offs_src0 atIndex:1];
-                [encoder setBuffer:id_dst  offset:offs_dst  atIndex:2];
+                [encoder setBytes:&args length:sizeof(args)       atIndex:0];
+                [encoder setBuffer:id_src0    offset:offs_src0    atIndex:1];
+                [encoder setBuffer:id_fuse[0] offset:offs_fuse[0] atIndex:2];
+                [encoder setBuffer:id_fuse[1] offset:offs_fuse[1] atIndex:3];
+                [encoder setBuffer:id_dst     offset:offs_dst     atIndex:4];
 
                 [encoder setThreadgroupMemoryLength:32*sizeof(float) atIndex:0];
 
-                const int64_t nrows = lm_ggml_nrows(src0);
-
-                [encoder dispatchThreadgroups:MTLSizeMake(nrows, 1, 1) threadsPerThreadgroup:MTLSizeMake(nth, 1, 1)];
+                [encoder dispatchThreadgroups:MTLSizeMake(ne01, ne02, ne03) threadsPerThreadgroup:MTLSizeMake(nth, 1, 1)];
             } break;
         case LM_GGML_OP_L2_NORM:
             {
@@ -4804,7 +5350,11 @@ static bool lm_ggml_metal_encode_node(
                     /*.nb21          =*/ nb21,
                     /*.nb22          =*/ nb22,
                     /*.nb23          =*/ nb23,
+                    /*.ne32          =*/ ne32,
+                    /*.ne33          =*/ ne33,
                     /*.nb31          =*/ nb31,
+                    /*.nb32          =*/ nb32,
+                    /*.nb33          =*/ nb33,
                     /*.ne1           =*/ ne1,
                     /*.ne2           =*/ ne2,
                     /*.scale         =*/ scale,
@@ -5210,7 +5760,7 @@ static bool lm_ggml_metal_encode_node(
             }
     }
 
-    return true;
+    return n_fuse;
 }
 
 static enum lm_ggml_status lm_ggml_metal_graph_compute(
@@ -5716,20 +6266,22 @@ static void lm_ggml_backend_metal_set_n_cb(lm_ggml_backend_t backend, int n_cb) 
         struct lm_ggml_metal_mem_pool * mem_pool = ctx->cmd_bufs[cb_idx].mem_pool;
         lm_ggml_metal_mem_pool_reset(mem_pool);
 
-        for (int idx = node_start; idx < node_end; ++idx) {
+        for (int idx = node_start; idx < node_end;) {
             if (should_capture) {
                 [encoder pushDebugGroup:[NSString stringWithCString:lm_ggml_op_desc(lm_ggml_graph_node(ctx->gf, idx)) encoding:NSUTF8StringEncoding]];
             }
 
-            const bool res = lm_ggml_metal_encode_node(backend, idx, encoder, mem_pool);
+            const int res = lm_ggml_metal_encode_node(backend, idx, encoder, mem_pool);
 
             if (should_capture) {
                 [encoder popDebugGroup];
             }
 
-            if (!res) {
+            if (res == 0) {
                 break;
             }
+
+            idx += res;
         }
 
         [encoder endEncoding];
