@@ -253,6 +253,8 @@ Java_com_rnllama_LlamaContext_initContext(
     jfloat rope_freq_scale,
     jint pooling_type,
     jboolean ctx_shift,
+    jboolean kv_unified,
+    jboolean swa_full,
     jobject load_progress_callback
 ) {
     UNUSED(thiz);
@@ -274,6 +276,8 @@ Java_com_rnllama_LlamaContext_initContext(
     defaultParams.n_batch = n_batch;
     defaultParams.n_ubatch = n_ubatch;
     defaultParams.ctx_shift = ctx_shift;
+    defaultParams.kv_unified = kv_unified;
+    defaultParams.swa_full = swa_full;
 
     if (pooling_type != -1) {
         defaultParams.pooling_type = static_cast<enum llama_pooling_type>(pooling_type);
@@ -296,10 +300,22 @@ Java_com_rnllama_LlamaContext_initContext(
     defaultParams.n_gpu_layers = n_gpu_layers;
     defaultParams.flash_attn = flash_attn;
 
-    const char *cache_type_k_chars = env->GetStringUTFChars(cache_type_k, nullptr);
-    const char *cache_type_v_chars = env->GetStringUTFChars(cache_type_v, nullptr);
-    defaultParams.cache_type_k = rnllama::kv_cache_type_from_str(cache_type_k_chars);
-    defaultParams.cache_type_v = rnllama::kv_cache_type_from_str(cache_type_v_chars);
+    const char *cache_type_k_chars = nullptr;
+    const char *cache_type_v_chars = nullptr;
+    
+    if (cache_type_k) {
+        cache_type_k_chars = env->GetStringUTFChars(cache_type_k, nullptr);
+        if (cache_type_k_chars) {
+            defaultParams.cache_type_k = rnllama::kv_cache_type_from_str(cache_type_k_chars);
+        }
+    }
+    
+    if (cache_type_v) {
+        cache_type_v_chars = env->GetStringUTFChars(cache_type_v, nullptr);
+        if (cache_type_v_chars) {
+            defaultParams.cache_type_v = rnllama::kv_cache_type_from_str(cache_type_v_chars);
+        }
+    }
 
     defaultParams.use_mlock = use_mlock;
     defaultParams.use_mmap = use_mmap;
@@ -338,8 +354,8 @@ Java_com_rnllama_LlamaContext_initContext(
 
     env->ReleaseStringUTFChars(model_path_str, model_path_chars);
     env->ReleaseStringUTFChars(chat_template, chat_template_chars);
-    env->ReleaseStringUTFChars(cache_type_k, cache_type_k_chars);
-    env->ReleaseStringUTFChars(cache_type_v, cache_type_v_chars);
+    if (cache_type_k_chars) env->ReleaseStringUTFChars(cache_type_k, cache_type_k_chars);
+    if (cache_type_v_chars) env->ReleaseStringUTFChars(cache_type_v, cache_type_v_chars);
 
     LOGI("[RNLlama] is_model_loaded %s", (is_model_loaded ? "true" : "false"));
     if (is_model_loaded) {
@@ -417,7 +433,7 @@ Java_com_rnllama_LlamaContext_loadModelDetails(
     for (int i = 0; i < count; i++) {
         char key[256];
         llama_model_meta_key_by_index(llama->model, i, key, sizeof(key));
-        char val[4096];
+        char val[16384];  // gpt-oss's chat template is 12kb 
         llama_model_meta_val_str_by_index(llama->model, i, val, sizeof(val));
 
         putString(env, meta, key, val);
@@ -485,7 +501,10 @@ Java_com_rnllama_LlamaContext_getFormattedChatWithJinja(
     jstring tools,
     jboolean parallel_tool_calls,
     jstring tool_choice,
-    jboolean enable_thinking
+    jboolean enable_thinking,
+    jboolean add_generation_prompt,
+    jstring now_str,
+    jstring chat_template_kwargs
 ) {
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
@@ -495,6 +514,22 @@ Java_com_rnllama_LlamaContext_getFormattedChatWithJinja(
     const char *json_schema_chars = env->GetStringUTFChars(json_schema, nullptr);
     const char *tools_chars = env->GetStringUTFChars(tools, nullptr);
     const char *tool_choice_chars = env->GetStringUTFChars(tool_choice, nullptr);
+    const char *now_chars = env->GetStringUTFChars(now_str, nullptr);
+    const char *kwargs_chars = env->GetStringUTFChars(chat_template_kwargs, nullptr);
+
+    std::map<std::string, std::string> kwargs_map;
+    if (strlen(kwargs_chars) > 0) {
+        try {
+            auto kwargs_json = json::parse(kwargs_chars);
+            for (auto& [key, value] : kwargs_json.items()) {
+                if (value.is_string()) {
+                    kwargs_map[key] = value.get<std::string>();
+                }
+            }
+        } catch (...) {
+            // Ignore JSON parsing errors for kwargs
+        }
+    }
 
     auto result = createWriteableMap(env);
     try {
@@ -505,7 +540,10 @@ Java_com_rnllama_LlamaContext_getFormattedChatWithJinja(
             tools_chars,
             parallel_tool_calls,
             tool_choice_chars,
-            enable_thinking
+            enable_thinking,
+            add_generation_prompt,
+            now_chars,
+            kwargs_map
         );
         putString(env, result, "prompt", formatted.prompt.c_str());
         putInt(env, result, "chat_format", static_cast<int>(formatted.format));
@@ -546,6 +584,8 @@ Java_com_rnllama_LlamaContext_getFormattedChatWithJinja(
     env->ReleaseStringUTFChars(chat_template, tmpl_chars);
     env->ReleaseStringUTFChars(json_schema, json_schema_chars);
     env->ReleaseStringUTFChars(tool_choice, tool_choice_chars);
+    env->ReleaseStringUTFChars(now_str, now_chars);
+    env->ReleaseStringUTFChars(chat_template_kwargs, kwargs_chars);
     return reinterpret_cast<jobject>(result);
 }
 
@@ -1027,6 +1067,8 @@ Java_com_rnllama_LlamaContext_doCompletion(
                 chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
             } else if (strcmp(reasoning_format_chars, "deepseek-legacy") == 0) {
                 chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK_LEGACY;
+            } else if (strcmp(reasoning_format_chars, "auto") == 0) {
+                chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
             } else {
                 chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_NONE;
             }
@@ -1060,6 +1102,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     }
 
     auto result = createWriteableMap(env);
+    putInt(env, result, "chat_format", chat_format);
     putString(env, result, "text", llama->generated_text.c_str());
     if (!content.empty()) {
         putString(env, result, "content", content.c_str());
@@ -1076,6 +1119,7 @@ Java_com_rnllama_LlamaContext_doCompletion(
     putInt(env, result, "tokens_evaluated", llama->num_prompt_tokens);
     putInt(env, result, "truncated", llama->truncated);
     putBoolean(env, result, "context_full", llama->context_full);
+    putBoolean(env, result, "interrupted", llama->is_interrupted);
     putInt(env, result, "stopped_eos", llama->stopped_eos);
     putInt(env, result, "stopped_word", llama->stopped_word);
     putInt(env, result, "stopped_limit", llama->stopped_limit);
@@ -1515,13 +1559,14 @@ Java_com_rnllama_LlamaContext_initVocoder(
     JNIEnv *env,
     jobject thiz,
     jlong context_ptr,
-    jstring vocoder_model_path
+    jstring vocoder_model_path,
+    jint batch_size
 ) {
     UNUSED(env);
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
     const char *vocoder_model_path_chars = env->GetStringUTFChars(vocoder_model_path, nullptr);
-    bool result = llama->initVocoder(vocoder_model_path_chars);
+    bool result = llama->initVocoder(vocoder_model_path_chars, batch_size);
     env->ReleaseStringUTFChars(vocoder_model_path, vocoder_model_path_chars);
     return result;
 }
@@ -1550,7 +1595,7 @@ Java_com_rnllama_LlamaContext_isVocoderEnabled(
     return llama->isVocoderEnabled();
 }
 
-JNIEXPORT jstring JNICALL
+JNIEXPORT jobject JNICALL
 Java_com_rnllama_LlamaContext_getFormattedAudioCompletion(
     JNIEnv *env,
     jobject thiz,
@@ -1558,15 +1603,29 @@ Java_com_rnllama_LlamaContext_getFormattedAudioCompletion(
     jstring speaker_json_str,
     jstring text_to_speak
 ) {
-    UNUSED(env);
     UNUSED(thiz);
     auto llama = context_map[(long) context_ptr];
     const char *speaker_json_str_chars = env->GetStringUTFChars(speaker_json_str, nullptr);
     const char *text_to_speak_chars = env->GetStringUTFChars(text_to_speak, nullptr);
-    std::string result = llama->getFormattedAudioCompletion(speaker_json_str_chars, text_to_speak_chars);
+
+    auto result = createWriteableMap(env);
+    try {
+        auto audio_result = llama->getFormattedAudioCompletion(speaker_json_str_chars, text_to_speak_chars);
+        putString(env, result, "prompt", audio_result.prompt.c_str());
+        if (audio_result.grammar != nullptr) {
+            putString(env, result, "grammar", audio_result.grammar);
+        }
+    } catch (const std::exception &e) {
+        env->ReleaseStringUTFChars(speaker_json_str, speaker_json_str_chars);
+        env->ReleaseStringUTFChars(text_to_speak, text_to_speak_chars);
+        jclass exceptionClass = env->FindClass("java/lang/RuntimeException");
+        env->ThrowNew(exceptionClass, e.what());
+        return nullptr;
+    }
+
     env->ReleaseStringUTFChars(speaker_json_str, speaker_json_str_chars);
     env->ReleaseStringUTFChars(text_to_speak, text_to_speak_chars);
-    return env->NewStringUTF(result.c_str());
+    return result;
 }
 
 JNIEXPORT jobject JNICALL

@@ -105,6 +105,9 @@ RCT_EXPORT_METHOD(getFormattedChat:(double)contextId
             BOOL parallelToolCalls = [params[@"parallel_tool_calls"] boolValue];
             NSString *toolChoice = params[@"tool_choice"];
             BOOL enableThinking = [params[@"enable_thinking"] boolValue];
+            BOOL addGenerationPrompt = params[@"add_generation_prompt"] ? [params[@"add_generation_prompt"] boolValue] : YES;
+            NSString *nowStr = params[@"now"] ?: @"";
+            NSString *chatTemplateKwargs = params[@"chat_template_kwargs"] ?: @"";
             resolve([context getFormattedChatWithJinja:messages
                 withChatTemplate:chatTemplate
                 withJsonSchema:jsonSchema
@@ -112,6 +115,9 @@ RCT_EXPORT_METHOD(getFormattedChat:(double)contextId
                 withParallelToolCalls:parallelToolCalls
                 withToolChoice:toolChoice
                 withEnableThinking:enableThinking
+                withAddGenerationPrompt:addGenerationPrompt
+                withNow:nowStr
+                withChatTemplateKwargs:chatTemplateKwargs
             ]);
         } else {
             resolve([context getFormattedChat:messages withChatTemplate:chatTemplate]);
@@ -462,7 +468,7 @@ RCT_EXPORT_METHOD(releaseMultimodal:(double)contextId
 }
 
 RCT_EXPORT_METHOD(initVocoder:(double)contextId
-                 withVocoderModelPath:(NSString *)vocoderModelPath
+                 withParams:(NSDictionary *)params
                  withResolver:(RCTPromiseResolveBlock)resolve
                  withRejecter:(RCTPromiseRejectBlock)reject)
 {
@@ -477,7 +483,7 @@ RCT_EXPORT_METHOD(initVocoder:(double)contextId
     }
 
     @try {
-        bool success = [context initVocoder:vocoderModelPath];
+        bool success = [context initVocoder:params];
         resolve(@(success));
     } @catch (NSException *exception) {
         reject(@"llama_cpp_error", exception.reason, nil);
@@ -515,7 +521,7 @@ RCT_EXPORT_METHOD(getFormattedAudioCompletion:(double)contextId
     }
 
     @try {
-        NSString *result = [context getFormattedAudioCompletion:speakerJsonStr textToSpeak:textToSpeak];
+        NSDictionary *result = [context getFormattedAudioCompletion:speakerJsonStr textToSpeak:textToSpeak];
         resolve(result);
     } @catch (NSException *exception) {
         reject(@"llama_cpp_error", exception.reason, nil);

@@ -174,6 +174,10 @@ public class LlamaContext {
       params.hasKey("pooling_type") ? params.getInt("pooling_type") : -1,
       // boolean ctx_shift,
       params.hasKey("ctx_shift") ? params.getBoolean("ctx_shift") : true,
+      // boolean kv_unified,
+      params.hasKey("kv_unified") ? params.getBoolean("kv_unified") : false,
+      // boolean swa_full,
+      params.hasKey("swa_full") ? params.getBoolean("swa_full") : false,
       // LoadProgressCallback load_progress_callback
       params.hasKey("use_progress_callback") ? new LoadProgressCallback(this) : null
     );
@@ -200,7 +204,7 @@ public class LlamaContext {
     return loadedLibrary;
   }
 
-  public WritableMap getFormattedChatWithJinja(String messages, String chatTemplate, ReadableMap params) {
+  public WritableMap getFormattedChatWithJinja(String messages, String chatTemplate, ReadableMap params, boolean addGenerationPrompt, String nowStr, String chatTemplateKwargs) {
     String jsonSchema = params.hasKey("json_schema") ? params.getString("json_schema") : "";
     String tools = params.hasKey("tools") ? params.getString("tools") : "";
     Boolean parallelToolCalls = params.hasKey("parallel_tool_calls") ? params.getBoolean("parallel_tool_calls") : false;
@@ -214,7 +218,10 @@ public class LlamaContext {
       tools,
       parallelToolCalls,
       toolChoice,
-      enableThinking
+      enableThinking,
+      addGenerationPrompt,
+      nowStr,
+      chatTemplateKwargs
     );
   }
 
@@ -523,15 +530,15 @@ public class LlamaContext {
     releaseMultimodal(this.context);
   }
 
-  public boolean initVocoder(String vocoderModelPath) {
-    return initVocoder(this.context, vocoderModelPath);
+  public boolean initVocoder(ReadableMap params) {
+    return initVocoder(this.context, params.getString("path"), params.hasKey("n_batch") ? params.getInt("n_batch") : 512);
   }
 
   public boolean isVocoderEnabled() {
     return isVocoderEnabled(this.context);
   }
 
-  public String getFormattedAudioCompletion(String speakerJsonStr, String textToSpeak) {
+  public WritableMap getFormattedAudioCompletion(String speakerJsonStr, String textToSpeak) {
     return getFormattedAudioCompletion(this.context, speakerJsonStr, textToSpeak);
   }
 
@@ -672,6 +679,8 @@ public class LlamaContext {
     float rope_freq_scale,
     int pooling_type,
     boolean ctx_shift,
+    boolean kv_unified,
+    boolean swa_full,
     LoadProgressCallback load_progress_callback
   );
   protected static native boolean initMultimodal(long contextPtr, String mmproj_path, boolean MMPROJ_USE_GPU);
@@ -689,7 +698,10 @@ public class LlamaContext {
     String tools,
     boolean parallelToolCalls,
     String toolChoice,
-    boolean enableThinking
+    boolean enableThinking,
+    boolean addGenerationPrompt,
+    String nowStr,
+    String chatTemplateKwargs
   );
   protected static native String getFormattedChat(
     long contextPtr,
@@ -767,9 +779,9 @@ public class LlamaContext {
   protected static native void unsetLog();
   protected static native void releaseMultimodal(long contextPtr);
   protected static native boolean isVocoderEnabled(long contextPtr);
-  protected static native String getFormattedAudioCompletion(long contextPtr, String speakerJsonStr, String textToSpeak);
+  protected static native WritableMap getFormattedAudioCompletion(long contextPtr, String speakerJsonStr, String textToSpeak);
   protected static native WritableArray getAudioCompletionGuideTokens(long contextPtr, String textToSpeak);
   protected static native WritableArray decodeAudioTokens(long contextPtr, int[] tokens);
-  protected static native boolean initVocoder(long contextPtr, String vocoderModelPath);
+  protected static native boolean initVocoder(long contextPtr, String vocoderModelPath, int batchSize);
   protected static native void releaseVocoder(long contextPtr);
 }

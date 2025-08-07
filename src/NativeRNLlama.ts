@@ -71,6 +71,17 @@ export type NativeContextParams = {
    */
   ctx_shift?: boolean
 
+  /**
+   * Use a unified buffer across the input sequences when computing the attention.
+   * Try to disable when n_seq_max > 1 for improved performance when the sequences do not share a large prefix.
+   */
+  kv_unified?: boolean
+
+  /**
+   * Use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
+   */
+  swa_full?: boolean
+
   // Embedding params
   embedding?: boolean
   embd_normalize?: number
@@ -292,6 +303,8 @@ export type NativeCompletionResult = {
    */
   content: string
 
+  chat_format: number
+
   tokens_predicted: number
   tokens_evaluated: number
   truncated: boolean
@@ -299,6 +312,8 @@ export type NativeCompletionResult = {
   stopped_word: string
   stopped_limit: number
   stopping_word: string
+  context_full: boolean
+  interrupted: boolean
   tokens_cached: number
   timings: NativeCompletionResultTimings
 
@@ -450,6 +465,9 @@ export interface Spec extends TurboModule {
       parallel_tool_calls?: string
       tool_choice?: string
       enable_thinking?: boolean
+      add_generation_prompt?: boolean
+      now?: string
+      chat_template_kwargs?: string
     },
   ): Promise<JinjaFormattedChatResult | string>
   loadSession(
@@ -523,9 +541,18 @@ export interface Spec extends TurboModule {
   ): Promise<void>
 
   // TTS methods
-  initVocoder(contextId: number, vocoderModelPath: string): Promise<boolean>
+  initVocoder(
+    contextId: number,
+    params: {
+      path: string
+      n_batch?: number
+    },
+  ): Promise<boolean>
   isVocoderEnabled(contextId: number): Promise<boolean>
-  getFormattedAudioCompletion(contextId: number, speakerJsonStr: string, textToSpeak: string): Promise<string>
+  getFormattedAudioCompletion(contextId: number, speakerJsonStr: string, textToSpeak: string): Promise<{
+    prompt: string
+    grammar?: string
+  }>
   getAudioCompletionGuideTokens(contextId: number, textToSpeak: string): Promise<Array<number>>
   decodeAudioTokens(contextId: number, tokens: number[]): Promise<Array<number>>
   releaseVocoder(contextId: number): Promise<void>

@@ -57,6 +57,7 @@ if (!NativeModules.RNLlama) {
         audio_tokens: [
           1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010,
         ],
+        content: '*giggles*',
         text: '*giggles*',
         completion_probabilities: [
           {
@@ -238,8 +239,9 @@ if (!NativeModules.RNLlama) {
     }),
     isVocoderEnabled: jest.fn(async (id) => vocoderMap[id] || false),
     getFormattedAudioCompletion: jest.fn(
-      async (id, speakerJsonStr, textToSpeak) =>
-        `${speakerJsonStr || '<default speaker>'}<sep>${textToSpeak}`,
+      async (id, speakerJsonStr, textToSpeak) => ({
+        prompt: `${speakerJsonStr || '<default speaker>'}<sep>${textToSpeak}`,
+      }),
     ),
     getAudioCompletionGuideTokens: jest.fn(async (id, textToSpeak) =>
       textToSpeak.split('').map((char) => char.charCodeAt(0) + 1000),

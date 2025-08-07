@@ -96,12 +96,18 @@ static const std::vector<lm_ggml_type> kv_cache_types = {
 };
 
 lm_ggml_type kv_cache_type_from_str(const std::string & s) {
+    if (s.empty()) {
+        return LM_GGML_TYPE_F16; // Default to F16 if empty string
+    }
+
     for (const auto & type : kv_cache_types) {
         if (lm_ggml_type_name(type) == s) {
             return type;
         }
     }
-    throw std::runtime_error("Unsupported cache type: " + s);
+
+    // Return default type instead of throwing to avoid crashes
+    return LM_GGML_TYPE_F16;
 }
 
 static void llama_batch_clear(llama_batch *batch) {
@@ -306,13 +312,16 @@ bool llama_rn_context::validateModelChatTemplate(bool use_jinja, const char *nam
 }
 
 common_chat_params llama_rn_context::getFormattedChatWithJinja(
-  const std::string &messages,
-  const std::string &chat_template,
-  const std::string &json_schema,
-  const std::string &tools,
-  const bool &parallel_tool_calls,
-  const std::string &tool_choice,
-  const bool &enable_thinking
+        const std::string& messages,
+        const std::string& chat_template,
+        const std::string& json_schema,
+        const std::string& tools,
+        const bool& parallel_tool_calls,
+        const std::string& tool_choice,
+        const bool& enable_thinking,
+        const bool& add_generation_prompt,
+        const std::string& now_str,
+        const std::map<std::string, std::string>& chat_template_kwargs
 ) const {
     common_chat_templates_inputs inputs;
     inputs.use_jinja = true;
@@ -329,6 +338,21 @@ common_chat_params llama_rn_context::getFormattedChatWithJinja(
         inputs.json_schema = json::parse(json_schema);
     }
     inputs.enable_thinking = enable_thinking;
+    inputs.add_generation_prompt = add_generation_prompt;
+
+    // Handle now parameter - parse timestamp or use current time
+    if (!now_str.empty()) {
+        try {
+            // Try to parse as timestamp (seconds since epoch)
+            auto timestamp = std::stoll(now_str);
+            inputs.now = std::chrono::system_clock::from_time_t(timestamp);
+        } catch (...) {
+            // If parsing fails, use current time
+            inputs.now = std::chrono::system_clock::now();
+        }
+    }
+
+    inputs.chat_template_kwargs = chat_template_kwargs;
 
     // If chat_template is provided, create new one and use it (probably slow)
     if (!chat_template.empty()) {
@@ -543,7 +567,14 @@ completion_token_output llama_rn_context::nextToken()
 
         llama_token new_token_id = common_sampler_sample(ctx_sampling, ctx, -1);
 
-        if (next_token_uses_guide_token && !guide_tokens.empty() && !llama_vocab_is_control(vocab, new_token_id) && !llama_vocab_is_eog(vocab, new_token_id)) {
+        if (llama_vocab_is_eog(vocab, new_token_id)) {
+            has_next_token = false;
+            stopped_eos = true;
+            LOG_VERBOSE("EOS: %s", common_token_to_piece(ctx, new_token_id).c_str());
+            return result;
+        }
+
+        if (next_token_uses_guide_token && !guide_tokens.empty() && !llama_vocab_is_control(vocab, new_token_id)) {
             new_token_id = guide_tokens[0];
             guide_tokens.erase(guide_tokens.begin());
         }
@@ -578,15 +609,6 @@ completion_token_output llama_rn_context::nextToken()
     embd.push_back(result.tok);
     // decrement remaining sampling budget
     --n_remain;
-
-    if (!embd.empty() && embd.back() == llama_vocab_eos(vocab))
-    {
-        // stopping_word = llama_token_to_piece(ctx, embd.back());
-        has_next_token = false;
-        stopped_eos = true;
-        LOG_VERBOSE("eos token found", "");
-        return result;
-    }
 
     has_next_token = params.n_predict == -1 || n_remain != 0;
     return result;
@@ -1401,22 +1423,29 @@ void llama_rn_context::releaseMultimodal() {
 
 struct llama_rn_context_vocoder {
     common_init_result init_result;
+    common_params params;
     llama_model *model = nullptr;
     llama_context *ctx = nullptr;
     tts_type type = UNKNOWN;
 };
 
-bool llama_rn_context::initVocoder(const std::string &vocoder_model_path) {
+bool llama_rn_context::initVocoder(const std::string &vocoder_model_path, int batch_size) {
     if (vocoder_wrapper != nullptr) {
         return true;
     }
+    common_params params = this->params;
     params.model.path = vocoder_model_path;
     params.embedding = true;
     params.ctx_shift = false;
+    if (batch_size > 0) {
+        params.n_batch = batch_size;
+    }
     params.n_ubatch = params.n_batch;
+
 
     llama_rn_context_vocoder *wrapper = new llama_rn_context_vocoder{
         .init_result = common_init_from_params(params),
+        .params = params,
     };
 
     wrapper->model = wrapper->init_result.model.get();
@@ -1466,6 +1495,9 @@ tts_type llama_rn_context::getTTSType(json speaker) {
     const char *chat_template = llama_model_chat_template(model, nullptr);
     if (chat_template && std::string(chat_template) == "outetts-0.3") {
         return OUTETTS_V0_3;
+    }
+    if (model->name.find("OuteTTS 0.1") != std::string::npos) {
+        return OUTETTS_V0_1;
     }
     return OUTETTS_V0_2;
 }
@@ -1659,7 +1691,7 @@ static std::string process_text(const std::string & text, const tts_type tts_typ
     return processed_text;
 }
 
-std::string llama_rn_context::getFormattedAudioCompletion(const std::string &speaker_json_str, const std::string &text_to_speak) {
+llama_rn_audio_completion_result llama_rn_context::getFormattedAudioCompletion(const std::string &speaker_json_str, const std::string &text_to_speak) {
     if (!isVocoderEnabled()) {
         throw std::runtime_error("Vocoder is not enabled but audio completion is requested");
     }
@@ -1670,7 +1702,7 @@ std::string llama_rn_context::getFormattedAudioCompletion(const std::string &spe
     const tts_type type = getTTSType(speaker);
     if (type == UNKNOWN) {
         LOG_ERROR("Unknown TTS version");
-        return "";
+        return {"", nullptr};
     }
 
     if (type == OUTETTS_V0_3) {
@@ -1684,7 +1716,15 @@ std::string llama_rn_context::getFormattedAudioCompletion(const std::string &spe
         audio_data = audio_data_from_speaker(speaker, type);
     }
 
-    return "<|im_start|>\n" + audio_text + process_text(text_to_speak, type) + "<|text_end|>\n" + audio_data + "\n";
+    std::string prompt = "<|im_start|>\n" + audio_text + process_text(text_to_speak, type) + "<|text_end|>\n" + audio_data + "\n";
+
+    if (type == OUTETTS_V0_1) {
+        return {prompt, OUTETTS_V1_GRAMMAR};
+    } else if (type == OUTETTS_V0_2 || type == OUTETTS_V0_3) {
+        return {prompt, OUTETTS_V2_GRAMMAR};
+    } else {
+        return {prompt, nullptr};
+    }
 }
 
 std::vector<llama_token> llama_rn_context::getAudioCompletionGuideTokens(const std::string &text_to_speak) {
@@ -1715,6 +1755,10 @@ std::vector<llama_token> llama_rn_context::getAudioCompletionGuideTokens(const s
     if (tmp.size() > 0) {
         result.push_back(tmp[0]);
     }
+
+    // Add Audio End, forcing stop generation
+    result.push_back(common_tokenize(vocab, "<|audio_end|>", false, true)[0]);
+
     return result;
 }
 

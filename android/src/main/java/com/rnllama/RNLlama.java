@@ -183,7 +183,10 @@ public class RNLlama implements LifecycleEventListener {
             throw new Exception("Context not found");
           }
           if (params.hasKey("jinja") && params.getBoolean("jinja")) {
-            ReadableMap result = context.getFormattedChatWithJinja(messages, chatTemplate, params);
+            boolean addGenerationPrompt = params.hasKey("add_generation_prompt") ? params.getBoolean("add_generation_prompt") : true;
+            String nowStr = params.hasKey("now") ? params.getString("now") : "";
+            String chatTemplateKwargs = params.hasKey("chat_template_kwargs") ? params.getString("chat_template_kwargs") : "";
+            ReadableMap result = context.getFormattedChatWithJinja(messages, chatTemplate, params, addGenerationPrompt, nowStr, chatTemplateKwargs);
             if (result.hasKey("_error")) {
               throw new Exception(result.getString("_error"));
             }
@@ -792,7 +795,7 @@ public class RNLlama implements LifecycleEventListener {
     tasks.put(task, "releaseMultimodal" + id);
   }
 
-  public void initVocoder(double id, final String vocoderModelPath, final Promise promise) {
+  public void initVocoder(double id, final ReadableMap params, final Promise promise) {
     final int contextId = (int) id;
     AsyncTask task = new AsyncTask<Void, Void, Boolean>() {
       private Exception exception;
@@ -807,7 +810,7 @@ public class RNLlama implements LifecycleEventListener {
           if (context.isPredicting()) {
             throw new Exception("Context is busy");
           }
-          return context.initVocoder(vocoderModelPath);
+          return context.initVocoder(params);
         } catch (Exception e) {
           exception = e;
         }
@@ -893,11 +896,11 @@ public class RNLlama implements LifecycleEventListener {
 
   public void getFormattedAudioCompletion(double id, final String speakerJsonStr, final String textToSpeak, Promise promise) {
     final int contextId = (int) id;
-    AsyncTask task = new AsyncTask<Void, Void, String>() {
+    AsyncTask task = new AsyncTask<Void, Void, Object>() {
       private Exception exception;
 
       @Override
-      protected String doInBackground(Void... voids) {
+      protected Object doInBackground(Void... voids) {
         try {
           LlamaContext context = contexts.get(contextId);
           if (context == null) {
@@ -914,7 +917,7 @@ public class RNLlama implements LifecycleEventListener {
       }
 
       @Override
-      protected void onPostExecute(String result) {
+      protected void onPostExecute(Object result) {
         if (exception != null) {
           promise.reject(exception);
           return;

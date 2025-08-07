@@ -14,7 +14,11 @@ git branch -D "$STAGING_BRANCH" 2>/dev/null || echo "No local staging branch to 
 git checkout -B "$STAGING_BRANCH" origin/main
 
 echo "🔍 Checking latest llama.cpp release..."
-LATEST_TAG=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r .tag_name)
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  LATEST_TAG=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r .tag_name)
+else
+  LATEST_TAG=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r .tag_name)
+fi
 
 if [[ -z "$LATEST_TAG" || "$LATEST_TAG" == "null" ]]; then
   echo "❌ Failed to fetch latest tag"
@@ -31,7 +35,7 @@ echo "📦 Current tag in llama.cpp: $CURRENT_TAG"
 if [[ "$LATEST_TAG" == "$CURRENT_TAG" ]]; then
   echo "✅ Already synced to $LATEST_TAG"
   echo "🛠 Running bootstrap to ensure cpp/ directory is up to date..."
-  yarn bootstrap
+  npm run bootstrap
 
   # Check if bootstrap created any changes
   if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -55,7 +59,7 @@ git add "$LLAMA_DIR"
 git commit -m "chore: update llama.cpp to $LATEST_TAG (submodule ref)"
 
 echo "🛠 Running bootstrap to copy files and apply patches..."
-yarn bootstrap
+npm run bootstrap
 
 # Check if bootstrap created any changes in cpp/ directory
 if git diff --quiet && git diff --cached --quiet; then

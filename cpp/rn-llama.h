@@ -11,6 +11,7 @@
 #include "ggml.h"
 #include "gguf.h"
 #include "llama.h"
+#include "llama-model.h"
 #include "llama-impl.h"
 #include "sampling.h"
 #include "nlohmann/json.hpp"
@@ -59,8 +60,14 @@ struct llama_rn_tokenize_result {
     std::vector<size_t> chunk_pos_media; // media only
 };
 
+struct llama_rn_audio_completion_result {
+    std::string prompt;
+    const char *grammar;
+};
+
 enum tts_type {
     UNKNOWN = -1,
+    OUTETTS_V0_1 = 0,
     OUTETTS_V0_2 = 1,
     OUTETTS_V0_3 = 2,
 };
@@ -120,13 +127,16 @@ struct llama_rn_context {
     bool loadModel(common_params &params_);
     bool validateModelChatTemplate(bool use_jinja, const char *name) const;
     common_chat_params getFormattedChatWithJinja(
-      const std::string &messages,
-      const std::string &chat_template,
-      const std::string &json_schema,
-      const std::string &tools,
-      const bool &parallel_tool_calls,
-      const std::string &tool_choice,
-      const bool &enable_thinking
+      const std::string& messages,
+      const std::string& chat_template,
+      const std::string& json_schema,
+      const std::string& tools,
+      const bool& parallel_tool_calls,
+      const std::string& tool_choice,
+      const bool& enable_thinking,
+      const bool& add_generation_prompt = true,
+      const std::string& now_str = "",
+      const std::map<std::string, std::string>& chat_template_kwargs = {}
     ) const;
     std::string getFormattedChat(
       const std::string &messages,
@@ -163,9 +173,9 @@ struct llama_rn_context {
     llama_rn_tokenize_result tokenize(const std::string &text, const std::vector<std::string> &media_paths);
 
     // Vocoder methods
-    bool initVocoder(const std::string &vocoder_model_path);
+    bool initVocoder(const std::string &vocoder_model_path, int batch_size = -1);
     tts_type getTTSType(json speaker = nullptr);
-    std::string getFormattedAudioCompletion(const std::string &speaker_json_str, const std::string &text_to_speak);
+    llama_rn_audio_completion_result getFormattedAudioCompletion(const std::string &speaker_json_str, const std::string &text_to_speak);
     std::vector<llama_token> getAudioCompletionGuideTokens(const std::string &text_to_speak);
     std::vector<float> decodeAudioTokens(const std::vector<llama_token> &tokens);
     bool isVocoderEnabled() const;

@@ -3,6 +3,37 @@
 
 @implementation RNLlamaContext
 
++ (BOOL)isGpuAvailable:(NSDictionary *)params {
+    BOOL skipGpuDevices = params[@"no_gpu_devices"] && [params[@"no_gpu_devices"] boolValue];
+
+    if (skipGpuDevices) {
+        return false;
+    }
+
+#ifdef LM_GGML_USE_METAL
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+
+    // Check ggml-metal availability
+    BOOL supportsGgmlMetal = [device supportsFamily:MTLGPUFamilyApple7];
+    if (@available(iOS 16.0, tvOS 16.0, *)) {
+        supportsGgmlMetal = supportsGgmlMetal && [device supportsFamily:MTLGPUFamilyMetal3];
+    }
+
+#if TARGET_OS_SIMULATOR
+    // GPU acceleration not fully supported on simulator
+    device = nil;
+    return false;
+#else
+    device = nil;
+    return supportsGgmlMetal;
+#endif
+
+#else
+    // Metal is not enabled in this build
+    return false;
+#endif
+}
+
 + (void)toggleNativeLog:(BOOL)enabled onEmitLog:(void (^)(NSString *level, NSString *text))onEmitLog {
   if (enabled) {
       void (^copiedBlock)(NSString *, NSString *) = [onEmitLog copy];
@@ -93,38 +124,34 @@
     if (params[@"n_ctx"]) defaultParams.n_ctx = [params[@"n_ctx"] intValue];
     if (params[@"use_mlock"]) defaultParams.use_mlock = [params[@"use_mlock"]boolValue];
 
-    BOOL skipGpuDevices = params[@"no_gpu_devices"] && [params[@"no_gpu_devices"] boolValue];
+    BOOL isGpuAvailable = [self isGpuAvailable:params];
+    BOOL skipGpuDevices = !isGpuAvailable || (params[@"no_gpu_devices"] && [params[@"no_gpu_devices"] boolValue]);
 
     BOOL isMetalEnabled = false;
     NSString *reasonNoMetal = @"";
     defaultParams.n_gpu_layers = 0;
-#ifdef LM_GGML_USE_METAL
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
 
-    // Check ggml-metal availability
-    BOOL supportsGgmlMetal = [device supportsFamily:MTLGPUFamilyApple7];
-    if (@available(iOS 16.0, tvOS 16.0, *)) {
-        supportsGgmlMetal = supportsGgmlMetal && [device supportsFamily:MTLGPUFamilyMetal3];
-    }
-    if (!supportsGgmlMetal) {
-        reasonNoMetal = @"Metal is not supported in this device";
-        skipGpuDevices = true;
-    }
-
+    if (isGpuAvailable) {
 #if TARGET_OS_SIMULATOR
-    // Use the backend, but no layers because not supported fully on simulator
-    defaultParams.n_gpu_layers = 0;
-    isMetalEnabled = true;
+        // Use the backend, but no layers because not supported fully on simulator
+        defaultParams.n_gpu_layers = 0;
+        isMetalEnabled = true;
 #else
-    defaultParams.n_gpu_layers = [params[@"n_gpu_layers"] intValue];
-    isMetalEnabled = true;
+        defaultParams.n_gpu_layers = [params[@"n_gpu_layers"] intValue];
+        isMetalEnabled = true;
 #endif
-
-    device = nil;
+    } else {
+        if (params[@"no_gpu_devices"] && [params[@"no_gpu_devices"] boolValue]) {
+            reasonNoMetal = @"GPU devices disabled by user";
+        } else {
+#ifdef LM_GGML_USE_METAL
+            reasonNoMetal = @"Metal is not supported in this device";
 #else
-    reasonNoMetal = @"Metal is not enabled in this build";
-    isMetalEnabled = false;
+            reasonNoMetal = @"Metal is not enabled in this build";
 #endif
+        }
+        isMetalEnabled = false;
+    }
 
     if (skipGpuDevices) {
         std::vector<lm_ggml_backend_dev_t> cpu_devs;
@@ -171,8 +198,22 @@
 
     if (params[@"ctx_shift"]) defaultParams.ctx_shift = [params[@"ctx_shift"] boolValue];
 
-    if (params[@"cache_type_k"]) defaultParams.cache_type_k = rnllama::kv_cache_type_from_str([params[@"cache_type_k"] UTF8String]);
-    if (params[@"cache_type_v"]) defaultParams.cache_type_v = rnllama::kv_cache_type_from_str([params[@"cache_type_v"] UTF8String]);
+    if (params[@"kv_unified"]) defaultParams.kv_unified = [params[@"kv_unified"] boolValue];
+
+    if (params[@"swa_full"]) defaultParams.swa_full = [params[@"swa_full"] boolValue];
+
+    if (params[@"cache_type_k"] && [params[@"cache_type_k"] isKindOfClass:[NSString class]]) {
+        const char* cache_type_k_str = [params[@"cache_type_k"] UTF8String];
+        if (cache_type_k_str) {
+            defaultParams.cache_type_k = rnllama::kv_cache_type_from_str(cache_type_k_str);
+        }
+    }
+    if (params[@"cache_type_v"] && [params[@"cache_type_v"] isKindOfClass:[NSString class]]) {
+        const char* cache_type_v_str = [params[@"cache_type_v"] UTF8String];
+        if (cache_type_v_str) {
+            defaultParams.cache_type_v = rnllama::kv_cache_type_from_str(cache_type_v_str);
+        }
+    }
 
     int nThreads = params[@"n_threads"] ? [params[@"n_threads"] intValue] : 0;
     const int maxThreads = (int) [[NSProcessInfo processInfo] processorCount];
@@ -264,7 +305,7 @@
     for (int i = 0; i < count; i++) {
         char key[256];
         llama_model_meta_key_by_index(llama->model, i, key, sizeof(key));
-        char val[4096];
+        char val[16384];  // gpt-oss's chat template is 12kb 
         llama_model_meta_val_str_by_index(llama->model, i, val, sizeof(val));
 
         NSString *keyStr = [NSString stringWithUTF8String:key];
@@ -328,6 +369,12 @@
 - (bool)initMultimodal:(NSDictionary *)params {
     NSString *mmproj_path = params[@"path"];
     BOOL use_gpu = params[@"use_gpu"] ? [params[@"use_gpu"] boolValue] : true;
+
+    // Check GPU availability using utility function
+    if (use_gpu) {
+        use_gpu = [RNLlamaContext isGpuAvailable:params];
+    }
+
     return llama->initMultimodal([mmproj_path UTF8String], use_gpu);
 }
 
@@ -356,8 +403,26 @@
     withParallelToolCalls:(BOOL)parallelToolCalls
     withToolChoice:(NSString *)toolChoice
     withEnableThinking:(BOOL)enableThinking
+    withAddGenerationPrompt:(BOOL)addGenerationPrompt
+    withNow:(NSString *)nowStr
+    withChatTemplateKwargs:(NSString *)chatTemplateKwargs
 {
     auto tmpl_str = chatTemplate == nil ? "" : [chatTemplate UTF8String];
+
+    // Parse chat template kwargs
+    std::map<std::string, std::string> kwargs_map;
+    if (chatTemplateKwargs != nil && [chatTemplateKwargs length] > 0) {
+        try {
+            auto kwargs_json = json::parse([chatTemplateKwargs UTF8String]);
+            for (auto& [key, value] : kwargs_json.items()) {
+                if (value.is_string()) {
+                    kwargs_map[key] = value.get<std::string>();
+                }
+            }
+        } catch (...) {
+            // Ignore JSON parsing errors for kwargs
+        }
+    }
 
     NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
     auto chatParams = llama->getFormattedChatWithJinja(
@@ -367,7 +432,10 @@
         tools == nil ? "" : [tools UTF8String],
         parallelToolCalls,
         toolChoice == nil ? "" : [toolChoice UTF8String],
-        enableThinking
+        enableThinking,
+        addGenerationPrompt,
+        nowStr == nil ? "" : [nowStr UTF8String],
+        kwargs_map
     );
     result[@"prompt"] = [NSString stringWithUTF8String:chatParams.prompt.c_str()];
     result[@"chat_format"] = @(static_cast<int>(chatParams.format));
@@ -686,9 +754,12 @@
     NSMutableArray *toolCalls = nil;
     NSString *reasoningContent = nil;
     NSString *content = nil;
+    NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
+    auto chat_format = params[@"chat_format"] ? [params[@"chat_format"] intValue] : COMMON_CHAT_FORMAT_CONTENT_ONLY;
+    result[@"chat_format"] = @(chat_format);
+
     if (!llama->is_interrupted) {
         try {
-            auto chat_format = params[@"chat_format"] ? [params[@"chat_format"] intValue] : COMMON_CHAT_FORMAT_CONTENT_ONLY;
             common_chat_syntax chat_syntax;
             chat_syntax.format = static_cast<common_chat_format>(chat_format);
 
@@ -697,6 +768,8 @@
                 chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
             } else if (reasoningFormat && [reasoningFormat isEqualToString:@"deepseek-legacy"]) {
                 chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK_LEGACY;
+            } else if (reasoningFormat && [reasoningFormat isEqualToString:@"auto"]) {
+                chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
             } else {
                 chat_syntax.reasoning_format = COMMON_REASONING_FORMAT_NONE;
             }
@@ -723,7 +796,6 @@
         }
     }
 
-    NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
     result[@"text"] = [NSString stringWithUTF8String:llama->generated_text.c_str()]; // Original text
     if (content) result[@"content"] = content;
     if (reasoningContent) result[@"reasoning_content"] = reasoningContent;
@@ -733,6 +805,7 @@
     result[@"tokens_evaluated"] = @(llama->num_prompt_tokens);
     result[@"truncated"] = @(llama->truncated);
     result[@"context_full"] = @(llama->context_full);
+    result[@"interrupted"] = @(llama->is_interrupted);
     result[@"stopped_eos"] = @(llama->stopped_eos);
     result[@"stopped_word"] = @(llama->stopped_word);
     result[@"stopped_limit"] = @(llama->stopped_limit);
@@ -984,17 +1057,26 @@
     return result;
 }
 
-- (bool)initVocoder:(NSString *)vocoderModelPath {
-    return llama->initVocoder([vocoderModelPath UTF8String]);
+- (bool)initVocoder:(NSDictionary *)params {
+    int n_batch = params[@"n_batch"] ? [params[@"n_batch"] intValue] : 512;
+    return llama->initVocoder([params[@"path"] UTF8String], n_batch);
 }
 
 - (bool)isVocoderEnabled {
     return llama->isVocoderEnabled();
 }
 
-- (NSString *)getFormattedAudioCompletion:(NSString *)speakerJsonStr textToSpeak:(NSString *)textToSpeak {
+- (NSDictionary *)getFormattedAudioCompletion:(NSString *)speakerJsonStr textToSpeak:(NSString *)textToSpeak {
     std::string speakerStr = speakerJsonStr ? [speakerJsonStr UTF8String] : "";
-    return [NSString stringWithUTF8String:llama->getFormattedAudioCompletion(speakerStr, [textToSpeak UTF8String]).c_str()];
+    try {
+        auto audio_result = llama->getFormattedAudioCompletion(speakerStr, [textToSpeak UTF8String]);
+        return @{
+            @"prompt": [NSString stringWithUTF8String:audio_result.prompt.c_str()],
+            @"grammar": [NSString stringWithUTF8String:audio_result.grammar]
+        };
+    } catch (const std::exception &e) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+    }
 }
 
 - (NSArray *)getAudioCompletionGuideTokens:(NSString *)textToSpeak {

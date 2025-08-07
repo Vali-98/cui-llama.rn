@@ -26,6 +26,7 @@ import type {
   SchemaGrammarConverterBuiltinRule,
 } from './grammar'
 import { SchemaGrammarConverter, convertJsonSchemaToGrammar } from './grammar'
+import { BUILD_NUMBER, BUILD_COMMIT } from './version'
 
 export type RNLlamaMessagePart = {
   type: string
@@ -130,6 +131,18 @@ export type ContextParams = Omit<
   pooling_type?: 'none' | 'mean' | 'cls' | 'last' | 'rank'
 }
 
+const validCacheTypes = [
+  'f16',
+  'f32',
+  'bf16',
+  'q8_0',
+  'q4_0',
+  'q4_1',
+  'iq4_nl',
+  'q5_0',
+  'q5_1',
+]
+
 export type EmbeddingParams = NativeEmbeddingParams
 
 export type RerankParams = {
@@ -162,6 +175,9 @@ export type CompletionBaseParams = {
   tool_choice?: string
   response_format?: CompletionResponseFormat
   media_paths?: string | string[]
+  add_generation_prompt?: boolean
+  now?: string | number
+  chat_template_kwargs?: Record<string, string>
 }
 export type CompletionParams = Omit<
   NativeCompletionParams,
@@ -243,6 +259,9 @@ export class LlamaContext {
       parallel_tool_calls?: object
       tool_choice?: string,
       enable_thinking?: boolean,
+      add_generation_prompt?: boolean,
+      now?: string | number,
+      chat_template_kwargs?: Record<string, string>,
     },
   ): Promise<FormattedChatResult | JinjaFormattedChatResult> {
     const mediaPaths: string[] = []
@@ -306,6 +325,9 @@ export class LlamaContext {
           : undefined,
         tool_choice: params?.tool_choice,
         enable_thinking: params?.enable_thinking ?? true,
+        add_generation_prompt: params?.add_generation_prompt,
+        now: typeof params?.now === 'number' ? params.now.toString() : params?.now,
+        chat_template_kwargs: params?.chat_template_kwargs ? JSON.stringify(params.chat_template_kwargs) : undefined,
       },
     )
     if (!useJinja) {
@@ -353,6 +375,9 @@ export class LlamaContext {
           parallel_tool_calls: params.parallel_tool_calls,
           tool_choice: params.tool_choice,
           enable_thinking: params.enable_thinking,
+          add_generation_prompt: params.add_generation_prompt,
+          now: params.now,
+          chat_template_kwargs: params.chat_template_kwargs,
         },
       )
       if (formattedResult.type === 'jinja') {
@@ -580,11 +605,12 @@ export class LlamaContext {
    * Initialize TTS support with a vocoder model
    * @param params Parameters for TTS support
    * @param params.path Path to the vocoder model
+   * @param params.n_batch Batch size for the vocoder model
    * @returns Promise resolving to true if initialization was successful
    */
-  async initVocoder({ path }: { path: string }): Promise<boolean> {
+  async initVocoder({ path, n_batch: nBatch }: { path: string; n_batch?: number }): Promise<boolean> {
     if (path.startsWith('file://')) path = path.slice(7)
-    return await RNLlama.initVocoder(this.id, path)
+    return await RNLlama.initVocoder(this.id, { path, n_batch: nBatch })
   }
 
   /**
@@ -599,12 +625,15 @@ export class LlamaContext {
    * Get a formatted audio completion prompt
    * @param speakerJsonStr JSON string representing the speaker
    * @param textToSpeak Text to speak
-   * @returns Promise resolving to the formatted audio completion prompt
+   * @returns Promise resolving to the formatted audio completion result with prompt and grammar
    */
   async getFormattedAudioCompletion(
     speaker: object | null,
     textToSpeak: string,
-  ): Promise<string> {
+  ): Promise<{
+    prompt: string
+    grammar?: string
+  }> {
     return await RNLlama.getFormattedAudioCompletion(
       this.id,
       speaker ? JSON.stringify(speaker) : '',
@@ -741,6 +770,16 @@ export async function initLlama(
   }
 
   const poolType = poolTypeMap[poolingType as keyof typeof poolTypeMap]
+
+  if (rest.cache_type_k && !validCacheTypes.includes(rest.cache_type_k)) {
+    console.warn(`[RNLlama] initLlama: Invalid cache K type: ${rest.cache_type_k}, falling back to f16`)
+    delete rest.cache_type_k
+  }
+  if (rest.cache_type_v && !validCacheTypes.includes(rest.cache_type_v)) {
+    console.warn(`[RNLlama] initLlama: Invalid cache V type: ${rest.cache_type_v}, falling back to f16`)
+    delete rest.cache_type_v
+  }
+
   const {
     gpu,
     reasonNoGPU,
@@ -770,4 +809,9 @@ export async function initLlama(
 
 export async function releaseAllLlama(): Promise<void> {
   return RNLlama.releaseAllContexts()
+}
+
+export const BuildInfo = {
+  number: BUILD_NUMBER,
+  commit: BUILD_COMMIT,
 }

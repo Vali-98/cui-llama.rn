@@ -360,6 +360,16 @@ struct clip_model {
     lm_ggml_tensor * conv1d_2_b = nullptr;
     lm_ggml_tensor * mm_norm_pre_w = nullptr;
     lm_ggml_tensor * mm_norm_mid_w = nullptr;
+
+    bool audio_has_avgpool() const {
+        return proj_type == PROJECTOR_TYPE_QWEN2A
+            || proj_type == PROJECTOR_TYPE_VOXTRAL;
+    }
+
+    bool audio_has_stack_frames() const {
+        return proj_type == PROJECTOR_TYPE_ULTRAVOX
+            || proj_type == PROJECTOR_TYPE_VOXTRAL;
+    }
 };
 
 struct clip_ctx {
@@ -864,10 +874,16 @@ struct clip_graph {
             int n_head = n_embd/d_head;
             int num_query = 96;
             if (ctx->model.hparams.minicpmv_version == 2) {
+                // MiniCPM-V 2.5
                 num_query = 96;
             } else if (ctx->model.hparams.minicpmv_version == 3) {
+                // MiniCPM-V 2.6
                 num_query = 64;
             } else if (ctx->model.hparams.minicpmv_version == 4) {
+                // MiniCPM-o 2.6
+                num_query = 64;
+            } else if (ctx->model.hparams.minicpmv_version == 5) {
+                // MiniCPM-V 4.0
                 num_query = 64;
             }
 
@@ -1489,48 +1505,51 @@ struct clip_graph {
 
         cb(cur, "after_transformer", -1);
 
-        if (ctx->proj_type() == PROJECTOR_TYPE_ULTRAVOX) {
+        if (model.audio_has_stack_frames()) {
             // StackAudioFrames
             // https://huggingface.co/fixie-ai/ultravox-v0_5-llama-3_2-1b/blob/main/ultravox_model.py
-            {
-                int64_t stride = n_embd * hparams.proj_stack_factor;
-                int64_t padded_len = LM_GGML_PAD(lm_ggml_nelements(cur), stride);
-                int64_t pad = padded_len - lm_ggml_nelements(cur);
-                if (pad > 0) {
-                    cur = lm_ggml_view_1d(ctx0, cur, lm_ggml_nelements(cur), 0);
-                    cur = lm_ggml_pad(ctx0, cur, pad, 0, 0, 0);
-                }
-                cur = lm_ggml_view_2d(ctx0, cur, stride, padded_len / stride,
-                                    lm_ggml_row_size(cur->type, stride), 0);
+            int64_t stride = n_embd * hparams.proj_stack_factor;
+            int64_t padded_len = LM_GGML_PAD(lm_ggml_nelements(cur), stride);
+            int64_t pad = padded_len - lm_ggml_nelements(cur);
+            if (pad > 0) {
+                cur = lm_ggml_view_1d(ctx0, cur, lm_ggml_nelements(cur), 0);
+                cur = lm_ggml_pad(ctx0, cur, pad, 0, 0, 0);
             }
-
+            cur = lm_ggml_view_2d(ctx0, cur, stride, padded_len / stride,
+                                lm_ggml_row_size(cur->type, stride), 0);
             cb(cur, "after_stacked", -1);
+        }
 
+        if (ctx->proj_type() == PROJECTOR_TYPE_ULTRAVOX) {
             // UltravoxProjector
-            {
-                // pre-norm
-                cur = lm_ggml_rms_norm(ctx0, cur, 1e-6);
-                cur = lm_ggml_mul(ctx0, cur, model.mm_norm_pre_w);
+            // pre-norm
+            cur = lm_ggml_rms_norm(ctx0, cur, 1e-6);
+            cur = lm_ggml_mul(ctx0, cur, model.mm_norm_pre_w);
 
-                // ffn in
-                cur = lm_ggml_mul_mat(ctx0, model.mm_1_w, cur);
+            // ffn in
+            cur = lm_ggml_mul_mat(ctx0, model.mm_1_w, cur);
 
-                // swiglu
-                // see SwiGLU in ultravox_model.py, the second half passed through is silu, not the first half
-                cur = lm_ggml_swiglu_swapped(ctx0, cur);
+            // swiglu
+            // see SwiGLU in ultravox_model.py, the second half passed through is silu, not the first half
+            cur = lm_ggml_swiglu_swapped(ctx0, cur);
 
-                // mid-norm
-                cur = lm_ggml_rms_norm(ctx0, cur, 1e-6);
-                cur = lm_ggml_mul(ctx0, cur, model.mm_norm_mid_w);
+            // mid-norm
+            cur = lm_ggml_rms_norm(ctx0, cur, 1e-6);
+            cur = lm_ggml_mul(ctx0, cur, model.mm_norm_mid_w);
 
-                // ffn out
-                cur = lm_ggml_mul_mat(ctx0, model.mm_2_w, cur);
-            }
+            // ffn out
+            cur = lm_ggml_mul_mat(ctx0, model.mm_2_w, cur);
 
         } else if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2A) {
             // projector
             cur = lm_ggml_mul_mat(ctx0, model.mm_fc_w, cur);
             cur = lm_ggml_add(ctx0, cur, model.mm_fc_b);
+
+        } else if (ctx->proj_type() == PROJECTOR_TYPE_VOXTRAL) {
+            // projector
+            cur = lm_ggml_mul_mat(ctx0, model.mm_1_w, cur);
+            cur = lm_ggml_gelu_erf(ctx0, cur);
+            cur = lm_ggml_mul_mat(ctx0, model.mm_2_w, cur);
 
         } else {
             LM_GGML_ABORT("%s: unknown projector type", __func__);
@@ -1676,8 +1695,7 @@ private:
             inpL = cur;
         }
 
-        // TODO @ngxson : find a way to move this outside
-        if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2A) {
+        if (ctx->model.audio_has_avgpool()) {
             lm_ggml_tensor * cur = inpL;
             cur = lm_ggml_transpose(ctx0, cur);
             cur = lm_ggml_cont(ctx0, cur);
@@ -1991,6 +2009,7 @@ static lm_ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_
                 res = graph.build_llama4();
             } break;
         case PROJECTOR_TYPE_ULTRAVOX:
+        case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_QWEN2A:
             {
                 res = graph.build_whisper_enc();
@@ -2265,8 +2284,10 @@ struct clip_model_loader {
                     } break;
                 case PROJECTOR_TYPE_ULTRAVOX:
                 case PROJECTOR_TYPE_QWEN2A:
+                case PROJECTOR_TYPE_VOXTRAL:
                     {
-                        bool require_stack = model.proj_type == PROJECTOR_TYPE_ULTRAVOX;
+                        bool require_stack = model.proj_type == PROJECTOR_TYPE_ULTRAVOX ||
+                                             model.proj_type == PROJECTOR_TYPE_VOXTRAL;
                         get_u32(KEY_A_PROJ_STACK_FACTOR, hparams.proj_stack_factor, require_stack);
                         if (hparams.n_mel_bins != 128) {
                             throw std::runtime_error(string_format("%s: only 128 mel bins are supported for ultravox\n", __func__));
@@ -2321,7 +2342,7 @@ struct clip_model_loader {
 
         // create data context
         struct lm_ggml_init_params params = {
-            /*.mem_size =*/ (lm_gguf_get_n_tensors(ctx_gguf.get()) + 1) * lm_ggml_tensor_overhead(),
+            /*.mem_size =*/ static_cast<size_t>(lm_gguf_get_n_tensors(ctx_gguf.get()) + 1) * lm_ggml_tensor_overhead(),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc =*/ true,
         };
@@ -2549,6 +2570,15 @@ struct clip_model_loader {
                     model.conv1d_2_b = get_tensor(string_format(TN_CONV1D, 2, "bias"));
                     model.mm_fc_w = get_tensor(string_format(TN_MM_AUDIO_FC, "weight"));
                     model.mm_fc_b = get_tensor(string_format(TN_MM_AUDIO_FC, "bias"));
+                } break;
+            case PROJECTOR_TYPE_VOXTRAL:
+                {
+                    model.conv1d_1_w = get_tensor(string_format(TN_CONV1D, 1, "weight"));
+                    model.conv1d_1_b = get_tensor(string_format(TN_CONV1D, 1, "bias"));
+                    model.conv1d_2_w = get_tensor(string_format(TN_CONV1D, 2, "weight"));
+                    model.conv1d_2_b = get_tensor(string_format(TN_CONV1D, 2, "bias"));
+                    model.mm_1_w = get_tensor(string_format(TN_MM_AUDIO_MLP, 1, "weight"));
+                    model.mm_2_w = get_tensor(string_format(TN_MM_AUDIO_MLP, 2, "weight"));
                 } break;
             case PROJECTOR_TYPE_INTERNVL:
                 {
@@ -3583,10 +3613,16 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
         case PROJECTOR_TYPE_MINICPMV:
             {
                 if (params.minicpmv_version == 2) {
+                    // MiniCPM-V 2.5
                     n_patches_sq = 96;
                 } else if (params.minicpmv_version == 3) {
+                    // MiniCPM-V 2.6
                     n_patches_sq = 64;
                 } else if (params.minicpmv_version == 4) {
+                    // MiniCPM-o 2.6
+                    n_patches_sq = 64;
+                } else if (params.minicpmv_version == 5) {
+                    // MiniCPM-V 4.0
                     n_patches_sq = 64;
                 } else {
                     LM_GGML_ABORT("Unknown minicpmv version");
@@ -3626,17 +3662,26 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
                 int scale_factor = ctx->model.hparams.proj_scale_factor;
                 n_patches_sq /= (scale_factor * scale_factor);
             } break;
+        case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_ULTRAVOX:
-            {
-                const int proj_stack_factor = ctx->model.hparams.proj_stack_factor;
-                const int n_len = CLIP_ALIGN(img->nx, proj_stack_factor);
-                n_patches_sq = n_len / proj_stack_factor / 2;
-            } break;
         case PROJECTOR_TYPE_QWEN2A:
             {
-                // divide by 2 because of whisper
-                // another divide by 2 because of nn.AvgPool1d(2, stride=2)
-                n_patches_sq = img->nx / 4;
+                n_patches_sq = img->nx;
+
+                const int proj_stack_factor = ctx->model.hparams.proj_stack_factor;
+                if (ctx->model.audio_has_stack_frames()) {
+                    LM_GGML_ASSERT(proj_stack_factor > 0);
+                    const int n_len = CLIP_ALIGN(n_patches_sq, proj_stack_factor);
+                    n_patches_sq = n_len / proj_stack_factor;
+                }
+
+                // whisper downscales input token by half after conv1d
+                n_patches_sq /= 2;
+
+                if (ctx->model.audio_has_avgpool()) {
+                    // divide by 2 because of nn.AvgPool1d(2, stride=2)
+                    n_patches_sq /= 2;
+                }
             } break;
         default:
             LM_GGML_ABORT("unsupported projector type");
@@ -4042,6 +4087,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         case PROJECTOR_TYPE_INTERNVL:
         case PROJECTOR_TYPE_QWEN2A:
         case PROJECTOR_TYPE_ULTRAVOX:
+        case PROJECTOR_TYPE_VOXTRAL:
             {
                 // do nothing
             } break;
@@ -4125,11 +4171,17 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
             return ctx->model.mm_3_b->ne[0];
         case PROJECTOR_TYPE_MINICPMV:
             if (hparams.minicpmv_version == 2) {
+                // MiniCPM-V 2.5
                 return 4096;
             } else if (hparams.minicpmv_version == 3) {
+                // MiniCPM-V 2.6
                 return 3584;
             } else if (hparams.minicpmv_version == 4) {
+                // MiniCPM-o 2.6
                 return 3584;
+            } else if (hparams.minicpmv_version == 5) {
+                // MiniCPM-V 4.0
+                return 2560;
             }
             LM_GGML_ABORT("Unknown minicpmv version");
         case PROJECTOR_TYPE_GLM_EDGE:
@@ -4142,6 +4194,7 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
         case PROJECTOR_TYPE_IDEFICS3:
             return ctx->model.projection->ne[1];
         case PROJECTOR_TYPE_ULTRAVOX:
+        case PROJECTOR_TYPE_VOXTRAL:
             return ctx->model.mm_2_w->ne[1];
         case PROJECTOR_TYPE_INTERNVL:
             return ctx->model.mm_3_w->ne[1];
@@ -4188,7 +4241,8 @@ bool clip_has_audio_encoder(const struct clip_ctx * ctx) {
 
 bool clip_has_whisper_encoder(const struct clip_ctx * ctx) {
     return ctx->proj_type() == PROJECTOR_TYPE_ULTRAVOX
-        || ctx->proj_type() == PROJECTOR_TYPE_QWEN2A;
+        || ctx->proj_type() == PROJECTOR_TYPE_QWEN2A
+        || ctx->proj_type() == PROJECTOR_TYPE_VOXTRAL;
 }
 
 bool clip_encode_float_image (struct clip_ctx * ctx, int n_threads, float * img, int h, int w, float * vec) {
