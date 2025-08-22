@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+} from 'react'
 import { z } from 'zod'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import {
@@ -12,7 +18,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Chat, defaultTheme } from '@flyerhq/react-native-chat-ui'
 import type { MessageType } from '@flyerhq/react-native-chat-ui'
-import { initLlama, LlamaContext } from '../../../src'
 import ModelDownloadCard from '../components/ModelDownloadCard'
 import ContextParamsModal from '../components/ContextParamsModal'
 import CompletionParamsModal from '../components/CompletionParamsModal'
@@ -20,10 +25,12 @@ import CustomModelModal from '../components/CustomModelModal'
 import CustomModelCard from '../components/CustomModelCard'
 import { Bubble } from '../components/Bubble'
 import { HeaderButton } from '../components/HeaderButton'
+import { Menu } from '../components/Menu'
 import { MessagesModal } from '../components/MessagesModal'
 import { MaskedProgress } from '../components/MaskedProgress'
 import SessionModal from '../components/SessionModal'
 import { StopButton } from '../components/StopButton'
+import ToolsModal from '../components/ToolsModal'
 import { CommonStyles } from '../styles/commonStyles'
 import { MODELS } from '../utils/constants'
 import type {
@@ -37,6 +44,7 @@ import {
   loadCustomModels,
 } from '../utils/storage'
 import type { LLMMessage } from '../utils/llmMessages'
+import { initLlama, LlamaContext } from '../../../src' // import 'llama.rn'
 
 const user = { id: 'user' }
 const assistant = { id: 'assistant' }
@@ -172,11 +180,18 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
   const [showMessagesModal, setShowMessagesModal] = useState(false)
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [showCustomModelModal, setShowCustomModelModal] = useState(false)
+  const [showToolsModal, setShowToolsModal] = useState(false)
   const [contextParams, setContextParams] = useState<ContextParams | null>(null)
   const [completionParams, setCompletionParams] =
     useState<CompletionParams | null>(null)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [customModels, setCustomModels] = useState<CustomModel[]>([])
+  const [currentTools, setCurrentTools] = useState(AVAILABLE_TOOLS)
+  const [mockResponses, setMockResponses] = useState<Record<string, string>>({
+    get_weather: "It's sunny and 72°F in your location with light clouds.",
+    calculate: 'The calculation result is 42.',
+    get_time: 'The current time is 2:30 PM on Tuesday, January 15, 2025.',
+  })
   const insets = useSafeAreaInsets()
 
   useEffect(
@@ -237,12 +252,12 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
       )
       .reverse() // Reverse to get chronological order
       .reduce((acc: LLMMessage[], msg) => {
-        if (msg.metadata?.toolCalls) {
+        if (msg.metadata?.tool_calls) {
           // This is an assistant message that made tool calls
           acc.push({
             role: 'assistant',
             content: msg.text,
-            tool_calls: msg.metadata.storedToolCalls || [],
+            tool_calls: msg.metadata.tool_calls || [],
           })
         } else if (msg.metadata?.toolMessage) {
           // This contains tool results, add them as individual tool messages
@@ -254,11 +269,13 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
             role: 'user',
             content: msg.text,
           })
-        } else if (!msg.metadata?.toolCalls && !msg.metadata?.toolResults) {
+        } else if (!msg.metadata?.tool_calls) {
           // Regular assistant message (only if not tool-related)
           acc.push({
             role: 'assistant',
             content: msg.text,
+            reasoning_content:
+              msg.metadata?.completionResult?.reasoning_content,
           })
         }
         return acc
@@ -267,43 +284,10 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
     return [...conversationMessages, ...recentMessages]
   }
 
-  // Set up navigation header buttons
-  useLayoutEffect(() => {
-    if (isModelReady) {
-      navigation.setOptions({
-        headerRight: () => (
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <HeaderButton
-              iconName="folder"
-              onPress={() => setShowSessionModal(true)}
-            />
-            <HeaderButton
-              iconName="chat"
-              onPress={() => setShowMessagesModal(true)}
-            />
-            <HeaderButton
-              iconName="settings"
-              onPress={() => setShowCompletionParamsModal(true)}
-            />
-          </View>
-        ),
-      })
-    } else {
-      navigation.setOptions({
-        headerRight: () => (
-          <HeaderButton
-            iconName="settings"
-            onPress={() => setShowContextParamsModal(true)}
-          />
-        ),
-      })
-    }
-  }, [navigation, isModelReady])
-
-  const addMessage = (message: MessageType.Any) => {
+  const addMessage = useCallback((message: MessageType.Any) => {
     messagesRef.current = [message, ...messagesRef.current]
     setMessagesVersion((prev) => prev + 1)
-  }
+  }, [])
 
   const updateMessage = (
     messageId: string,
@@ -321,18 +305,90 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
     }
   }
 
-  const addSystemMessage = (text: string, metadata = {}) => {
-    const textMessage: MessageType.Text = {
-      author: assistant,
-      createdAt: Date.now(),
-      id: randId(),
-      text,
-      type: 'text',
-      metadata: { system: true, ...metadata },
+  const addSystemMessage = useCallback(
+    (text: string, metadata = {}) => {
+      const textMessage: MessageType.Text = {
+        author: assistant,
+        createdAt: Date.now(),
+        id: randId(),
+        text,
+        type: 'text',
+        metadata: { system: true, ...metadata },
+      }
+      addMessage(textMessage)
+      return textMessage.id
+    },
+    [addMessage],
+  )
+
+  const handleReset = useCallback(() => {
+    Alert.alert(
+      'Reset Chat',
+      'Are you sure you want to clear all messages? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            messagesRef.current = []
+            setMessagesVersion((prev) => prev + 1)
+            addSystemMessage(
+              `Hello! I'm a tool-calling AI assistant. You can customize my tools using the tools button in the header. Try asking me something!`,
+            )
+          },
+        },
+      ],
+    )
+  }, [addSystemMessage])
+
+  // Set up navigation header buttons
+  useLayoutEffect(() => {
+    if (isModelReady) {
+      navigation.setOptions({
+        headerRight: () => (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <HeaderButton iconName="refresh" onPress={handleReset} />
+            <HeaderButton
+              iconName="cog-outline"
+              onPress={() => setShowCompletionParamsModal(true)}
+            />
+            <Menu
+              actions={[
+                {
+                  id: 'tools',
+                  title: 'Tools',
+                  onPress: () => setShowToolsModal(true),
+                },
+                {
+                  id: 'messages',
+                  title: 'Messages',
+                  onPress: () => setShowMessagesModal(true),
+                },
+                {
+                  id: 'sessions',
+                  title: 'Sessions',
+                  onPress: () => setShowSessionModal(true),
+                },
+              ]}
+            />
+          </View>
+        ),
+      })
+    } else {
+      navigation.setOptions({
+        headerRight: () => (
+          <HeaderButton
+            iconName="cog-outline"
+            onPress={() => setShowContextParamsModal(true)}
+          />
+        ),
+      })
     }
-    addMessage(textMessage)
-    return textMessage.id
-  }
+  }, [navigation, isModelReady, handleReset])
 
   const handleImportMessages = (newMessages: MessageType.Any[]) => {
     // Reset messages and add system message back
@@ -341,7 +397,7 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
 
     // Add the initial system message
     addSystemMessage(
-      `Hello! I'm a tool-calling AI assistant. I can help you with:\n\n• Weather information ("What's the weather in New York?")\n• Calculations ("Calculate 15 * 24 + 37")\n• Time queries ("What time is it in Tokyo?")\n\nTry asking me something!`,
+      `Hello! I'm a tool-calling AI assistant. You can customize my tools using the tools button in the header. Try asking me something!`,
     )
 
     // Add imported messages
@@ -351,6 +407,14 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
 
   const handleUpdateSystemPrompt = (newSystemPrompt: string) => {
     setSystemPrompt(newSystemPrompt)
+  }
+
+  const handleSaveTools = (
+    tools: any[],
+    newMockResponses: Record<string, string>,
+  ) => {
+    setCurrentTools(tools)
+    setMockResponses(newMockResponses)
   }
 
   const initializeModel = async (modelPath: string) => {
@@ -375,7 +439,7 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
       setInitProgress(100)
 
       addSystemMessage(
-        `Hello! I'm a tool-calling AI assistant. I can help you with:\n\n• Weather information ("What's the weather in New York?")\n• Calculations ("Calculate 15 * 24 + 37")\n• Time queries ("What time is it in Tokyo?")\n\nTry asking me something!`,
+        `Hello! I'm a tool-calling AI assistant. You can customize my tools using the tools button in the header. Try asking me something!`,
       )
     } catch (error: any) {
       Alert.alert('Error', `Failed to initialize model: ${error.message}`)
@@ -388,74 +452,23 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
   const executeTool = async (toolCall: ToolCall): Promise<ToolResult> => {
     const { name, arguments: args } = toolCall
 
-    try {
-      switch (name) {
-        case 'get_weather':
-          // Simulate weather API call
-          const weather = {
-            location: args.location,
-            temperature: Math.floor(Math.random() * 30) + 10,
-            condition: ['Sunny', 'Cloudy', 'Rainy', 'Partly Cloudy'][
-              Math.floor(Math.random() * 4)
-            ],
-            humidity: Math.floor(Math.random() * 50) + 30,
-          }
-          return {
-            id: toolCall.id,
-            result: weather,
-          }
-
-        case 'calculate':
-          // Simple expression evaluation (in a real app, use a safer evaluator)
-          try {
-            // Convert ^ to ** for exponentiation and sanitize input
-            const sanitizedExpression = args.expression
-              .replace(/\^/g, '**') // Convert ^ to ** for exponentiation
-              .replace(/[^\d\s()*+./\-]/g, '') // Remove unsafe characters
-
-            const result = eval(sanitizedExpression)
-            return {
-              id: toolCall.id,
-              result: { expression: args.expression, result },
-            }
-          } catch {
-            return {
-              id: toolCall.id,
-              result: null,
-              error: 'Invalid mathematical expression',
-            }
-          }
-
-        case 'get_time':
-          const now = new Date()
-          const timeString = now.toLocaleString('en-US', {
-            timeZone: args.timezone || 'UTC',
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          })
-          return {
-            id: toolCall.id,
-            result: { timezone: args.timezone, time: timeString },
-          }
-
-        default:
-          return {
-            id: toolCall.id,
-            result: null,
-            error: `Unknown tool: ${name}`,
-          }
-      }
-    } catch (error: any) {
+    if (!currentTools.find((tool) => tool.function.name === name)) {
       return {
         id: toolCall.id,
-        result: null,
-        error: error.message,
+        result: `Error: Tool not found: ${name}`,
       }
+    }
+
+    // Check if we have a mock response for this tool
+    if (mockResponses[name]) {
+      return {
+        id: toolCall.id,
+        result: mockResponses[name],
+      }
+    }
+    return {
+      id: toolCall.id,
+      result: `Error: Response not implemented for: ${name}(${args})`,
     }
   }
 
@@ -479,7 +492,6 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
       // Build conversation messages using the reusable function
       const conversationMessages = buildLLMMessages()
 
-      let response = ''
       const responseId = randId()
       const responseMessage: MessageType.Text = {
         author: assistant,
@@ -495,28 +507,38 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
         completionParams || (await loadCompletionParams())
       const completionResult = await context.completion(
         {
+          ...completionParameters,
+          reasoning_format: 'auto',
           messages: conversationMessages,
-          tools: AVAILABLE_TOOLS,
+          tools: currentTools,
           tool_choice: 'auto',
           jinja: true,
-          ...completionParameters,
         },
         (data) => {
-          const { token } = data
+          const {
+            content = '',
+            reasoning_content: reasoningContent,
+            tool_calls: toolCalls,
+          } = data
 
-          if (token) {
-            response += token
-
-            updateMessage(responseId, (msg) => {
-              if (msg.type === 'text') {
-                return {
-                  ...msg,
-                  text: response.replace(/^\s+/, ''),
-                }
+          // Update message with streaming data
+          updateMessage(responseId, (msg) => {
+            if (msg.type === 'text') {
+              return {
+                ...msg,
+                text: content.replace(/^\s+/, ''),
+                metadata: {
+                  ...msg.metadata,
+                  partialCompletionResult: {
+                    reasoning_content: reasoningContent,
+                    tool_calls: toolCalls,
+                    content: content.replace(/^\s+/, ''),
+                  },
+                },
               }
-              return msg
-            })
-          }
+            }
+            return msg
+          })
         },
       )
 
@@ -527,10 +549,14 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
       // update last message
       updateMessage(responseId, (msg) => {
         // if not tool_calls, update the text
-        if (msg.type === 'text' && !msg.metadata?.toolCalls) {
+        if (msg.type === 'text' && !msg.metadata?.tool_calls) {
           return {
             ...msg,
             text: content,
+            metadata: {
+              ...msg.metadata,
+              completionResult,
+            },
           }
         }
         return msg
@@ -565,8 +591,8 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
                 : content,
               metadata: {
                 ...msg.metadata,
-                toolCalls: true,
-                storedToolCalls: toolCalls,
+                tool_calls: toolCalls,
+                completionResult,
               },
             }
           }
@@ -666,9 +692,7 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
           {/* Custom Models Section */}
           {customModels.filter((model) => !model.mmprojFilename).length > 0 && (
             <>
-              <Text style={CommonStyles.modelSectionTitle}>
-                Custom Models
-              </Text>
+              <Text style={CommonStyles.modelSectionTitle}>Custom Models</Text>
               {customModels
                 .filter((model) => !model.mmprojFilename) // Only show non-multimodal models
                 .map((model) => (
@@ -729,6 +753,7 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
           onClose={() => setShowCustomModelModal(false)}
           onModelAdded={handleCustomModelAdded}
           title="Add Custom Model"
+          enableFileSelection
         />
 
         <MaskedProgress
@@ -752,7 +777,7 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
         textInputProps={{
           editable: !isLoading,
           placeholder: isLoading
-            ? 'Executing tools...'
+            ? 'Responding...'
             : 'Ask me to use tools...',
         }}
       />
@@ -769,7 +794,7 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
         visible={showMessagesModal}
         onClose={() => setShowMessagesModal(false)}
         messages={buildLLMMessages()}
-        tools={AVAILABLE_TOOLS}
+        tools={currentTools}
         context={context}
         onImportMessages={handleImportMessages}
         onUpdateSystemPrompt={handleUpdateSystemPrompt}
@@ -780,6 +805,14 @@ export default function ToolCallsScreen({ navigation }: { navigation: any }) {
         visible={showSessionModal}
         onClose={() => setShowSessionModal(false)}
         context={context}
+      />
+
+      <ToolsModal
+        visible={showToolsModal}
+        onClose={() => setShowToolsModal(false)}
+        tools={currentTools}
+        onSave={handleSaveTools}
+        mockResponses={mockResponses}
       />
     </View>
   )

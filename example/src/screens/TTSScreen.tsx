@@ -11,7 +11,6 @@ import {
 } from 'react-native'
 import { saveDocuments } from '@react-native-documents/picker'
 import ReactNativeBlobUtil from 'react-native-blob-util'
-import { initLlama, LlamaContext } from '../../../src'
 import { TTSModelDownloadCard } from '../components/ModelDownloadCard'
 import ContextParamsModal from '../components/ContextParamsModal'
 import CompletionParamsModal from '../components/CompletionParamsModal'
@@ -32,6 +31,7 @@ import {
 import { HeaderButton } from '../components/HeaderButton'
 import { MaskedProgress } from '../components/MaskedProgress'
 import { createWavFile } from '../utils/audioUtils'
+import { initLlama, LlamaContext } from '../../../src' // import 'llama.rn'
 
 const styles = StyleSheet.create({
   // Using shared styles for common patterns
@@ -281,11 +281,11 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
         headerRight: () => (
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <HeaderButton
-              iconName="volume-up"
+              iconName="speaker"
               onPress={() => setShowTTSParamsModal(true)}
             />
             <HeaderButton
-              iconName="settings"
+              iconName="cog-outline"
               onPress={() => setShowCompletionParamsModal(true)}
             />
           </View>
@@ -295,7 +295,7 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
       navigation.setOptions({
         headerRight: () => (
           <HeaderButton
-            iconName="settings"
+            iconName="cog-outline"
             onPress={() => setShowContextParamsModal(true)}
           />
         ),

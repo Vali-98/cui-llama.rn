@@ -1033,11 +1033,12 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "CROSS_ENTROPY_LOSS",
     "CROSS_ENTROPY_LOSS_BACK",
     "OPT_STEP_ADAMW",
+    "OPT_STEP_SGD",
 
     "GLU",
 };
 
-static_assert(LM_GGML_OP_COUNT == 87, "LM_GGML_OP_COUNT != 87");
+static_assert(LM_GGML_OP_COUNT == 88, "LM_GGML_OP_COUNT != 88");
 
 static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "none",
@@ -1134,14 +1135,14 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "cross_entropy_loss(x,y)",
     "cross_entropy_loss_back(x,y)",
     "adamw(x)",
+    "sgd(x)",
 
     "glu(x)",
 };
 
-static_assert(LM_GGML_OP_COUNT == 87, "LM_GGML_OP_COUNT != 87");
+static_assert(LM_GGML_OP_COUNT == 88, "LM_GGML_OP_COUNT != 88");
 
 static_assert(LM_GGML_OP_POOL_COUNT == 2, "LM_GGML_OP_POOL_COUNT != 2");
-
 
 static const char * LM_GGML_UNARY_OP_NAME[LM_GGML_UNARY_OP_COUNT] = {
     "ABS",
@@ -3906,6 +3907,7 @@ static struct lm_ggml_tensor * lm_ggml_rope_impl(
         struct lm_ggml_tensor  * b,
         struct lm_ggml_tensor  * c,
         int                   n_dims,
+        int                   sections[LM_GGML_MROPE_SECTIONS],
         int                   mode,
         int                   n_ctx_orig,
         float                 freq_base,
@@ -3919,14 +3921,18 @@ static struct lm_ggml_tensor * lm_ggml_rope_impl(
 
     LM_GGML_ASSERT(lm_ggml_is_vector(b));
     LM_GGML_ASSERT(b->type == LM_GGML_TYPE_I32);
-    LM_GGML_ASSERT(a->ne[2] == b->ne[0]);
+
+    bool mrope_used = mode & LM_GGML_ROPE_TYPE_MROPE;
+    if (mrope_used) {
+        LM_GGML_ASSERT(a->ne[2] * 4 == b->ne[0]); // mrope expecting 4 position ids per token
+    } else {
+        LM_GGML_ASSERT(a->ne[2] == b->ne[0]);
+    }
 
     if (c) {
         LM_GGML_ASSERT(c->type == LM_GGML_TYPE_F32);
         LM_GGML_ASSERT(c->ne[0] >= n_dims / 2);
     }
-
-    int sections[4] = {0, 0, 0, 0};
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
@@ -3937,7 +3943,11 @@ static struct lm_ggml_tensor * lm_ggml_rope_impl(
     memcpy(params +  8, &attn_factor,  sizeof(float));
     memcpy(params +  9, &beta_fast,    sizeof(float));
     memcpy(params + 10, &beta_slow,    sizeof(float));
-    memcpy(params + 11, &sections,     sizeof(int)*4);
+    if (mrope_used) {
+        memcpy(params + 11, sections,  sizeof(int32_t) * LM_GGML_MROPE_SECTIONS);
+    } else {
+        memset(params + 11, 0,         sizeof(int32_t) * LM_GGML_MROPE_SECTIONS);
+    }
     lm_ggml_set_op_params(result, params, sizeof(params));
 
     result->op     = LM_GGML_OP_ROPE;
@@ -3955,7 +3965,7 @@ struct lm_ggml_tensor * lm_ggml_rope(
         int                   n_dims,
         int                   mode) {
     return lm_ggml_rope_impl(
-        ctx, a, b, NULL, n_dims, mode, 0, 10000.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, false
+        ctx, a, b, NULL, n_dims, NULL, mode, 0, 10000.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, false
     );
 }
 
@@ -3965,7 +3975,7 @@ struct lm_ggml_tensor * lm_ggml_rope_multi(
         struct lm_ggml_tensor  * b,
         struct lm_ggml_tensor  * c,
         int                   n_dims,
-        int                   sections[4],
+        int                   sections[LM_GGML_MROPE_SECTIONS],
         int                   mode,
         int                   n_ctx_orig,
         float                 freq_base,
@@ -3974,36 +3984,31 @@ struct lm_ggml_tensor * lm_ggml_rope_multi(
         float                 attn_factor,
         float                 beta_fast,
         float                 beta_slow) {
-    // Multimodal Rotary Position Embedding
-    LM_GGML_ASSERT((mode & 1) == 0 && "mode & 1 == 1 is no longer supported");
+    return lm_ggml_rope_impl(
+        ctx, a, b, c, n_dims, sections, mode, n_ctx_orig, freq_base, freq_scale,
+        ext_factor, attn_factor, beta_fast, beta_slow, false
+    );
+}
 
-    LM_GGML_ASSERT(lm_ggml_is_vector(b));
-    LM_GGML_ASSERT(b->type == LM_GGML_TYPE_I32);
-    LM_GGML_ASSERT(a->ne[2] * 4 == b->ne[0]); // mrope expecting 4 position ids per token
-
-    if (c) {
-        LM_GGML_ASSERT(c->type == LM_GGML_TYPE_F32);
-        LM_GGML_ASSERT(c->ne[0] >= n_dims / 2);
-    }
-
-    struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
-
-    int32_t params[11 + 4] = { /*n_past*/ 0, n_dims, mode, /*n_ctx*/ 0, n_ctx_orig };
-    memcpy(params +  5, &freq_base,    sizeof(float));
-    memcpy(params +  6, &freq_scale,   sizeof(float));
-    memcpy(params +  7, &ext_factor,   sizeof(float));
-    memcpy(params +  8, &attn_factor,  sizeof(float));
-    memcpy(params +  9, &beta_fast,    sizeof(float));
-    memcpy(params + 10, &beta_slow,    sizeof(float));
-    memcpy(&params[11], sections,      sizeof(int)*4);
-    lm_ggml_set_op_params(result, params, sizeof(params));
-
-    result->op   = LM_GGML_OP_ROPE;
-    result->src[0] = a;
-    result->src[1] = b;
-    result->src[2] = c;
-
-    return result;
+struct lm_ggml_tensor * lm_ggml_rope_multi_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        struct lm_ggml_tensor  * c,
+        int                   n_dims,
+        int                   sections[LM_GGML_MROPE_SECTIONS],
+        int                   mode,
+        int                   n_ctx_orig,
+        float                 freq_base,
+        float                 freq_scale,
+        float                 ext_factor,
+        float                 attn_factor,
+        float                 beta_fast,
+        float                 beta_slow) {
+    return lm_ggml_rope_impl(
+        ctx, a, b, c, n_dims, sections, mode, n_ctx_orig, freq_base, freq_scale,
+        ext_factor, attn_factor, beta_fast, beta_slow, true
+    );
 }
 
 struct lm_ggml_tensor * lm_ggml_rope_inplace(
@@ -4013,7 +4018,7 @@ struct lm_ggml_tensor * lm_ggml_rope_inplace(
         int                   n_dims,
         int                   mode) {
     return lm_ggml_rope_impl(
-        ctx, a, b, NULL, n_dims, mode, 0, 10000.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, true
+        ctx, a, b, NULL, n_dims, NULL, mode, 0, 10000.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, true
     );
 }
 
@@ -4032,7 +4037,7 @@ struct lm_ggml_tensor * lm_ggml_rope_ext(
         float                 beta_fast,
         float                 beta_slow) {
     return lm_ggml_rope_impl(
-        ctx, a, b, c, n_dims, mode, n_ctx_orig, freq_base, freq_scale,
+        ctx, a, b, c, n_dims, NULL, mode, n_ctx_orig, freq_base, freq_scale,
         ext_factor, attn_factor, beta_fast, beta_slow, false
     );
 }
@@ -4052,7 +4057,7 @@ struct lm_ggml_tensor * lm_ggml_rope_ext_inplace(
         float                 beta_fast,
         float                 beta_slow) {
     return lm_ggml_rope_impl(
-        ctx, a, b, c, n_dims, mode, n_ctx_orig, freq_base, freq_scale,
+        ctx, a, b, c, n_dims, NULL, mode, n_ctx_orig, freq_base, freq_scale,
         ext_factor, attn_factor, beta_fast, beta_slow, true
     );
 }
@@ -4071,7 +4076,7 @@ struct lm_ggml_tensor * lm_ggml_rope_custom(
         float                 beta_fast,
         float                 beta_slow) {
     return lm_ggml_rope_impl(
-        ctx, a, b, NULL, n_dims, mode, n_ctx_orig, freq_base, freq_scale,
+        ctx, a, b, NULL, n_dims, NULL, mode, n_ctx_orig, freq_base, freq_scale,
         ext_factor, attn_factor, beta_fast, beta_slow, false
     );
 }
@@ -4090,7 +4095,7 @@ struct lm_ggml_tensor * lm_ggml_rope_custom_inplace(
         float                 beta_fast,
         float                 beta_slow) {
     return lm_ggml_rope_impl(
-        ctx, a, b, NULL, n_dims, mode, n_ctx_orig, freq_base, freq_scale,
+        ctx, a, b, NULL, n_dims, NULL, mode, n_ctx_orig, freq_base, freq_scale,
         ext_factor, attn_factor, beta_fast, beta_slow, true
     );
 }
@@ -4288,14 +4293,13 @@ struct lm_ggml_tensor * lm_ggml_conv_1d_dw(
         int                   s0,
         int                   p0,
         int                   d0) {
-    struct lm_ggml_tensor * new_a = lm_ggml_reshape_4d(ctx, a, a->ne[0], 1, a->ne[1], a->ne[2]);
     struct lm_ggml_tensor * new_b = lm_ggml_reshape_4d(ctx, b, b->ne[0], 1, b->ne[1], b->ne[2]);
 
-    struct lm_ggml_tensor * im2col = lm_ggml_im2col(ctx, new_a, new_b, s0, 0, p0, 0, d0, 0, false, LM_GGML_TYPE_F16);
+    struct lm_ggml_tensor * im2col = lm_ggml_im2col(ctx, a, new_b, s0, 0, p0, 0, d0, 0, false, LM_GGML_TYPE_F16);
 
     struct lm_ggml_tensor * result = lm_ggml_mul_mat(ctx, im2col, a);
 
-    result = lm_ggml_reshape_3d(ctx, result, b->ne[0], b->ne[1], 1);
+    result = lm_ggml_reshape_3d(ctx, result, result->ne[0], result->ne[2], 1);
 
     return result;
 }
@@ -5619,6 +5623,28 @@ struct lm_ggml_tensor * lm_ggml_opt_step_adamw(
     result->src[2] = m;
     result->src[3] = v;
     result->src[4] = adamw_params;
+
+    return result;
+}
+
+// opt_step_sgd
+
+struct lm_ggml_tensor * lm_ggml_opt_step_sgd(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * grad,
+        struct lm_ggml_tensor  * params) {
+    LM_GGML_ASSERT(a->flags & LM_GGML_TENSOR_FLAG_PARAM);
+    LM_GGML_ASSERT(lm_ggml_are_same_shape(a, grad));
+    LM_GGML_ASSERT(params->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(lm_ggml_nelements(params) == 2);
+
+    struct lm_ggml_tensor * result = lm_ggml_view_tensor(ctx, a);
+
+    result->op     = LM_GGML_OP_OPT_STEP_SGD;
+    result->src[0] = a;
+    result->src[1] = grad;
+    result->src[2] = params;
 
     return result;
 }

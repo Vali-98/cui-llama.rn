@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   Clipboard,
 } from 'react-native'
-import { initLlama, LlamaContext } from '../../../src'
 import ModelDownloadCard from '../components/ModelDownloadCard'
 import ContextParamsModal from '../components/ContextParamsModal'
 import CustomModelModal from '../components/CustomModelModal'
@@ -19,6 +18,7 @@ import { CommonStyles } from '../styles/commonStyles'
 import { MODELS } from '../utils/constants'
 import type { ContextParams, CustomModel } from '../utils/storage'
 import { loadContextParams, loadCustomModels } from '../utils/storage'
+import { initLlama, LlamaContext } from '../../../src' // import 'llama.rn'
 
 const styles = {
   container: CommonStyles.container,
@@ -174,14 +174,14 @@ export default function BenchScreen({ navigation }: { navigation: any }) {
     if (isModelReady) {
       navigation.setOptions({
         headerRight: () => (
-          <HeaderButton iconName="clear" onPress={clearLogs} />
+          <HeaderButton iconName="refresh" onPress={clearLogs} />
         ),
       })
     } else {
       navigation.setOptions({
         headerRight: () => (
           <HeaderButton
-            iconName="settings"
+            iconName="cog-outline"
             onPress={() => setShowContextParamsModal(true)}
           />
         ),

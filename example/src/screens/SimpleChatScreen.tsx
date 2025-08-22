@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+} from 'react'
 import {
   View,
   Text,
@@ -10,7 +16,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Chat, defaultTheme } from '@flyerhq/react-native-chat-ui'
 import type { MessageType } from '@flyerhq/react-native-chat-ui'
-import { initLlama, LlamaContext } from '../../../src'
 import ModelDownloadCard from '../components/ModelDownloadCard'
 import ContextParamsModal from '../components/ContextParamsModal'
 import CompletionParamsModal from '../components/CompletionParamsModal'
@@ -19,6 +24,7 @@ import CustomModelCard from '../components/CustomModelCard'
 import { Bubble } from '../components/Bubble'
 import { MaskedProgress } from '../components/MaskedProgress'
 import { HeaderButton } from '../components/HeaderButton'
+import { Menu } from '../components/Menu'
 import { MessagesModal } from '../components/MessagesModal'
 import SessionModal from '../components/SessionModal'
 import { StopButton } from '../components/StopButton'
@@ -35,6 +41,7 @@ import {
   loadCustomModels,
 } from '../utils/storage'
 import type { LLMMessage } from '../utils/llmMessages'
+import { initLlama, LlamaContext } from '../../../src' // import 'llama.rn'
 
 const user = { id: 'user' }
 const assistant = { id: 'assistant' }
@@ -136,48 +143,16 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
             ? ('user' as const)
             : ('assistant' as const),
         content: msg.text,
+        reasoning_content: msg.metadata?.completionResult?.reasoning_content,
       }))
 
     return [...conversationMessages, ...recentMessages]
   }
 
-  // Set up navigation header buttons
-  useLayoutEffect(() => {
-    if (isModelReady) {
-      navigation.setOptions({
-        headerRight: () => (
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <HeaderButton
-              iconName="folder"
-              onPress={() => setShowSessionModal(true)}
-            />
-            <HeaderButton
-              iconName="chat"
-              onPress={() => setShowMessagesModal(true)}
-            />
-            <HeaderButton
-              iconName="settings"
-              onPress={() => setShowCompletionParamsModal(true)}
-            />
-          </View>
-        ),
-      })
-    } else {
-      navigation.setOptions({
-        headerRight: () => (
-          <HeaderButton
-            iconName="settings"
-            onPress={() => setShowContextParamsModal(true)}
-          />
-        ),
-      })
-    }
-  }, [navigation, isModelReady])
-
-  const addMessage = (message: MessageType.Any) => {
+  const addMessage = useCallback((message: MessageType.Any) => {
     messagesRef.current = [message, ...messagesRef.current]
     setMessagesVersion((prev) => prev + 1)
-  }
+  }, [])
 
   const updateMessage = (
     messageId: string,
@@ -195,18 +170,85 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
     }
   }
 
-  const addSystemMessage = (text: string, metadata = {}) => {
-    const textMessage: MessageType.Text = {
-      author: assistant,
-      createdAt: Date.now(),
-      id: randId(),
-      text,
-      type: 'text',
-      metadata: { system: true, ...metadata },
+  const addSystemMessage = useCallback(
+    (text: string, metadata = {}) => {
+      const textMessage: MessageType.Text = {
+        author: assistant,
+        createdAt: Date.now(),
+        id: randId(),
+        text,
+        type: 'text',
+        metadata: { system: true, ...metadata },
+      }
+      addMessage(textMessage)
+      return textMessage.id
+    },
+    [addMessage],
+  )
+
+  const handleReset = useCallback(() => {
+    Alert.alert(
+      'Reset Chat',
+      'Are you sure you want to clear all messages? This action cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            messagesRef.current = []
+            setMessagesVersion((prev) => prev + 1)
+            addSystemMessage(
+              "Hello! I'm ready to chat with you. How can I help you today?",
+            )
+          },
+        },
+      ],
+    )
+  }, [addSystemMessage])
+
+  // Set up navigation header buttons
+  useLayoutEffect(() => {
+    if (isModelReady) {
+      navigation.setOptions({
+        headerRight: () => (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <HeaderButton iconName="refresh" onPress={handleReset} />
+            <HeaderButton
+              iconName="cog-outline"
+              onPress={() => setShowCompletionParamsModal(true)}
+            />
+            <Menu
+              actions={[
+                {
+                  id: 'messages',
+                  title: 'Messages',
+                  onPress: () => setShowMessagesModal(true),
+                },
+                {
+                  id: 'sessions',
+                  title: 'Sessions',
+                  onPress: () => setShowSessionModal(true),
+                },
+              ]}
+            />
+          </View>
+        ),
+      })
+    } else {
+      navigation.setOptions({
+        headerRight: () => (
+          <HeaderButton
+            iconName="cog-outline"
+            onPress={() => setShowContextParamsModal(true)}
+          />
+        ),
+      })
     }
-    addMessage(textMessage)
-    return textMessage.id
-  }
+  }, [navigation, isModelReady, handleReset])
 
   const handleImportMessages = (newMessages: MessageType.Any[]) => {
     // Reset messages and add system message back
@@ -278,7 +320,6 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
       // Build conversation messages using the reusable function
       const conversationMessages = buildLLMMessages()
 
-      let response = ''
       const responseId = randId()
       const responseMessage: MessageType.Text = {
         author: assistant,
@@ -293,18 +334,26 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
       const params = completionParams || (await loadCompletionParams())
       const completionResult = await context.completion(
         {
-          messages: conversationMessages,
           ...params,
+          messages: conversationMessages,
+          reasoning_format: 'auto',
+          jinja: true,
         },
         (data) => {
-          const { token } = data
-          response += token
+          const { content = '', reasoning_content: reasoningContent } = data
 
           updateMessage(responseId, (msg) => {
             if (msg.type === 'text') {
               return {
                 ...msg,
-                text: response.replace(/^\s+/, ''),
+                text: content.replace(/^\s+/, ''),
+                metadata: {
+                  ...msg.metadata,
+                  partialCompletionResult: {
+                    reasoning_content: reasoningContent,
+                    content: content.replace(/^\s+/, ''),
+                  },
+                },
               }
             }
             return msg
@@ -325,6 +374,7 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
             metadata: {
               ...msg.metadata,
               timings: 'Response completed',
+              completionResult,
             },
           }
         }
@@ -360,9 +410,7 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
           {/* Custom Models Section */}
           {customModels.length > 0 && (
             <>
-              <Text style={CommonStyles.modelSectionTitle}>
-                Custom Models
-              </Text>
+              <Text style={CommonStyles.modelSectionTitle}>Custom Models</Text>
               {customModels.map((model) => (
                 <CustomModelCard
                   key={model.id}
@@ -419,6 +467,7 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
           onClose={() => setShowCustomModelModal(false)}
           onModelAdded={handleCustomModelAdded}
           title="Add Custom Model"
+          enableFileSelection
         />
 
         <MaskedProgress
