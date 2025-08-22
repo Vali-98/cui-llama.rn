@@ -242,6 +242,8 @@
 #define LM_GGML_ROPE_TYPE_MROPE  8
 #define LM_GGML_ROPE_TYPE_VISION 24
 
+#define LM_GGML_MROPE_SECTIONS   4
+
 #define LM_GGML_UNUSED(x) (void)(x)
 
 #define LM_GGML_PAD(x, n) (((x) + (n) - 1) & ~((n) - 1))
@@ -541,6 +543,7 @@ extern "C" {
         LM_GGML_OP_CROSS_ENTROPY_LOSS,
         LM_GGML_OP_CROSS_ENTROPY_LOSS_BACK,
         LM_GGML_OP_OPT_STEP_ADAMW,
+        LM_GGML_OP_OPT_STEP_SGD,
 
         LM_GGML_OP_GLU,
 
@@ -1661,7 +1664,7 @@ extern "C" {
             struct lm_ggml_tensor  * b,
             struct lm_ggml_tensor  * c,
             int                   n_dims,
-            int                   sections[4],
+            int                   sections[LM_GGML_MROPE_SECTIONS],
             int                   mode,
             int                   n_ctx_orig,
             float                 freq_base,
@@ -1678,6 +1681,22 @@ extern "C" {
             struct lm_ggml_tensor  * b,
             struct lm_ggml_tensor  * c,
             int                   n_dims,
+            int                   mode,
+            int                   n_ctx_orig,
+            float                 freq_base,
+            float                 freq_scale,
+            float                 ext_factor,
+            float                 attn_factor,
+            float                 beta_fast,
+            float                 beta_slow);
+
+    LM_GGML_API struct lm_ggml_tensor * lm_ggml_rope_multi_inplace(
+            struct lm_ggml_context * ctx,
+            struct lm_ggml_tensor  * a,
+            struct lm_ggml_tensor  * b,
+            struct lm_ggml_tensor  * c,
+            int                   n_dims,
+            int                   sections[LM_GGML_MROPE_SECTIONS],
             int                   mode,
             int                   n_ctx_orig,
             float                 freq_base,
@@ -2294,7 +2313,14 @@ extern "C" {
             struct lm_ggml_tensor  * grad,
             struct lm_ggml_tensor  * m,
             struct lm_ggml_tensor  * v,
-            struct lm_ggml_tensor  * adamw_params); // parameters such a the learning rate
+            struct lm_ggml_tensor  * adamw_params); // parameters such as the learning rate
+
+    // stochastic gradient descent step (with weight decay)
+    LM_GGML_API struct lm_ggml_tensor * lm_ggml_opt_step_sgd(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor *  a,
+        struct lm_ggml_tensor *  grad,
+        struct lm_ggml_tensor *  sgd_params); // alpha, weight decay
 
     //
     // automatic differentiation

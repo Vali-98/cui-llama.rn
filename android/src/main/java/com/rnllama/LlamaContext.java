@@ -115,11 +115,11 @@ public class LlamaContext {
     if(!isGGUF(modelName, reactContext)) {
       throw new IllegalArgumentException("File is not in GGUF format");
     }
-
+    ParcelFileDescriptor pfd = null;
     if (modelName.startsWith("content://")) {
       Uri uri = Uri.parse(modelName);
       try {
-        ParcelFileDescriptor pfd = reactContext.getApplicationContext().getContentResolver().openFileDescriptor(uri, "r");
+        pfd = reactContext.getApplicationContext().getContentResolver().openFileDescriptor(uri, "r");
         modelName =  "" + pfd.getFd();
       } catch (Exception e) {
         Log.e(NAME, "Failed to convert to FD!");
@@ -183,6 +183,13 @@ public class LlamaContext {
     );
     if (this.context == -1) {
       throw new IllegalStateException("Failed to initialize context");
+    }
+    if(pfd != null) {
+        try {
+            pfd.close();
+        } catch (Exception e) {
+            Log.e(NAME, "Failed to close FD");
+        }
     }
     this.modelDetails = loadModelDetails(this.context);
     this.reactContext = reactContext;
