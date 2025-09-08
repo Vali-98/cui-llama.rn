@@ -31,7 +31,13 @@ export type NativeContextParams = {
   no_gpu_devices?: boolean
 
   /**
-   * Enable flash attention, only recommended in GPU device (Experimental in llama.cpp)
+   * Enable flash attention, only recommended in GPU device.
+   */
+  flash_attn_type?: string
+
+  /**
+   * Enable flash attention, only recommended in GPU device
+   * Deprecated: use flash_attn_type instead
    */
   flash_attn?: boolean
 
@@ -81,6 +87,11 @@ export type NativeContextParams = {
    * Use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
    */
   swa_full?: boolean
+
+  /**
+   * Number of layers to keep MoE weights on CPU
+   */
+  n_cpu_moe?: number
 
   // Embedding params
   embedding?: boolean
@@ -466,6 +477,9 @@ export interface Spec extends TurboModule {
       tool_choice?: string
       enable_thinking?: boolean
       add_generation_prompt?: boolean
+      /*
+       * Timestamp in seconds since epoch to apply to chat template's strftime_now
+       */
       now?: string
       chat_template_kwargs?: string
     },

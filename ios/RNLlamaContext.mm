@@ -194,13 +194,37 @@
     if (params[@"rope_freq_base"]) defaultParams.rope_freq_base = [params[@"rope_freq_base"] floatValue];
     if (params[@"rope_freq_scale"]) defaultParams.rope_freq_scale = [params[@"rope_freq_scale"] floatValue];
 
-    if (params[@"flash_attn"] && [params[@"flash_attn"] boolValue]) defaultParams.flash_attn = true;
+    if (params[@"flash_attn_type"] && [params[@"flash_attn_type"] isKindOfClass:[NSString class]]) {
+      const char* flash_attn_type_str = [params[@"flash_attn_type"] UTF8String];
+      if (flash_attn_type_str) {
+        defaultParams.flash_attn_type = static_cast<enum llama_flash_attn_type>(rnllama::flash_attn_type_from_str(flash_attn_type_str));
+      }
+    } else {
+      // DEPRECATED: use flash_attn_type instead
+      if (params[@"flash_attn"]) {
+        defaultParams.flash_attn_type = [params[@"flash_attn"] boolValue] ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED;
+      }
+    }
 
     if (params[@"ctx_shift"]) defaultParams.ctx_shift = [params[@"ctx_shift"] boolValue];
 
     if (params[@"kv_unified"]) defaultParams.kv_unified = [params[@"kv_unified"] boolValue];
 
     if (params[@"swa_full"]) defaultParams.swa_full = [params[@"swa_full"] boolValue];
+
+    // Handle n_cpu_moe parameter
+    if (params[@"n_cpu_moe"] && [params[@"n_cpu_moe"] isKindOfClass:[NSNumber class]]) {
+        int nCpuMoe = [params[@"n_cpu_moe"] intValue];
+        if (nCpuMoe > 0) {
+            for (int i = 0; i < nCpuMoe; ++i) {
+                static std::list<std::string> buft_overrides;
+                std::string pattern = "blk\\." + std::to_string(i) + "\\.ffn_(up|down|gate)_exps";
+                buft_overrides.push_back(pattern);
+                defaultParams.tensor_buft_overrides.push_back({buft_overrides.back().c_str(), lm_ggml_backend_cpu_buffer_type()});
+            }
+            defaultParams.tensor_buft_overrides.push_back({nullptr, nullptr});
+        }
+    }
 
     if (params[@"cache_type_k"] && [params[@"cache_type_k"] isKindOfClass:[NSString class]]) {
         const char* cache_type_k_str = [params[@"cache_type_k"] UTF8String];
@@ -363,7 +387,10 @@
 }
 
 - (bool)isPredicting {
-    return llama->is_predicting;
+    if (llama->completion == nullptr) {
+        return false;
+    }
+    return llama->completion->is_predicting;
 }
 
 - (bool)initMultimodal:(NSDictionary *)params {
@@ -481,14 +508,18 @@
         for (const auto &p : prob.probs)
         {
             std::string tokStr = rnllama::tokens_to_output_formatted_string(llama->ctx, p.tok);
+            NSString *tokStrString = [NSString stringWithUTF8String:tokStr.c_str()];
+            if (tokStrString == nil) tokStrString = @"<UNKNOWN>";
             [probsForToken addObject:@{
-                @"tok_str": [NSString stringWithUTF8String:tokStr.c_str()],
+                @"tok_str": tokStrString,
                 @"prob": [NSNumber numberWithDouble:p.prob]
             }];
         }
         std::string tokStr = rnllama::tokens_to_output_formatted_string(llama->ctx, prob.tok);
+        NSString *tokStrString = [NSString stringWithUTF8String:tokStr.c_str()];
+        if (tokStrString == nil) tokStrString = @"<UNKNOWN>";
         [out addObject:@{
-            @"content": [NSString stringWithUTF8String:tokStr.c_str()],
+            @"content": tokStrString,
             @"probs": probsForToken
         }];
     }
@@ -498,7 +529,10 @@
 - (NSDictionary *)completion:(NSDictionary *)params
     onToken:(void (^)(NSMutableDictionary * tokenResult))onToken
 {
-    llama->rewind();
+    if (llama->completion == nullptr) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Completion not initialized" userInfo:nil];
+    }
+    llama->completion->rewind();
 
     //llama_reset_timings(llama->ctx);
 
@@ -657,8 +691,13 @@
         }
     }
 
-    if (!llama->initSampling()) {
+    if (!llama->completion->initSampling()) {
         @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to initialize sampling" userInfo:nil];
+    }
+
+    NSString *prefillText = params[@"prefill_text"];
+    if (prefillText) {
+        llama->completion->prefill_text = [prefillText UTF8String];
     }
 
     auto chat_format = params[@"chat_format"] ? [params[@"chat_format"] intValue] : COMMON_CHAT_FORMAT_CONTENT_ONLY;
@@ -669,7 +708,7 @@
     std::string reasoningFormatStr = [reasoningFormat UTF8String];
     common_reasoning_format reasoning_format = common_reasoning_format_from_name(reasoningFormatStr);
 
-    llama->beginCompletion(chat_format, reasoning_format, thinking_forced_open);
+    llama->completion->beginCompletion(chat_format, reasoning_format, thinking_forced_open);
     try {
         // Use the unified loadPrompt function with image paths if available
         NSArray *imagePaths = params[@"media_paths"];
@@ -681,57 +720,57 @@
                     media_paths_vector.push_back([path UTF8String]);
                 }
             }
-            llama->loadPrompt(media_paths_vector);
+            llama->completion->loadPrompt(media_paths_vector);
         } else {
-            llama->loadPrompt({});
+            llama->completion->loadPrompt({});
         }
     } catch (const std::exception &e) {
-        llama->endCompletion();
+        llama->completion->endCompletion();
         @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
     } catch (const std::runtime_error& e) {
-        llama->endCompletion();
+        llama->completion->endCompletion();
         @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
     }
 
-    if (llama->context_full) {
-        llama->endCompletion();
+    if (llama->completion->context_full) {
+        llama->completion->endCompletion();
         @throw [NSException exceptionWithName:@"LlamaException" reason:@"Context is full" userInfo:nil];
     }
 
     size_t sent_count = 0;
     size_t sent_token_probs_index = 0;
 
-    while (llama->has_next_token && !llama->is_interrupted) {
-        const rnllama::completion_token_output token_with_probs = llama->doCompletion();
-        if (token_with_probs.tok == -1 || llama->incomplete) {
+    while (llama->completion->has_next_token && !llama->completion->is_interrupted) {
+        const rnllama::completion_token_output token_with_probs = llama->completion->doCompletion();
+        if (token_with_probs.tok == -1 || llama->completion->incomplete) {
             continue;
         }
         const std::string token_text = common_token_to_piece(llama->ctx, token_with_probs.tok);
 
-        size_t pos = std::min(sent_count, llama->generated_text.size());
+        size_t pos = std::min(sent_count, llama->completion->generated_text.size());
 
-        const std::string str_test = llama->generated_text.substr(pos);
+        const std::string str_test = llama->completion->generated_text.substr(pos);
         bool is_stop_full = false;
         size_t stop_pos =
-            llama->findStoppingStrings(str_test, token_text.size(), rnllama::STOP_FULL);
+            llama->completion->findStoppingStrings(str_test, token_text.size(), rnllama::STOP_FULL);
         if (stop_pos != std::string::npos) {
             is_stop_full = true;
-            llama->generated_text.erase(
-                llama->generated_text.begin() + pos + stop_pos,
-                llama->generated_text.end());
-            pos = std::min(sent_count, llama->generated_text.size());
+            llama->completion->generated_text.erase(
+                llama->completion->generated_text.begin() + pos + stop_pos,
+                llama->completion->generated_text.end());
+            pos = std::min(sent_count, llama->completion->generated_text.size());
         } else {
             is_stop_full = false;
-            stop_pos = llama->findStoppingStrings(str_test, token_text.size(),
+            stop_pos = llama->completion->findStoppingStrings(str_test, token_text.size(),
                 rnllama::STOP_PARTIAL);
         }
 
         if (
             stop_pos == std::string::npos ||
             // Send rest of the text if we are at the end of the generation
-            (!llama->has_next_token && !is_stop_full && stop_pos > 0)
+            (!llama->completion->has_next_token && !is_stop_full && stop_pos > 0)
         ) {
-            const std::string to_send = llama->generated_text.substr(pos, std::string::npos);
+            const std::string to_send = llama->completion->generated_text.substr(pos, std::string::npos);
 
             sent_count += to_send.size();
 
@@ -742,17 +781,17 @@
 
             if (llama->params.sampling.n_probs > 0) {
                 const std::vector<llama_token> to_send_toks = common_tokenize(llama->ctx, to_send, false);
-                size_t probs_pos = std::min(sent_token_probs_index, llama->generated_token_probs.size());
-                size_t probs_stop_pos = std::min(sent_token_probs_index + to_send_toks.size(), llama->generated_token_probs.size());
+                size_t probs_pos = std::min(sent_token_probs_index, llama->completion->generated_token_probs.size());
+                size_t probs_stop_pos = std::min(sent_token_probs_index + to_send_toks.size(), llama->completion->generated_token_probs.size());
                 if (probs_pos < probs_stop_pos) {
-                    probs_output = std::vector<rnllama::completion_token_output>(llama->generated_token_probs.begin() + probs_pos, llama->generated_token_probs.begin() + probs_stop_pos);
+                    probs_output = std::vector<rnllama::completion_token_output>(llama->completion->generated_token_probs.begin() + probs_pos, llama->completion->generated_token_probs.begin() + probs_stop_pos);
                 }
                 sent_token_probs_index = probs_stop_pos;
 
                 tokenResult[@"completion_probabilities"] = [self tokenProbsToDict:probs_output];
             }
 
-            auto partial_output = llama->getPartialOutput(token_text);
+            auto partial_output = llama->completion->parseChatOutput(true);
             if (!partial_output.content.empty()) {
                 tokenResult[@"content"] = [NSString stringWithUTF8String:partial_output.content.c_str()];
             }
@@ -782,7 +821,7 @@
     }
 
     llama_perf_context_print(llama->ctx);
-    llama->endCompletion();
+    llama->completion->endCompletion();
 
     const auto timings = llama_perf_context(llama->ctx);
 
@@ -792,24 +831,15 @@
     NSMutableDictionary *result = [[NSMutableDictionary alloc] init];
     result[@"chat_format"] = @(chat_format);
 
-    if (!llama->is_interrupted) {
+    if (!llama->completion->is_interrupted) {
         try {
-            common_chat_syntax chat_syntax;
-            chat_syntax.format = static_cast<common_chat_format>(chat_format);
-
-            NSString *reasoningFormat = params[@"reasoning_format"];
-            if (!reasoningFormat) reasoningFormat = @"none";
-            std::string reasoningFormatStr = [reasoningFormat UTF8String];
-            chat_syntax.reasoning_format = common_reasoning_format_from_name(reasoningFormatStr);
-            chat_syntax.thinking_forced_open = [params[@"thinking_forced_open"] boolValue];
-
-            common_chat_msg message = common_chat_parse(llama->generated_text, false, chat_syntax);
-            if (!message.reasoning_content.empty()) {
-                reasoningContent = [NSString stringWithUTF8String:message.reasoning_content.c_str()];
+            auto final_output = llama->completion->parseChatOutput(false);
+            if (!final_output.reasoning_content.empty()) {
+                reasoningContent = [NSString stringWithUTF8String:final_output.reasoning_content.c_str()];
             }
-            content = [NSString stringWithUTF8String:message.content.c_str()];
+            content = [NSString stringWithUTF8String:final_output.content.c_str()];
             toolCalls = [[NSMutableArray alloc] init];
-            for (const auto &tc : message.tool_calls) {
+            for (const auto &tc : final_output.tool_calls) {
                 [toolCalls addObject:@{
                     @"type": @"function",
                     @"function": @{
@@ -824,21 +854,21 @@
         }
     }
 
-    result[@"text"] = [NSString stringWithUTF8String:llama->generated_text.c_str()]; // Original text
+    result[@"text"] = [NSString stringWithUTF8String:llama->completion->generated_text.c_str()]; // Original text
     if (content) result[@"content"] = content;
     if (reasoningContent) result[@"reasoning_content"] = reasoningContent;
     if (toolCalls && toolCalls.count > 0) result[@"tool_calls"] = toolCalls;
-    result[@"completion_probabilities"] = [self tokenProbsToDict:llama->generated_token_probs];
-    result[@"tokens_predicted"] = @(llama->num_tokens_predicted);
-    result[@"tokens_evaluated"] = @(llama->num_prompt_tokens);
-    result[@"truncated"] = @(llama->truncated);
-    result[@"context_full"] = @(llama->context_full);
-    result[@"interrupted"] = @(llama->is_interrupted);
-    result[@"stopped_eos"] = @(llama->stopped_eos);
-    result[@"stopped_word"] = @(llama->stopped_word);
-    result[@"stopped_limit"] = @(llama->stopped_limit);
-    result[@"stopping_word"] = [NSString stringWithUTF8String:llama->stopping_word.c_str()];
-    result[@"tokens_cached"] = @(llama->n_past);
+    result[@"completion_probabilities"] = [self tokenProbsToDict:llama->completion->generated_token_probs];
+    result[@"tokens_predicted"] = @(llama->completion->num_tokens_predicted);
+    result[@"tokens_evaluated"] = @(llama->completion->num_prompt_tokens);
+    result[@"truncated"] = @(llama->completion->truncated);
+    result[@"context_full"] = @(llama->completion->context_full);
+    result[@"interrupted"] = @(llama->completion->is_interrupted);
+    result[@"stopped_eos"] = @(llama->completion->stopped_eos);
+    result[@"stopped_word"] = @(llama->completion->stopped_word);
+    result[@"stopped_limit"] = @(llama->completion->stopped_limit);
+    result[@"stopping_word"] = [NSString stringWithUTF8String:llama->completion->stopping_word.c_str()];
+    result[@"tokens_cached"] = @(llama->completion->n_past);
 
     if (llama->isVocoderEnabled() && llama->tts_wrapper != nullptr && !llama->tts_wrapper->audio_tokens.empty()) {
         NSMutableArray *audioTokens = [[NSMutableArray alloc] init];
@@ -863,7 +893,10 @@
 }
 
 - (void)stopCompletion {
-    llama->is_interrupted = true;
+    if (llama->completion == nullptr) {
+        return;
+    }
+    llama->completion->is_interrupted = true;
 }
 
 - (NSDictionary *)tokenize:(NSString *)text imagePaths:(NSArray *)imagePaths {
@@ -922,8 +955,14 @@
 }
 
 - (NSDictionary *)embedding:(NSString *)text params:(NSDictionary *)params {
+    if (llama->completion == nullptr) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Context has been released" userInfo:nil];
+    }
     if (llama->params.embedding != true) {
         @throw [NSException exceptionWithName:@"LlamaException" reason:@"Embedding is not enabled" userInfo:nil];
+    }
+    if ([self isPredicting]) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Context is predicting" userInfo:nil];
     }
 
     common_params embdParams;
@@ -934,48 +973,43 @@
         embdParams.embd_normalize = [params[@"embd_normalize"] intValue];
     }
 
-    llama->rewind();
-
-    llama_perf_context_reset(llama->ctx);
-
     llama->params.prompt = [text UTF8String];
-
     llama->params.n_predict = 0;
-
-    if (!llama->initSampling()) {
-        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to initialize sampling" userInfo:nil];
-    }
-    llama->beginCompletion();
     try {
-      llama->loadPrompt({});
+        std::vector<float> result = llama->completion->embedding(embdParams);
+
+        NSMutableDictionary *resultDict = [[NSMutableDictionary alloc] init];
+        NSMutableArray *embeddingResult = [[NSMutableArray alloc] init];
+        for (float f : result) {
+            [embeddingResult addObject:@(f)];
+        }
+        resultDict[@"embedding"] = embeddingResult;
+        NSMutableArray *promptTokens = [[NSMutableArray alloc] init];
+        for (llama_token tok : llama->completion->embd) {
+            [promptTokens addObject:[NSString stringWithUTF8String:common_token_to_piece(llama->ctx, tok).c_str()]];
+        }
+        resultDict[@"prompt_tokens"] = promptTokens;
+        return resultDict;
     } catch (const std::exception &e) {
-      llama->endCompletion();
-      @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+        llama->completion->endCompletion();
+        @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
     } catch (const std::runtime_error& e) {
-      llama->endCompletion();
-      @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
+        llama->completion->endCompletion();
+        @throw [NSException exceptionWithName:@"LlamaException" reason:[NSString stringWithUTF8String:e.what()] userInfo:nil];
     }
-    llama->doCompletion();
-
-    std::vector<float> result = llama->getEmbedding(embdParams);
-
-    NSMutableDictionary *resultDict = [[NSMutableDictionary alloc] init];
-    NSMutableArray *embeddingResult = [[NSMutableArray alloc] init];
-    for (float f : result) {
-        [embeddingResult addObject:@(f)];
-    }
-    resultDict[@"embedding"] = embeddingResult;
-    NSMutableArray *promptTokens = [[NSMutableArray alloc] init];
-    for (llama_token tok : llama->embd) {
-        [promptTokens addObject:[NSString stringWithUTF8String:common_token_to_piece(llama->ctx, tok).c_str()]];
-    }
-    resultDict[@"prompt_tokens"] = promptTokens;
-
-    llama->endCompletion();
-    return resultDict;
 }
 
 - (NSArray *)rerank:(NSString *)query documents:(NSArray<NSString *> *)documents params:(NSDictionary *)params {
+    if (llama->completion == nullptr) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Context has been released" userInfo:nil];
+    }
+    if (llama->params.embedding != true) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Embedding is not enabled" userInfo:nil];
+    }
+    if ([self isPredicting]) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Context is predicting" userInfo:nil];
+    }
+
     // Convert NSArray to std::vector
     std::vector<std::string> documentsVector;
     for (NSString *doc in documents) {
@@ -985,7 +1019,7 @@
     NSMutableArray *resultArray = [[NSMutableArray alloc] init];
 
     try {
-        std::vector<float> scores = llama->rerank(std::string([query UTF8String]), documentsVector);
+        std::vector<float> scores = llama->completion->rerank(std::string([query UTF8String]), documentsVector);
 
         // Create result array with score and index
         for (size_t i = 0; i < scores.size(); i++) {
@@ -1004,6 +1038,9 @@
 }
 
 - (NSDictionary *)loadSession:(NSString *)path {
+    if (llama->completion == nullptr) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Context has been released" userInfo:nil];
+    }
     if (!path || [path length] == 0) {
         @throw [NSException exceptionWithName:@"LlamaException" reason:@"Session path is empty" userInfo:nil];
     }
@@ -1012,17 +1049,17 @@
     }
 
     size_t n_token_count_out = 0;
-    llama->embd.resize(llama->params.n_ctx);
-    if (!llama_state_load_file(llama->ctx, [path UTF8String], llama->embd.data(), llama->embd.capacity(), &n_token_count_out)) {
+    llama->completion->embd.resize(llama->params.n_ctx);
+    if (!llama_state_load_file(llama->ctx, [path UTF8String], llama->completion->embd.data(), llama->completion->embd.capacity(), &n_token_count_out)) {
         @throw [NSException exceptionWithName:@"LlamaException" reason:@"Failed to load session" userInfo:nil];
     }
-    llama->embd.resize(n_token_count_out);
+    llama->completion->embd.resize(n_token_count_out);
     // Find LLAMA_TOKEN_NULL in the tokens and resize the array to the index of the null token
-    auto null_token_iter = std::find(llama->embd.begin(), llama->embd.end(), LLAMA_TOKEN_NULL);
-    if (null_token_iter != llama->embd.end()) {
-        llama->embd.resize(std::distance(llama->embd.begin(), null_token_iter));
+    auto null_token_iter = std::find(llama->completion->embd.begin(), llama->completion->embd.end(), LLAMA_TOKEN_NULL);
+    if (null_token_iter != llama->completion->embd.end()) {
+        llama->completion->embd.resize(std::distance(llama->completion->embd.begin(), null_token_iter));
     }
-    const std::string text = rnllama::tokens_to_str(llama->ctx, llama->embd.cbegin(), llama->embd.cend());
+    const std::string text = rnllama::tokens_to_str(llama->ctx, llama->completion->embd.cbegin(), llama->completion->embd.cend());
     return @{
         @"tokens_loaded": @(n_token_count_out),
         @"prompt": [NSString stringWithUTF8String:text.c_str()]
@@ -1030,10 +1067,13 @@
 }
 
 - (int)saveSession:(NSString *)path size:(int)size {
+    if (llama->completion == nullptr) {
+        @throw [NSException exceptionWithName:@"LlamaException" reason:@"Context has been released" userInfo:nil];
+    }
     if (!path || [path length] == 0) {
         @throw [NSException exceptionWithName:@"LlamaException" reason:@"Session path is empty" userInfo:nil];
     }
-    std::vector<llama_token> session_tokens = llama->embd;
+    std::vector<llama_token> session_tokens = llama->completion->embd;
     // Find LLAMA_TOKEN_NULL in the tokens and resize the array to the index of the null token
     auto null_token_iter = std::find(session_tokens.begin(), session_tokens.end(), LLAMA_TOKEN_NULL);
     if (null_token_iter != session_tokens.end()) {
@@ -1048,7 +1088,10 @@
 }
 
 - (NSString *)bench:(int)pp tg:(int)tg pl:(int)pl nr:(int)nr {
-    return [NSString stringWithUTF8String:llama->bench(pp, tg, pl, nr).c_str()];
+    if (llama->completion == nullptr) {
+        return @"";
+    }
+    return [NSString stringWithUTF8String:llama->completion->bench(pp, tg, pl, nr).c_str()];
 }
 
 - (void)applyLoraAdapters:(NSArray *)loraAdapters {

@@ -138,8 +138,9 @@ export enum CACHE_TYPE  {
 
 export type ContextParams = Omit<
   NativeContextParams,
-  'cache_type_k' | 'cache_type_v' | 'pooling_type'
+  'flash_attn_type' | 'cache_type_k' | 'cache_type_v' | 'pooling_type'
 > & {
+  flash_attn_type?: 'auto' | 'on' | 'off'
   cache_type_k?: CACHE_TYPE
   cache_type_v?: CACHE_TYPE
   pooling_type?: 'none' | 'mean' | 'cls' | 'last' | 'rank'
@@ -190,8 +191,16 @@ export type CompletionBaseParams = {
   response_format?: CompletionResponseFormat
   media_paths?: string | string[]
   add_generation_prompt?: boolean
+  /*
+   * Timestamp in seconds since epoch to apply to chat template's strftime_now
+   */
   now?: string | number
   chat_template_kwargs?: Record<string, string>
+  /**
+   * Prefill text to be used for chat parsing (Generation Prompt + Content)
+   * Used for if last assistant message is for prefill purpose
+   */
+  prefill_text?: string
 }
 export type CompletionParams = Omit<
   NativeCompletionParams,
@@ -341,7 +350,12 @@ export class LlamaContext {
         enable_thinking: params?.enable_thinking ?? true,
         add_generation_prompt: params?.add_generation_prompt,
         now: typeof params?.now === 'number' ? params.now.toString() : params?.now,
-        chat_template_kwargs: params?.chat_template_kwargs ? JSON.stringify(params.chat_template_kwargs) : undefined,
+        chat_template_kwargs: params?.chat_template_kwargs ? JSON.stringify(
+          Object.entries(params.chat_template_kwargs).reduce((acc, [key, value]) => {
+            acc[key] = JSON.stringify(value) // Each value is a stringified JSON object
+            return acc
+          }, {} as Record<string, any>)
+        ) : undefined,
       },
     )
     if (!useJinja) {

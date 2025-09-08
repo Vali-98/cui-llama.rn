@@ -61,8 +61,8 @@ set(
     ${RNLLAMA_LIB_DIR}/llama.cpp
     ${RNLLAMA_LIB_DIR}/llama-model.cpp
     ${RNLLAMA_LIB_DIR}/llama-model-loader.cpp
-    ${RNLLAMA_LIB_DIR}/llama-kv-cache-unified.cpp
-    ${RNLLAMA_LIB_DIR}/llama-kv-cache-unified-iswa.cpp
+    ${RNLLAMA_LIB_DIR}/llama-kv-cache.cpp
+    ${RNLLAMA_LIB_DIR}/llama-kv-cache-iswa.cpp
     ${RNLLAMA_LIB_DIR}/llama-memory-hybrid.cpp
     ${RNLLAMA_LIB_DIR}/llama-memory-recurrent.cpp
     ${RNLLAMA_LIB_DIR}/llama-mmap.cpp
@@ -82,6 +82,7 @@ set(
     ${RNLLAMA_LIB_DIR}/minja/chat-template.hpp
     ${RNLLAMA_LIB_DIR}/anyascii.c
     ${RNLLAMA_LIB_DIR}/rn-llama.cpp
+    ${RNLLAMA_LIB_DIR}/rn-completion.cpp
     ${RNLLAMA_LIB_DIR}/rn-tts.cpp
     ${CMAKE_SOURCE_DIR}/jni-utils.h
     ${CMAKE_SOURCE_DIR}/jni.cpp

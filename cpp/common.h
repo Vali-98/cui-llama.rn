@@ -34,6 +34,9 @@ struct common_adapter_lora_info {
     std::string path;
     float scale;
 
+    std::string task_name;
+    std::string prompt_prefix;
+
     struct llama_adapter_lora * ptr;
 };
 
@@ -303,7 +306,6 @@ struct common_params {
     float   yarn_beta_fast        = 32.0f; // YaRN low correction dim
     float   yarn_beta_slow        =  1.0f; // YaRN high correction dim
     int32_t yarn_orig_ctx         =     0; // YaRN original context length
-    float   defrag_thold          =  0.1f; // KV cache defragmentation threshold
 
     // offload params
     std::vector<lm_ggml_backend_dev_t> devices; // devices to use for offloading
@@ -325,6 +327,7 @@ struct common_params {
     enum llama_rope_scaling_type rope_scaling_type = LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED;
     enum llama_pooling_type      pooling_type      = LLAMA_POOLING_TYPE_UNSPECIFIED; // pooling type for embeddings
     enum llama_attention_type    attention_type    = LLAMA_ATTENTION_TYPE_UNSPECIFIED; // attention type for embeddings
+    enum llama_flash_attn_type   flash_attn_type   = LLAMA_FLASH_ATTN_TYPE_AUTO; // whether to use Flash Attention
 
     struct common_params_sampling    sampling;
     struct common_params_speculative speculative;
@@ -388,9 +391,8 @@ struct common_params {
     bool multiline_input   = false; // reverse the usage of `\`
     bool simple_io         = false; // improves compatibility with subprocesses and limited consoles
     bool cont_batching     = true;  // insert new sequences for decoding on-the-fly
-    bool flash_attn        = false; // flash attention
     bool no_perf           = false; // disable performance metrics
-    bool ctx_shift         = false;  // context shift on inifinite text generation
+    bool ctx_shift         = false;  // context shift on infinite text generation
     bool swa_full          = false; // use full-size SWA cache (https://github.com/ggml-org/llama.cpp/pull/13194#issuecomment-2868343055)
     bool kv_unified        = false; // enable unified KV cache
 
@@ -457,7 +459,7 @@ struct common_params {
 
     // "advanced" endpoints are disabled by default for better security
     bool webui            = true;
-    bool endpoint_slots   = false;
+    bool endpoint_slots   = true;
     bool endpoint_props   = false; // only control POST requests, not GET
     bool endpoint_metrics = false;
 
