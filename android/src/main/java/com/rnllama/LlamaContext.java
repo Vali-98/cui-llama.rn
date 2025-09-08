@@ -150,6 +150,8 @@ public class LlamaContext {
       params.hasKey("n_gpu_layers") ? params.getInt("n_gpu_layers") : 0,
       // boolean flash_attn,
       params.hasKey("flash_attn") ? params.getBoolean("flash_attn") : false,
+      // String flash_attn_type,
+      params.hasKey("flash_attn_type") ? params.getString("flash_attn_type") : "",
       // String cache_type_k,
       params.hasKey("cache_type_k") ? params.getString("cache_type_k") : "f16",
       // String cache_type_v,
@@ -178,6 +180,8 @@ public class LlamaContext {
       params.hasKey("kv_unified") ? params.getBoolean("kv_unified") : false,
       // boolean swa_full,
       params.hasKey("swa_full") ? params.getBoolean("swa_full") : false,
+      // int n_cpu_moe,
+      params.hasKey("n_cpu_moe") ? params.getInt("n_cpu_moe") : 0,
       // LoadProgressCallback load_progress_callback
       params.hasKey("use_progress_callback") ? new LoadProgressCallback(this) : null
     );
@@ -292,7 +296,7 @@ public class LlamaContext {
     return result;
   }
 
-  public int saveSession(String path, int size) {
+  public WritableMap saveSession(String path, int size) {
     if (path == null || path.isEmpty()) {
       throw new IllegalArgumentException("File path is empty");
     }
@@ -330,6 +334,8 @@ public class LlamaContext {
       this.context,
       // String prompt,
       params.getString("prompt"),
+      // String prefill_text,
+      params.hasKey("prefill_text") ? params.getString("prefill_text") : "",
       // int[] guide_tokens,
       guide_tokens,
       // int chat_format,
@@ -437,9 +443,6 @@ public class LlamaContext {
   }
 
   public WritableMap getEmbedding(String text, ReadableMap params) {
-    if (isEmbeddingEnabled(this.context) == false) {
-      throw new IllegalStateException("Embedding is not enabled");
-    }
     WritableMap result = embedding(
       this.context,
       text,
@@ -452,25 +455,20 @@ public class LlamaContext {
     return result;
   }
 
-  public WritableArray getRerank(String query, ReadableArray documents, ReadableMap params) {
-    if (isEmbeddingEnabled(this.context) == false) {
-      throw new IllegalStateException("Embedding is not enabled but required for reranking");
-    }
-
+  public WritableMap getRerank(String query, ReadableArray documents, ReadableMap params) {
     // Convert ReadableArray to Java string array
     String[] documentsArray = new String[documents.size()];
     for (int i = 0; i < documents.size(); i++) {
       documentsArray[i] = documents.getString(i);
     }
 
-    WritableArray result = rerank(
+    return rerank(
       this.context,
       query,
       documentsArray,
       // int normalize,
       params.hasKey("normalize") ? params.getInt("normalize") : -1
     );
-    return result;
   }
 
   public String bench(int pp, int tg, int pl, int nr) {
@@ -674,6 +672,7 @@ public class LlamaContext {
     int n_threads,
     int n_gpu_layers, // TODO: Support this
     boolean flash_attn,
+    String flash_attn_type,
     String cache_type_k,
     String cache_type_v,
     boolean use_mlock,
@@ -688,6 +687,7 @@ public class LlamaContext {
     boolean ctx_shift,
     boolean kv_unified,
     boolean swa_full,
+    int n_cpu_moe,
     LoadProgressCallback load_progress_callback
   );
   protected static native boolean initMultimodal(long contextPtr, String mmproj_path, boolean MMPROJ_USE_GPU);
@@ -719,7 +719,7 @@ public class LlamaContext {
     long contextPtr,
     String path
   );
-  protected static native int saveSession(
+  protected static native WritableMap saveSession(
     long contextPtr,
     String path,
     int size
@@ -727,6 +727,7 @@ public class LlamaContext {
   protected static native WritableMap doCompletion(
     long context_ptr,
     String prompt,
+    String prefill_text,
     int[] guide_tokens,
     int chat_format,
     String reasoning_format,
@@ -770,13 +771,12 @@ public class LlamaContext {
   protected static native boolean isPredicting(long contextPtr);
   protected static native WritableMap tokenize(long contextPtr, String text, String[] media_paths);
   protected static native String detokenize(long contextPtr, int[] tokens);
-  protected static native boolean isEmbeddingEnabled(long contextPtr);
   protected static native WritableMap embedding(
     long contextPtr,
     String text,
     int embd_normalize
   );
-  protected static native WritableArray rerank(long contextPtr, String query, String[] documents, int normalize);
+  protected static native WritableMap rerank(long contextPtr, String query, String[] documents, int normalize);
   protected static native String bench(long contextPtr, int pp, int tg, int pl, int nr);
   protected static native int applyLoraAdapters(long contextPtr, ReadableArray loraAdapters);
   protected static native void removeLoraAdapters(long contextPtr);

@@ -74,6 +74,7 @@ export default function ContextParamsModal({
       validateIntegerParam(params.n_batch, 1, 99999, 'Batch Size'),
       validateIntegerParam(params.n_ubatch, 1, 99999, 'Micro Batch Size'),
       validateIntegerParam(params.n_threads, 1, 32, 'Threads'),
+      validateIntegerParam(params.n_cpu_moe, 0, 99, 'CPU MoE Layers'),
     ]
 
     const errors = validations.filter((error): error is string => error !== null)
@@ -108,6 +109,11 @@ export default function ContextParamsModal({
     if (typeof converted.n_threads === 'string') {
       const num = parseInt(converted.n_threads, 10)
       converted.n_threads = Number.isNaN(num) ? undefined : num
+    }
+
+    if (typeof converted.n_cpu_moe === 'string') {
+      const num = parseInt(converted.n_cpu_moe, 10)
+      converted.n_cpu_moe = Number.isNaN(num) ? undefined : num
     }
 
     return converted
@@ -225,6 +231,16 @@ export default function ContextParamsModal({
         placeholder="8"
       />
 
+      {/* CPU MoE Layers */}
+      <ParameterTextInput
+        label="CPU MoE Layers (n_cpu_moe)"
+        description="Number of MoE layers to keep on CPU. Use 0 to disable, higher values for more CPU processing."
+        value={params.n_cpu_moe?.toString() || '0'}
+        onChangeText={(text) => handleTextInput(text, 'n_cpu_moe')}
+        keyboardType="numeric"
+        placeholder="0"
+      />
+
       {/* Context Shift */}
       <ParameterSwitch
         label="Context Shift (ctx_shift)"
@@ -233,18 +249,20 @@ export default function ContextParamsModal({
         onValueChange={(value) => updateParam('ctx_shift', value)}
       />
 
-      {/* Flash Attention */}
-      <ParameterSwitch
-        label="Flash Attention (flash_attn)"
-        description="Only recommended in GPU device."
-        value={params.flash_attn || false}
-        onValueChange={(value) => updateParam('flash_attn', value)}
+      {/* Flash Attention Type */}
+      <ParameterMenu
+        label="Flash Attention (flash_attn_type)"
+        description="Flash attention type. Only recommended on GPU devices."
+        value={params.flash_attn_type}
+        options={['auto', 'on', 'off']}
+        onSelect={(value) => updateParam('flash_attn_type', value)}
+        placeholder="auto"
       />
 
       {/* Cache Type K */}
       <ParameterMenu
         label="Cache Type K (cache_type_k)"
-        description="KV cache data type for the K. Need enable flash_attn to change this."
+        description="KV cache data type for the K. Need flash_attn_type set to 'on' to change this."
         value={params.cache_type_k}
         options={CACHE_TYPE_OPTIONS}
         onSelect={(value) => updateParam('cache_type_k', value)}
@@ -254,7 +272,7 @@ export default function ContextParamsModal({
       {/* Cache Type V */}
       <ParameterMenu
         label="Cache Type V (cache_type_v)"
-        description="KV cache data type for the V. Need enable flash_attn if change this."
+        description="KV cache data type for the V. Need flash_attn_type set to 'on' to change this."
         value={params.cache_type_v}
         options={CACHE_TYPE_OPTIONS}
         onSelect={(value) => updateParam('cache_type_v', value)}
