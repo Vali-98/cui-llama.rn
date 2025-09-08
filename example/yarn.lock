@@ -1670,6 +1670,11 @@
   resolved "https://registry.yarnpkg.com/@react-native-documents/picker/-/picker-10.1.5.tgz#3b9cd338210e70602a30d739f2c3ee919177c6a9"
   integrity sha512-ajn55rNyxUqbQbz5gmm9gYFI1ifHBmMLH4jVWViA7IFqk1EiEM+pJcpoHizWr5hetR6tzQsaoI4vzCNv/WyA7w==
 
+"@react-native-menu/menu@^1.2.4":
+  version "1.2.4"
+  resolved "https://registry.yarnpkg.com/@react-native-menu/menu/-/menu-1.2.4.tgz#73330bb5f580be0361d14a51e56873c4fb574724"
+  integrity sha512-63NU9NHd/KcBa7lhhV69xQmY3ORUxjMRmlzTY/qrY56GHnuKX+16dvUpKAuRSPK5kebBuRw5X4MFe2L9JHUlWA==
+
 "@react-native-vector-icons/common@^12.3.0":
   version "12.3.0"
   resolved "https://registry.yarnpkg.com/@react-native-vector-icons/common/-/common-12.3.0.tgz#8a3cb778fd197e971da0fa69a35fa4fc8b030f1a"
@@ -1679,10 +1684,10 @@
     picocolors "^1.1.1"
     plist "^3.1.0"
 
-"@react-native-vector-icons/material-icons@^12.2.0":
+"@react-native-vector-icons/material-design-icons@^12.2.0":
   version "12.3.0"
-  resolved "https://registry.yarnpkg.com/@react-native-vector-icons/material-icons/-/material-icons-12.3.0.tgz#e93aeffef628d651273d2c2707c2e51f372f2f93"
-  integrity sha512-W9rhgfc8zKKXhZa/099un/RSNFgO6aHhJR2r6rodvTlO+ZRXq2GbU38CMBwhomJxyErcfmlR7En6wSdtLykYVQ==
+  resolved "https://registry.yarnpkg.com/@react-native-vector-icons/material-design-icons/-/material-design-icons-12.3.0.tgz#2cad45c0a12afb0d05f7620eb8b81b4470f15f42"
+  integrity sha512-0fut9zjUJtGWwjGQ0lbirmPnjMkou9vkBY3d3ZsaHqXCBgV3fGeOWuRZ17eDpsGy/9BTRtBRI85RYdFGhdcB4Q==
   dependencies:
     "@react-native-vector-icons/common" "^12.3.0"
 
