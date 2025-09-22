@@ -79,8 +79,10 @@ build-x86_64/
 jniLibs/
 build-ios/
 build-tvos/
-
+bin/
 ios/rnllama.xcframework/**/*.framework
 
 local-plan
 local-plan-done
+
+tests/*.gguf

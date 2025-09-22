@@ -21,7 +21,6 @@ add_definitions(
     -DLM_GGML_USE_CPU
     -DLM_GGML_USE_ACCELERATE
     -DLM_GGML_USE_METAL
-    -DLM_GGML_METAL_USE_BF16
 )
 
 if (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64;x86_64")
@@ -64,7 +63,12 @@ add_library(rnllama SHARED
     ${SOURCE_DIR}/ggml-cpu/binary-ops.cpp
     ${SOURCE_DIR}/ggml-cpu/vec.cpp
     ${SOURCE_DIR}/ggml-cpu/ops.cpp
-    ${SOURCE_DIR}/ggml-metal.m
+    ${SOURCE_DIR}/ggml-metal/ggml-metal.cpp
+    ${SOURCE_DIR}/ggml-metal/ggml-metal-common.cpp
+    ${SOURCE_DIR}/ggml-metal/ggml-metal-device.cpp
+    ${SOURCE_DIR}/ggml-metal/ggml-metal-context.m
+    ${SOURCE_DIR}/ggml-metal/ggml-metal-device.m
+    ${SOURCE_DIR}/ggml-metal/ggml-metal-ops.cpp
     ${SOURCE_DIR}/ggml-opt.cpp
     ${SOURCE_DIR}/ggml-threading.cpp
     ${SOURCE_DIR}/ggml-quants.c

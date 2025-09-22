@@ -8,6 +8,8 @@
   "react-native": "src/index",
   "source": "src/index",
   "files": [
+    "bin",
+    "third_party/OpenCL-Headers/CL",
     "src",
     "lib",
     "jest",
@@ -34,12 +36,12 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
     "build": "bob build",
-    "prepack": "./scripts/build-ios.sh && ./scripts/build-android.sh && bob build",
+    "prepack": "npm run build:ios-frameworks && npm run build:android-libs && bob build",
     "release": "release-it",
     "example": "yarn --cwd  example",
     "build:ios-frameworks": "./scripts/build-ios.sh",
     "build:ios": "cd example/ios && xcodebuild -workspace RNLlamaExample.xcworkspace -scheme RNLlamaExample -configuration Debug -sdk iphonesimulator CC=clang CPLUSPLUS=clang++ LD=clang LDPLUSPLUS=clang++ GCC_OPTIMIZATION_LEVEL=0 GCC_PRECOMPILE_PREFIX_HEADER=YES ASSETCATALOG_COMPILER_OPTIMIZATION=time DEBUG_INFORMATION_FORMAT=dwarf COMPILER_INDEX_STORE_ENABLE=NO",
-    "build:android-libs": "./scripts/build-android.sh",
+    "build:android-libs": "./scripts/build-opencl.sh && ./scripts/build-android.sh",
     "build:android": "cd example/android && ./gradlew assembleDebug",
     "clean": "del-cli example/ios/build"
   },
@@ -101,7 +103,8 @@
     "preset": "react-native",
     "modulePathIgnorePatterns": [
       "<rootDir>/example/node_modules",
-      "<rootDir>/lib/"
+      "<rootDir>/lib/",
+      "<rootDir>/third_party/llama.cpp/"
     ]
   },
   "commitlint": {
@@ -203,7 +206,7 @@
     "node_modules/",
     "lib/",
     "*.d.ts",
-    "llama.cpp/"
+    "third_party/llama.cpp/"
   ],
   "prettier": {
     "trailingComma": "all",
