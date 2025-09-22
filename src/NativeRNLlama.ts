@@ -421,6 +421,7 @@ export type NativeCPUFeatures = {
   armv8: boolean
   i8mm: boolean
   dotprod: boolean
+  adreno: boolean
 }
 
 export type FormattedChatResult = {

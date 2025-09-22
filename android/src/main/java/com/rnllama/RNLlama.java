@@ -25,6 +25,7 @@ import java.util.Random;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.PushbackInputStream;
+import java.util.regex.Pattern;
 
 public class RNLlama implements LifecycleEventListener {
   public static final String NAME = "RNLlama";
@@ -426,6 +427,9 @@ public class RNLlama implements LifecycleEventListener {
           boolean isV8 = LlamaContext.isArm64V8a();
           result.putBoolean("armv8", isV8);
           
+          String gpuInfo = (Build.HARDWARE + " " + Build.MANUFACTURER + " " + Build.MODEL).toLowerCase();
+          boolean hasAdreno = Pattern.compile("(adreno|qcom|qualcomm)").matcher(gpuInfo).find();
+          result.putBoolean("adreno", hasAdreno);
           if(isV8) {
             String cpuFeatures = LlamaContext.getCpuFeatures();
             boolean hasDotProd = cpuFeatures.contains("dotprod") || cpuFeatures.contains("asimddp");
