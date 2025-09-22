@@ -1,5 +1,10 @@
-[submodule "llama.cpp"]
-	path = llama.cpp
+[submodule "third_party/llama.cpp"]
+	path = third_party/llama.cpp
 	url = https://github.com/Vali-98/llama.cpp.git
-	ignore = dirty
-	branch = cui-llama.rn
+
+[submodule "third_party/OpenCL-ICD-Loader"]
+	path = third_party/OpenCL-ICD-Loader
+	url = https://github.com/KhronosGroup/OpenCL-ICD-Loader
+[submodule "third_party/OpenCL-Headers"]
+	path = third_party/OpenCL-Headers
+	url = https://github.com/KhronosGroup/OpenCL-Headers

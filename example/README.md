@@ -4,6 +4,8 @@ This is an example project to show how to use the llama.rn library.
 
 For iPhone/iPad/Mac, you can try it by downloading our test app from [TestFlight](https://testflight.apple.com/join/MmzGSneU).
 
+For Android, you can try it by downloading our test app from [Releases](https://github.com/mybigday/llama.rn/releases) (example-app-release.apk).
+
 ## Examples
 
 The example app demonstrates various local LLM capabilities:
@@ -78,6 +80,6 @@ The following features are planned for future updates:
 
 - [x] **🔧 Add custom model modal** - Interface for loading and managing custom models
 - [x] **📊 Add embedding example** - Demonstrate text embedding and similarity search capabilities
-- [ ] **🛠️ ToolCallsScreen: Support MCP** - Integrate Model Context Protocol via [`mcp-sdk-client-ssejs`](https://github.com/mybigday/mcp-sdk-client-ssejs)
+- [x] **🛠️ ToolCallsScreen: Support MCP** - Integrate Model Context Protocol via [`mcp-sdk-client-ssejs`](https://github.com/mybigday/mcp-sdk-client-ssejs)
 - [ ] **🔍 Add reranker example** - Show document reranking for improved search relevance
 - [ ] **⚙️ Check hardware requirement for model** - Validate device capabilities before model loading
