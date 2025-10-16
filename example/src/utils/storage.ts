@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import type {
-  ContextParams as LlamaContextParams,
-  CompletionParams as LlamaCompletionParams,
+import {
+  type ContextParams as LlamaContextParams,
+  type CompletionParams as LlamaCompletionParams,
+  CACHE_TYPE,
 } from '../../../src'
 
 export type ContextParams = Omit<LlamaContextParams, 'model'>
@@ -51,8 +52,8 @@ export const DEFAULT_CONTEXT_PARAMS: ContextParams = {
   n_ubatch: 512,
   ctx_shift: false,
   flash_attn_type: 'auto',
-  cache_type_k: 'f16',
-  cache_type_v: 'f16',
+  cache_type_k: CACHE_TYPE.F16,
+  cache_type_v: CACHE_TYPE.F16,
   kv_unified: false,
   swa_full: false,
 }

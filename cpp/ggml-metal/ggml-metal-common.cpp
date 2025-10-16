@@ -112,7 +112,7 @@ static bool lm_ggml_mem_ranges_add_dst(lm_ggml_mem_ranges_t mrs, const lm_ggml_t
 }
 
 bool lm_ggml_mem_ranges_add(lm_ggml_mem_ranges_t mrs, const lm_ggml_tensor * tensor) {
-    for (int i = 0; i < LM_GGML_MAX_DIMS; i++) {
+    for (int i = 0; i < LM_GGML_MAX_SRC; i++) {
         if (tensor->src[i]) {
             lm_ggml_mem_ranges_add_src(mrs, tensor->src[i]);
         }
@@ -173,7 +173,7 @@ static bool lm_ggml_mem_ranges_check_dst(lm_ggml_mem_ranges_t mrs, const lm_ggml
 }
 
 bool lm_ggml_mem_ranges_check(lm_ggml_mem_ranges_t mrs, const lm_ggml_tensor * tensor) {
-    for (int i = 0; i < LM_GGML_MAX_DIMS; i++) {
+    for (int i = 0; i < LM_GGML_MAX_SRC; i++) {
         if (tensor->src[i]) {
             if (!lm_ggml_mem_ranges_check_src(mrs, tensor->src[i])) {
                 return false;
@@ -182,20 +182,6 @@ bool lm_ggml_mem_ranges_check(lm_ggml_mem_ranges_t mrs, const lm_ggml_tensor * t
     }
 
     return lm_ggml_mem_ranges_check_dst(mrs, tensor);
-}
-
-// TODO: move to ggml.h?
-static bool is_empty(lm_ggml_op op) {
-    switch (op) {
-        case LM_GGML_OP_NONE:
-        case LM_GGML_OP_RESHAPE:
-        case LM_GGML_OP_TRANSPOSE:
-        case LM_GGML_OP_VIEW:
-        case LM_GGML_OP_PERMUTE:
-            return true;
-        default:
-            return false;
-    }
 }
 
 struct node_info {
@@ -212,7 +198,7 @@ struct node_info {
     }
 
     bool is_empty() const {
-        return ::is_empty(node->op);
+        return lm_ggml_op_is_empty(node->op);
     }
 
     void add_fused(lm_ggml_tensor * t) {
@@ -270,8 +256,6 @@ static std::vector<int> lm_ggml_metal_graph_optimize_reorder(const std::vector<n
 
     // perform reorders only across these types of ops
     // can be expanded when needed
-    // IMPORTANT: do not add ops such as LM_GGML_OP_CPY or LM_GGML_OP_SET_ROWS
-    //            the dependencies from such ops are not always represented in the graph
     const auto & h_safe = [](lm_ggml_op op) {
         switch (op) {
             case LM_GGML_OP_MUL_MAT:
@@ -287,9 +271,11 @@ static std::vector<int> lm_ggml_metal_graph_optimize_reorder(const std::vector<n
             case LM_GGML_OP_GLU:
             case LM_GGML_OP_SCALE:
             case LM_GGML_OP_GET_ROWS:
+            case LM_GGML_OP_CPY:
+            case LM_GGML_OP_SET_ROWS:
                 return true;
             default:
-                return is_empty(op);
+                return lm_ggml_op_is_empty(op);
         }
     };
 
@@ -397,6 +383,7 @@ void lm_ggml_graph_optimize(lm_ggml_cgraph * gf) {
         // fuse only ops that start with these operations
         // can be expanded when needed
         if (node.op() == LM_GGML_OP_ADD ||
+            node.op() == LM_GGML_OP_NORM ||
             node.op() == LM_GGML_OP_RMS_NORM) {
             ops[0] = node.op();
 
@@ -406,6 +393,7 @@ void lm_ggml_graph_optimize(lm_ggml_cgraph * gf) {
                 // can be expanded when needed
                 if (gf->nodes[f]->op != LM_GGML_OP_ADD &&
                     gf->nodes[f]->op != LM_GGML_OP_MUL &&
+                    gf->nodes[f]->op != LM_GGML_OP_NORM &&
                     gf->nodes[f]->op != LM_GGML_OP_RMS_NORM) {
                     break;
                 }

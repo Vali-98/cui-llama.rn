@@ -53,6 +53,31 @@ By default, `llama.rn` will use pre-built libraries for Android. If you want to 
 - Add `<uses-native-library android:name="libOpenCL.so" android:required="false" />` to your app manifest so the loader can be loaded at runtime.
 - Configure `n_gpu_layers` (> 0) when calling `initLlama` to offload layers to the GPU. The native result exposes `gpu`, `gpuDevice`, and `reasonNoGPU` so you can confirm runtime behaviour.
 
+#### Expo
+
+For use with the Expo framework and CNG builds, you will need `expo-build-properties` to utilize iOS and OpenCL features. Simply add the following to your app.json/app.config.js file:
+
+```js
+module.exports = {
+  expo: {
+    // ...
+    plugins: [
+      // ...
+      [
+        'llama.rn',
+        // optional fields, below are the default values
+        {
+          enableEntitlements: true,
+          entitlementsProfile: 'production',
+          forceCxx20: true,
+          enableOpenCL: true,
+        },
+      ],
+    ],
+  },
+}
+```
+
 ## Obtain the model
 
 You can search HuggingFace for available models (Keyword: [`GGUF`](https://huggingface.co/search/full-text?q=GGUF&type=model)).
@@ -409,6 +434,112 @@ console.log('Result:', text)
 ```
 
 Also, this is how `json_schema` works in `response_format` during completion, it converts the json_schema to gbnf grammar.
+
+## Parallel Decoding
+
+llama.rn supports slot-based parallel request processing for concurrent completion requests, enabling multiple prompts to be processed simultaneously with automatic queue management. It is similar to the llama.cpp server.
+
+### Usage
+
+```js
+import { initLlama } from 'llama.rn'
+
+const context = await initLlama({
+  model: modelPath,
+  n_ctx: 8192,
+  n_gpu_layers: 99,
+  n_parallel: 4, // Max number of parallel slots supported
+})
+
+// Enable parallel mode with 4 slots
+await context.parallel.enable({
+  n_parallel: 4, // new_n_ctx (2048) = n_ctx / n_parallel
+  n_batch: 512,
+})
+
+// Queue multiple completion requests
+const request1 = await context.parallel.completion(
+  {
+    messages: [{ role: 'user', content: 'What is AI?' }],
+    n_predict: 100,
+  },
+  (requestId, data) => {
+    console.log(`Request ${requestId}:`, data.token)
+  }
+)
+
+const request2 = await context.parallel.completion(
+  {
+    messages: [{ role: 'user', content: 'Explain quantum computing' }],
+    n_predict: 100,
+  },
+  (requestId, data) => {
+    console.log(`Request ${requestId}:`, data.token)
+  }
+)
+
+// Cancel a request if needed
+await request1.stop()
+
+// Wait for completion
+const result = await request2.promise
+console.log('Result:', result.text)
+
+// Disable parallel mode when done
+await context.parallel.disable()
+```
+
+### API
+
+**context.parallel.enable(config?):**
+- `config.n_parallel` (number): Number of concurrent slots (default: 2)
+- `config.n_batch` (number): Batch size for processing (default: 512)
+- Returns: `Promise<boolean>`
+
+**context.parallel.disable():**
+- Disables parallel mode
+- Returns: `Promise<boolean>`
+
+**context.parallel.configure(config):**
+- Reconfigures parallel mode (enables if not already enabled)
+- `config.n_parallel` (number): Number of concurrent slots
+- `config.n_batch` (number): Batch size for processing
+- Returns: `Promise<boolean>`
+
+**context.parallel.completion(params, onToken?):**
+- `params`: Same completion parameters as `completion()`
+- `onToken`: Optional callback `(requestId, data) => void` for token streaming
+  - `requestId`: Unique request identifier
+  - `data`: Token data with `token`, `content`, `reasoning_content`, `tool_calls`, `accumulated_text`
+- Returns: `Promise<{ requestId, promise, stop }>`
+  - `requestId`: Unique request identifier
+  - `promise`: Resolves to `NativeCompletionResult` when complete
+  - `stop`: Function to cancel this request
+
+**context.parallel.embedding(text, params?):**
+- `text`: Text content to get embedding for
+- `params`: Optional embedding parameters
+- Returns: `Promise<{ requestId, promise }>`
+  - `requestId`: Unique request identifier
+  - `promise`: Resolves to embedding result when complete
+
+**context.parallel.rerank(query, documents, params?):**
+- `query`: Query string for ranking
+- `documents`: Array of document strings to rank
+- `params`: Optional rerank parameters (e.g., `normalize`)
+- Returns: `Promise<{ requestId, promise }>`
+  - `requestId`: Unique request identifier
+  - `promise`: Resolves to rerank results when complete
+
+### Notes
+
+- Parallel mode uses slot-based architecture where each request occupies an available slot
+- Slots share the same KV cache for efficient memory usage
+- Request processing runs in a background loop that manages slot states automatically
+- All standard completion parameters (temperature, top_k, etc.) work per-request
+- The context must be initialized with sufficient `n_parallel` (default: 8) to support desired slot count
+- Currently TTS models are not yet supported
+- State load/save are not fully supported on Android with OpenCL backend, but you can set `kv_unified: true` and `flash_attn_type: 'off'` context parameter to enable it.
 
 ## Session (State)
 

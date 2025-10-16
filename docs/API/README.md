@@ -34,10 +34,12 @@ llama.rn
 - [NativeEmbeddingResult](README.md#nativeembeddingresult)
 - [NativeImageProcessingResult](README.md#nativeimageprocessingresult)
 - [NativeLlamaContext](README.md#nativellamacontext)
+- [NativeParallelCompletionParams](README.md#nativeparallelcompletionparams)
 - [NativeRerankParams](README.md#nativererankparams)
 - [NativeRerankResult](README.md#nativererankresult)
 - [NativeSessionLoadResult](README.md#nativesessionloadresult)
 - [NativeTokenizeResult](README.md#nativetokenizeresult)
+- [ParallelCompletionParams](README.md#parallelcompletionparams)
 - [RNLlamaMessagePart](README.md#rnllamamessagepart)
 - [RNLlamaOAICompatibleMessage](README.md#rnllamaoaicompatiblemessage)
 - [RerankParams](README.md#rerankparams)
@@ -91,7 +93,7 @@ llama.rn
 
 #### Defined in
 
-[index.ts:214](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L214)
+[index.ts:230](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L230)
 
 ___
 
@@ -120,7 +122,7 @@ ___
 
 #### Defined in
 
-[index.ts:185](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L185)
+[index.ts:191](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L191)
 
 ___
 
@@ -130,7 +132,7 @@ ___
 
 #### Defined in
 
-[index.ts:208](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L208)
+[index.ts:214](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L214)
 
 ___
 
@@ -150,7 +152,7 @@ ___
 
 #### Defined in
 
-[index.ts:176](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L176)
+[index.ts:182](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L182)
 
 ___
 
@@ -160,7 +162,7 @@ ___
 
 #### Defined in
 
-[index.ts:126](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L126)
+[index.ts:132](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L132)
 
 ___
 
@@ -170,7 +172,7 @@ ___
 
 #### Defined in
 
-[index.ts:164](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L164)
+[index.ts:170](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L170)
 
 ___
 
@@ -189,7 +191,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:420](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L420)
+[NativeRNLlama.ts:456](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L456)
 
 ___
 
@@ -199,7 +201,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:427](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L427)
+[NativeRNLlama.ts:463](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L463)
 
 ___
 
@@ -255,7 +257,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:101](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L101)
+[NativeRNLlama.ts:107](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L107)
 
 ___
 
@@ -288,7 +290,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:292](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L292)
+[NativeRNLlama.ts:328](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L328)
 
 ___
 
@@ -311,7 +313,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:281](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L281)
+[NativeRNLlama.ts:317](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L317)
 
 ___
 
@@ -328,7 +330,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:276](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L276)
+[NativeRNLlama.ts:312](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L312)
 
 ___
 
@@ -345,7 +347,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:271](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L271)
+[NativeRNLlama.ts:307](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L307)
 
 ___
 
@@ -375,6 +377,7 @@ ___
 | `n_cpu_moe?` | `number` | Number of layers to keep MoE weights on CPU |
 | `n_ctx?` | `number` | - |
 | `n_gpu_layers?` | `number` | Number of layers to store in VRAM (Currently only for iOS) |
+| `n_parallel?` | `number` | Number of parallel sequences to support (sets n_seq_max). This determines the maximum number of parallel slots that can be used. Default: 8 |
 | `n_threads?` | `number` | - |
 | `n_ubatch?` | `number` | - |
 | `no_gpu_devices?` | `boolean` | Skip GPU devices (iOS only) |
@@ -389,7 +392,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:8](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L8)
+[NativeRNLlama.ts:8](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L8)
 
 ___
 
@@ -405,7 +408,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:4](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L4)
+[NativeRNLlama.ts:4](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L4)
 
 ___
 
@@ -421,7 +424,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:355](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L355)
+[NativeRNLlama.ts:391](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L391)
 
 ___
 
@@ -439,7 +442,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:441](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L441)
+[NativeRNLlama.ts:477](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L477)
 
 ___
 
@@ -485,7 +488,20 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:359](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L359)
+[NativeRNLlama.ts:395](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L395)
+
+___
+
+### NativeParallelCompletionParams
+
+Ƭ **NativeParallelCompletionParams**: [`NativeCompletionParams`](README.md#nativecompletionparams) & { `load_state_path?`: `string` ; `save_state_path?`: `string` ; `save_state_size?`: `number`  }
+
+Parameters for parallel completion requests (queueCompletion).
+Extends NativeCompletionParams with parallel-mode specific options.
+
+#### Defined in
+
+[NativeRNLlama.ts:281](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L281)
 
 ___
 
@@ -501,7 +517,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:447](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L447)
+[NativeRNLlama.ts:483](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L483)
 
 ___
 
@@ -518,7 +534,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:451](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L451)
+[NativeRNLlama.ts:487](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L487)
 
 ___
 
@@ -535,7 +551,7 @@ ___
 
 #### Defined in
 
-[NativeRNLlama.ts:405](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L405)
+[NativeRNLlama.ts:441](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L441)
 
 ___
 
@@ -547,15 +563,28 @@ ___
 
 | Name | Type | Description |
 | :------ | :------ | :------ |
-| `bitmap_hashes` | `number`[] | Bitmap hashes of the images |
-| `chunk_pos` | `number`[] | Chunk positions of the text and images |
-| `chunk_pos_images` | `number`[] | Chunk positions of the images |
-| `has_images` | `boolean` | Whether the tokenization contains images |
+| `bitmap_hashes` | `number`[] | Bitmap hashes of the media |
+| `chunk_pos` | `number`[] | Chunk positions of the text and media |
+| `chunk_pos_media` | `number`[] | Chunk positions of the media |
+| `has_media` | `boolean` | Whether the tokenization contains media |
 | `tokens` | `number`[] | - |
 
 #### Defined in
 
-[NativeRNLlama.ts:335](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/NativeRNLlama.ts#L335)
+[NativeRNLlama.ts:371](https://github.com/mybigday/llama.rn/blob/b279dce/src/NativeRNLlama.ts#L371)
+
+___
+
+### ParallelCompletionParams
+
+Ƭ **ParallelCompletionParams**: `Omit`<[`NativeParallelCompletionParams`](README.md#nativeparallelcompletionparams), ``"emit_partial_completion"`` \| ``"prompt"``\> & [`CompletionBaseParams`](README.md#completionbaseparams)
+
+Parameters for parallel completion requests.
+Extends CompletionParams with parallel-mode specific options like state management.
+
+#### Defined in
+
+[index.ts:224](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L224)
 
 ___
 
@@ -578,7 +607,7 @@ ___
 
 #### Defined in
 
-[index.ts:30](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L30)
+[index.ts:31](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L31)
 
 ___
 
@@ -595,7 +624,7 @@ ___
 
 #### Defined in
 
-[index.ts:43](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L43)
+[index.ts:44](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L44)
 
 ___
 
@@ -611,7 +640,7 @@ ___
 
 #### Defined in
 
-[index.ts:166](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L166)
+[index.ts:172](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L172)
 
 ___
 
@@ -629,7 +658,7 @@ ___
 
 #### Defined in
 
-[index.ts:170](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L170)
+[index.ts:176](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L176)
 
 ___
 
@@ -650,7 +679,7 @@ ___
 
 #### Defined in
 
-[index.ts:111](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L111)
+[index.ts:116](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L116)
 
 ___
 
@@ -670,7 +699,7 @@ ___
 
 #### Defined in
 
-[index.ts:102](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L102)
+[index.ts:107](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L107)
 
 ## Variables
 
@@ -687,7 +716,7 @@ ___
 
 #### Defined in
 
-[index.ts:851](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L851)
+[index.ts:1125](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L1125)
 
 ___
 
@@ -697,7 +726,7 @@ ___
 
 #### Defined in
 
-[index.ts:71](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L71)
+[index.ts:73](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L73)
 
 ## Functions
 
@@ -721,7 +750,7 @@ ___
 
 #### Defined in
 
-[index.ts:728](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L728)
+[index.ts:1001](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L1001)
 
 ___
 
@@ -745,7 +774,7 @@ ___
 
 #### Defined in
 
-[grammar.ts:829](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/grammar.ts#L829)
+[grammar.ts:829](https://github.com/mybigday/llama.rn/blob/b279dce/src/grammar.ts#L829)
 
 ___
 
@@ -766,7 +795,7 @@ ___
 
 #### Defined in
 
-[index.ts:769](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L769)
+[index.ts:1043](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L1043)
 
 ___
 
@@ -786,7 +815,7 @@ ___
 
 #### Defined in
 
-[index.ts:754](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L754)
+[index.ts:1028](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L1028)
 
 ___
 
@@ -800,7 +829,7 @@ ___
 
 #### Defined in
 
-[index.ts:847](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L847)
+[index.ts:1121](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L1121)
 
 ___
 
@@ -820,7 +849,7 @@ ___
 
 #### Defined in
 
-[index.ts:739](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L739)
+[index.ts:1012](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L1012)
 
 ___
 
@@ -840,4 +869,4 @@ ___
 
 #### Defined in
 
-[index.ts:724](https://github.com/mybigday/llama.rn/blob/ffc38d4/src/index.ts#L724)
+[index.ts:997](https://github.com/mybigday/llama.rn/blob/b279dce/src/index.ts#L997)

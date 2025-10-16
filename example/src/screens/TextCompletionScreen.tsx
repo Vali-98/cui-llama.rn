@@ -319,7 +319,7 @@ export default function TextCompletionScreen({
                 )
                 setPrompt(formatted.prompt)
                 setFormattedPrompt(formatted.prompt)
-                const tokenized = await context.tokenize(formatted.prompt)
+                const tokenized = await context.tokenizeAsync(formatted.prompt)
                 const detokenizedTokens = await Promise.all(
                   tokenized.tokens.map((token) => context.detokenize([token])),
                 )
@@ -395,7 +395,7 @@ export default function TextCompletionScreen({
         setPrompt(formatted.prompt)
         setFormattedPrompt(formatted.prompt) // Store the formatted prompt
         // Tokenize the prompt to show individual tokens
-        const tokenized = await ctx.tokenize(formatted.prompt)
+        const tokenized = await ctx.tokenizeAsync(formatted.prompt)
         const detokenizedTokens = await Promise.all(
           tokenized.tokens.map((token) => ctx.detokenize([token])),
         )
@@ -610,7 +610,7 @@ export default function TextCompletionScreen({
                         if (context && editableResult && hasChanges) {
                           try {
                             // Tokenize the entire edited text to show as prompt tokens
-                            const tokenized = await context.tokenize(
+                            const tokenized = await context.tokenizeAsync(
                               editableResult,
                             )
                             const detokenizedTokens = await Promise.all(
