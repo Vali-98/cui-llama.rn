@@ -86,7 +86,10 @@ set(
     ${RNLLAMA_LIB_DIR}/rn-llama.cpp
     ${RNLLAMA_LIB_DIR}/rn-completion.cpp
     ${RNLLAMA_LIB_DIR}/rn-tts.cpp
+    ${RNLLAMA_LIB_DIR}/rn-slot.cpp
+    ${RNLLAMA_LIB_DIR}/rn-slot-manager.cpp
     ${CMAKE_SOURCE_DIR}/jni-utils.h
+    ${CMAKE_SOURCE_DIR}/jni-utils.cpp
     ${CMAKE_SOURCE_DIR}/jni.cpp
 )
 
@@ -163,6 +166,7 @@ function(build_library target_name arch cpu_flags)
             mul_mv_id_mxfp4_f32_flat
             mul_mm_f32_f32_l4_lm
             mul_mm_f16_f32_l4_lm
+            mul_mm_q8_0_f32_l4_lm
             mul
             norm
             relu

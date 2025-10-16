@@ -16,6 +16,7 @@
     "ios",
     "android",
     "cpp",
+    "expo-plugin",
     "*.podspec",
     "!lib/typescript/example",
     "!ios/build",
@@ -69,10 +70,13 @@
   "devDependencies": {
     "@commitlint/config-conventional": "^17.0.2",
     "@evilmartians/lefthook": "^1.2.2",
+    "@expo/config-plugins": "^54.0.2",
     "@fugood/eslint-config-react": "^0.5.0",
+    "@react-native/typescript-config": "^0.82.0",
     "@react-native-community/eslint-config": "^3.0.2",
     "@release-it/conventional-changelog": "^5.0.0",
     "@types/jest": "^28.1.2",
+    "@types/node": "^24.7.2",
     "@types/react": "~17.0.21",
     "@types/react-native": "0.70.0",
     "commitlint": "^17.0.2",
@@ -118,7 +122,7 @@
       "tagName": "v${version}"
     },
     "npm": {
-      "publish": true,
+      "publish": false,
       "skipChecks": true
     },
     "github": {
@@ -185,7 +189,8 @@
               ]
             }
           ],
-          "react/require-default-props": "off"
+          "react/require-default-props": "off",
+          "no-bitwise": "off"
         }
       }
     ],
@@ -205,7 +210,9 @@
   "eslintIgnore": [
     "node_modules/",
     "lib/",
+    "tests/build",
     "*.d.ts",
+    "tests/build/",
     "third_party/llama.cpp/"
   ],
   "prettier": {

@@ -1164,10 +1164,14 @@ static const char * LM_GGML_UNARY_OP_NAME[LM_GGML_UNARY_OP_COUNT] = {
     "HARDSIGMOID",
     "EXP",
     "GELU_ERF",
+    "XIELU",
+    "FLOOR",
+    "CEIL",
+    "ROUND",
+    "TRUNC",
 };
 
-static_assert(LM_GGML_UNARY_OP_COUNT == 15, "LM_GGML_UNARY_OP_COUNT != 15");
-
+static_assert(LM_GGML_UNARY_OP_COUNT == 20, "LM_GGML_UNARY_OP_COUNT != 20");
 
 static const char * LM_GGML_GLU_OP_NAME[LM_GGML_GLU_OP_COUNT] = {
     "REGLU",
@@ -2673,6 +2677,29 @@ struct lm_ggml_tensor * lm_ggml_silu_inplace(
     return lm_ggml_unary_inplace(ctx, a, LM_GGML_UNARY_OP_SILU);
 }
 
+// lm_ggml_xielu
+
+struct lm_ggml_tensor * lm_ggml_xielu(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        float alpha_n,
+        float alpha_p,
+        float beta,
+        float eps) {
+    struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
+
+    lm_ggml_set_op_params_i32(result, 0, (int32_t) LM_GGML_UNARY_OP_XIELU);
+    lm_ggml_set_op_params_f32(result, 1, beta + lm_ggml_softplus(alpha_n));
+    lm_ggml_set_op_params_f32(result, 2, lm_ggml_softplus(alpha_p));
+    lm_ggml_set_op_params_f32(result, 3, beta);
+    lm_ggml_set_op_params_f32(result, 4, eps);
+
+    result->op     = LM_GGML_OP_UNARY;
+    result->src[0] = a;
+
+    return result;
+}
+
 // lm_ggml_silu_back
 
 struct lm_ggml_tensor * lm_ggml_silu_back(
@@ -2745,6 +2772,62 @@ static struct lm_ggml_tensor * lm_ggml_glu_impl(
     result->src[1] = b;
 
     return result;
+}
+
+// lm_ggml_floor
+
+struct lm_ggml_tensor * lm_ggml_floor(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary(ctx, a, LM_GGML_UNARY_OP_FLOOR);
+}
+
+struct lm_ggml_tensor * lm_ggml_floor_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary_inplace(ctx, a, LM_GGML_UNARY_OP_FLOOR);
+}
+
+// lm_ggml_ceil
+
+struct lm_ggml_tensor * lm_ggml_ceil(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary(ctx, a, LM_GGML_UNARY_OP_CEIL);
+}
+
+struct lm_ggml_tensor * lm_ggml_ceil_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary_inplace(ctx, a, LM_GGML_UNARY_OP_CEIL);
+}
+
+//lm_ggml_round
+
+struct lm_ggml_tensor * lm_ggml_round(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary(ctx, a, LM_GGML_UNARY_OP_ROUND);
+}
+
+struct lm_ggml_tensor * lm_ggml_round_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary_inplace(ctx, a, LM_GGML_UNARY_OP_ROUND);
+}
+
+//lm_ggml_trunc
+
+struct lm_ggml_tensor * lm_ggml_trunc(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary(ctx, a, LM_GGML_UNARY_OP_TRUNC);
+}
+
+struct lm_ggml_tensor * lm_ggml_trunc_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary_inplace(ctx, a, LM_GGML_UNARY_OP_TRUNC);
 }
 
 struct lm_ggml_tensor * lm_ggml_glu(
@@ -3698,7 +3781,7 @@ struct lm_ggml_tensor * lm_ggml_set_rows(
     LM_GGML_ASSERT(b->ne[3] % c->ne[2] == 0);
     LM_GGML_ASSERT(c->ne[3] == 1);
     LM_GGML_ASSERT(b->type == LM_GGML_TYPE_F32);
-    LM_GGML_ASSERT(c->type == LM_GGML_TYPE_I64);
+    LM_GGML_ASSERT(c->type == LM_GGML_TYPE_I64 || c->type == LM_GGML_TYPE_I32);
 
     LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(a));
     LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(b));
@@ -3708,6 +3791,7 @@ struct lm_ggml_tensor * lm_ggml_set_rows(
     result->op     = LM_GGML_OP_SET_ROWS;
     result->src[0] = b;
     result->src[1] = c;
+    result->src[2] = a; // note: order is weird due to legacy reasons (https://github.com/ggml-org/llama.cpp/pull/16063#discussion_r2385795931)
 
     return result;
 }
@@ -3849,6 +3933,15 @@ struct lm_ggml_tensor * lm_ggml_soft_max_ext(
     return lm_ggml_soft_max_impl(ctx, a, mask, scale, max_bias, false);
 }
 
+struct lm_ggml_tensor * lm_ggml_soft_max_ext_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * mask,
+        float                 scale,
+        float                 max_bias) {
+    return lm_ggml_soft_max_impl(ctx, a, mask, scale, max_bias, true);
+}
+
 void lm_ggml_soft_max_add_sinks(
         struct lm_ggml_tensor * a,
         struct lm_ggml_tensor * sinks) {
@@ -3948,7 +4041,7 @@ static struct lm_ggml_tensor * lm_ggml_rope_impl(
     memcpy(params +  8, &attn_factor,  sizeof(float));
     memcpy(params +  9, &beta_fast,    sizeof(float));
     memcpy(params + 10, &beta_slow,    sizeof(float));
-    if (mrope_used) {
+    if (mrope_used && sections) {
         memcpy(params + 11, sections,  sizeof(int32_t) * LM_GGML_MROPE_SECTIONS);
     } else {
         memset(params + 11, 0,         sizeof(int32_t) * LM_GGML_MROPE_SECTIONS);

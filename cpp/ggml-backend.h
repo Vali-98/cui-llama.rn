@@ -215,6 +215,8 @@ extern "C" {
     // Backend registry
     //
 
+    LM_GGML_API void lm_ggml_backend_register(lm_ggml_backend_reg_t reg);
+
     LM_GGML_API void lm_ggml_backend_device_register(lm_ggml_backend_dev_t device);
 
     // Backend (reg) enumeration
@@ -314,7 +316,8 @@ extern "C" {
     LM_GGML_API int                  lm_ggml_backend_sched_get_n_splits(lm_ggml_backend_sched_t sched);
     LM_GGML_API int                  lm_ggml_backend_sched_get_n_copies(lm_ggml_backend_sched_t sched);
 
-    LM_GGML_API size_t               lm_ggml_backend_sched_get_buffer_size(lm_ggml_backend_sched_t sched, lm_ggml_backend_t backend);
+    LM_GGML_API lm_ggml_backend_buffer_type_t lm_ggml_backend_sched_get_buffer_type(lm_ggml_backend_sched_t sched, lm_ggml_backend_t backend);
+    LM_GGML_API size_t                     lm_ggml_backend_sched_get_buffer_size(lm_ggml_backend_sched_t sched, lm_ggml_backend_t backend);
 
     LM_GGML_API void                 lm_ggml_backend_sched_set_tensor_backend(lm_ggml_backend_sched_t sched, struct lm_ggml_tensor * node, lm_ggml_backend_t backend);
     LM_GGML_API lm_ggml_backend_t       lm_ggml_backend_sched_get_tensor_backend(lm_ggml_backend_sched_t sched, struct lm_ggml_tensor * node);

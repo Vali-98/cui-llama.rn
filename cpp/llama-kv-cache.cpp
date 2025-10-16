@@ -123,11 +123,8 @@ llama_kv_cache::llama_kv_cache(
             throw std::runtime_error("failed to create ggml context for kv cache");
         }
 
-        lm_ggml_tensor * k;
-        lm_ggml_tensor * v;
-
-        k = lm_ggml_new_tensor_3d(ctx, type_k, n_embd_k_gqa, kv_size, n_stream);
-        v = lm_ggml_new_tensor_3d(ctx, type_v, n_embd_v_gqa, kv_size, n_stream);
+        lm_ggml_tensor * k = lm_ggml_new_tensor_3d(ctx, type_k, n_embd_k_gqa, kv_size, n_stream);
+        lm_ggml_tensor * v = lm_ggml_new_tensor_3d(ctx, type_v, n_embd_v_gqa, kv_size, n_stream);
 
         lm_ggml_format_name(k, "cache_k_l%d", il);
         lm_ggml_format_name(v, "cache_v_l%d", il);
@@ -471,6 +468,14 @@ llama_pos llama_kv_cache::seq_pos_max(llama_seq_id seq_id) const {
     const auto & cells = v_cells[seq_to_stream[seq_id]];
 
     return cells.seq_pos_max(seq_id);
+}
+
+std::map<lm_ggml_backend_buffer_type_t, size_t> llama_kv_cache::memory_breakdown() const {
+    std::map<lm_ggml_backend_buffer_type_t, size_t> ret;
+    for (const lm_ggml_backend_buffer_ptr & buf_ptr : bufs) {
+        ret[lm_ggml_backend_buffer_get_type(buf_ptr.get())] += lm_ggml_backend_buffer_get_size(buf_ptr.get());
+    }
+    return ret;
 }
 
 llama_memory_context_ptr llama_kv_cache::init_batch(
