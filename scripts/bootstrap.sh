@@ -1,13 +1,102 @@
 #!/bin/bash -e
 
 ROOT_DIR=$(pwd)
+OS=$(uname)
 
 LLAMA_DIR=third_party/llama.cpp
 CPP_DIR="$ROOT_DIR/cpp"
 SRC_DIR="$ROOT_DIR/src"
 
-git submodule init "$LLAMA_DIR"
-git submodule update --recursive "$LLAMA_DIR"
+#git submodule init "$LLAMA_DIR"
+#git submodule update --recursive "$LLAMA_DIR"
+
+# Hexagon SDK setup for Android builds
+echo ""
+echo "=========================================="
+echo "Hexagon SDK Setup"
+echo "=========================================="
+echo ""
+
+# Check if Docker is available and recommend it
+if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+  echo "✓ Docker is available!"
+  echo ""
+  echo "For Hexagon builds, we recommend using Docker for consistent builds."
+  echo "Docker provides a pre-configured environment with all dependencies."
+  echo ""
+  echo "Build commands:"
+  echo "  ./scripts/build-android-docker.sh    - Build everything with Docker"
+  echo "  ./scripts/build-hexagon-htp.sh       - Build HTP libraries (auto-detects Docker)"
+  echo ""
+
+  # Pull Docker image in background
+  DOCKER_IMAGE="ghcr.io/snapdragon-toolchain/arm64-android:v0.3"
+  if ! docker image inspect "$DOCKER_IMAGE" &> /dev/null; then
+    echo "Pulling Docker image in background..."
+    echo "  Image: $DOCKER_IMAGE"
+    docker pull "$DOCKER_IMAGE" &
+    DOCKER_PULL_PID=$!
+    echo "  (Pull process running in background, PID: $DOCKER_PULL_PID)"
+  else
+    echo "✓ Docker image already present: $DOCKER_IMAGE"
+  fi
+  echo ""
+else
+  echo "Docker not available. You can:"
+  echo "  1. Install Docker for consistent builds (recommended)"
+  echo "  2. Install Hexagon SDK manually for native Linux builds"
+  echo ""
+fi
+
+# Download and setup Hexagon SDK (for all platforms)
+# On macOS: Needed for libcdsprpc.so linking when building Android libraries
+# On Linux: Can be used for native builds without Docker
+HEXAGON_SDK_VERSION="6.4.0.2"
+HEXAGON_TOOLS_VERSION="19.0.04"
+HEXAGON_INSTALL_DIR="${HEXAGON_INSTALL_DIR:-$HOME/.hexagon-sdk}"
+
+if [ ! -d "$HEXAGON_INSTALL_DIR/$HEXAGON_SDK_VERSION" ]; then
+  echo "Downloading Hexagon SDK v${HEXAGON_SDK_VERSION}..."
+  echo ""
+
+  if [ "$OS" = "Darwin" ]; then
+    echo "Note: SDK tools won't run on macOS, but libcdsprpc.so is needed for linking"
+  fi
+  echo ""
+
+  TEMP_DIR=$(mktemp -d)
+  cd "$TEMP_DIR"
+
+  curl -L -o hex-sdk.tar.gz \
+    "https://github.com/snapdragon-toolchain/hexagon-sdk/releases/download/v${HEXAGON_SDK_VERSION}/hexagon-sdk-v${HEXAGON_SDK_VERSION}-amd64-lnx.tar.xz"
+
+  echo "Extracting Hexagon SDK..."
+  mkdir -p "$HEXAGON_INSTALL_DIR"
+  tar -xaf hex-sdk.tar.gz -C "$HEXAGON_INSTALL_DIR"
+
+  cd "$ROOT_DIR"
+  rm -rf "$TEMP_DIR"
+
+  echo "Hexagon SDK installed to: $HEXAGON_INSTALL_DIR/$HEXAGON_SDK_VERSION"
+  echo ""
+  echo "The build scripts will automatically detect and use the SDK."
+  echo ""
+  echo "To build with Docker (recommended):"
+  echo "  ./scripts/build-android-docker.sh"
+  echo ""
+  if [ "$OS" != "Darwin" ]; then
+    echo "Or build natively on Linux:"
+    echo "  USE_DOCKER=no ./scripts/build-hexagon-htp.sh"
+    echo "  npm run build:android-libs"
+    echo ""
+  fi
+else
+  echo "✓ Hexagon SDK installed: $HEXAGON_INSTALL_DIR/$HEXAGON_SDK_VERSION"
+  echo ""
+fi
+
+echo "=========================================="
+echo ""
 
 # ggml api
 cp ./$LLAMA_DIR/ggml/include/ggml.h ./cpp/ggml.h
@@ -18,14 +107,51 @@ cp ./$LLAMA_DIR/ggml/include/ggml-cpp.h ./cpp/ggml-cpp.h
 cp ./$LLAMA_DIR/ggml/include/ggml-opt.h ./cpp/ggml-opt.h
 cp ./$LLAMA_DIR/ggml/include/ggml-metal.h ./cpp/ggml-metal.h
 cp ./$LLAMA_DIR/ggml/include/ggml-opencl.h ./cpp/ggml-opencl.h
+cp ./$LLAMA_DIR/ggml/include/ggml-blas.h ./cpp/ggml-blas.h
+cp ./$LLAMA_DIR/ggml/include/ggml-hexagon.h ./cpp/ggml-hexagon.h
 cp ./$LLAMA_DIR/ggml/include/gguf.h ./cpp/gguf.h
 
 cp -r ./$LLAMA_DIR/ggml/src/ggml-metal ./cpp/
 rm ./cpp/ggml-metal/CMakeLists.txt
-rm ./cpp/ggml-metal/ggml-metal.metal
+# Keep ggml-metal.metal for runtime compilation
+# rm ./cpp/ggml-metal/ggml-metal.metal
+
+# Embed headers into ggml-metal.metal for runtime compilation
+# This allows the .metal file to be compiled at runtime without needing external header files
+echo "Embedding headers into ggml-metal.metal..."
+METAL_SOURCE="./cpp/ggml-metal/ggml-metal.metal"
+METAL_TMP="./cpp/ggml-metal/ggml-metal.metal.tmp1"
+COMMON_HEADER="./$LLAMA_DIR/ggml/src/ggml-common.h"
+IMPL_HEADER="./cpp/ggml-metal/ggml-metal-impl.h"
+
+# Step 1: Replace the entire conditional block with just the embedded header content
+# Find the line with #if defined(GGML_METAL_EMBED_LIBRARY), replace __embed__ placeholder with header,
+# and remove everything from #else to #endif (inclusive)
+awk '
+/^#if defined\(GGML_METAL_EMBED_LIBRARY\)/ { skip=1; next }
+/__embed_ggml-common.h__/ {
+    system("cat '"$COMMON_HEADER"'")
+    next
+}
+/^#else/ && skip { skip_else=1; next }
+/^#endif/ && skip_else { skip=0; skip_else=0; next }
+!skip { print }
+' < "$METAL_SOURCE" > "$METAL_TMP"
+
+# Step 2: Embed ggml-metal-impl.h by replacing the #include with file contents
+sed -e '/#include "ggml-metal-impl.h"/r '"$IMPL_HEADER" -e '/#include "ggml-metal-impl.h"/d' < "$METAL_TMP" > "$METAL_SOURCE"
+
+rm -f "$METAL_TMP"
+echo "Headers embedded successfully"
+
+cp -r ./$LLAMA_DIR/ggml/src/ggml-blas ./cpp/
+rm ./cpp/ggml-blas/CMakeLists.txt
 
 cp -r ./$LLAMA_DIR/ggml/src/ggml-opencl ./cpp/
 rm ./cpp/ggml-opencl/CMakeLists.txt
+
+cp -r ./$LLAMA_DIR/ggml/src/ggml-hexagon ./cpp/
+# Keep CMakeLists.txt for hexagon as it's needed for building HTP components
 
 cp ./$LLAMA_DIR/ggml/src/ggml-cpu/ggml-cpu.c ./cpp/ggml-cpu/ggml-cpu.c
 cp ./$LLAMA_DIR/ggml/src/ggml-cpu/ggml-cpu.cpp ./cpp/ggml-cpu/ggml-cpu.cpp
@@ -71,6 +197,8 @@ cp ./$LLAMA_DIR/ggml/src/gguf.cpp ./cpp/gguf.cpp
 # llama api
 cp ./$LLAMA_DIR/include/llama.h ./cpp/llama.h
 cp ./$LLAMA_DIR/include/llama-cpp.h ./cpp/llama-cpp.h
+rm -rf ./cpp/models
+cp -r ./$LLAMA_DIR/src/models ./cpp/models
 cp ./$LLAMA_DIR/src/llama.cpp ./cpp/llama.cpp
 cp ./$LLAMA_DIR/src/llama-chat.h ./cpp/llama-chat.h
 cp ./$LLAMA_DIR/src/llama-chat.cpp ./cpp/llama-chat.cpp
@@ -141,6 +269,8 @@ cp ./$LLAMA_DIR/common/chat.h ./cpp/chat.h
 cp ./$LLAMA_DIR/common/chat.cpp ./cpp/chat.cpp
 cp ./$LLAMA_DIR/common/chat-parser.h ./cpp/chat-parser.h
 cp ./$LLAMA_DIR/common/chat-parser.cpp ./cpp/chat-parser.cpp
+cp ./$LLAMA_DIR/common/chat-parser-xml-toolcall.h ./cpp/chat-parser-xml-toolcall.h
+cp ./$LLAMA_DIR/common/chat-parser-xml-toolcall.cpp ./cpp/chat-parser-xml-toolcall.cpp
 
 # Copy multimodal files from tools/mtmd
 rm -rf ./cpp/tools/mtmd
@@ -164,150 +294,55 @@ rm -rf ./cpp/tools/mtmd/stb
 cp -r ./$LLAMA_DIR/vendor/miniaudio ./cpp/tools/mtmd/miniaudio
 cp -r ./$LLAMA_DIR/vendor/stb ./cpp/tools/mtmd/stb
 
-
+# List of files to process
 files_add_lm_prefix=(
   # ggml api
-  "./cpp/ggml-common.h"
-  "./cpp/ggml.h"
-  "./cpp/ggml.c"
-  "./cpp/gguf.h"
-  "./cpp/gguf.cpp"
-  "./cpp/ggml-impl.h"
-  "./cpp/ggml-cpp.h"
-  "./cpp/ggml-opt.h"
-  "./cpp/ggml-opt.cpp"
-  "./cpp/ggml-quants.h"
-  "./cpp/ggml-quants.c"
-  "./cpp/ggml-alloc.h"
-  "./cpp/ggml-alloc.c"
-  "./cpp/ggml-backend.h"
-  "./cpp/ggml-backend.cpp"
-  "./cpp/ggml-backend-impl.h"
-  "./cpp/ggml-backend-reg.cpp"
-  "./cpp/ggml-metal.h"
-  "./cpp/ggml-metal/ggml-metal.cpp"
-  "./cpp/ggml-metal/ggml-metal-impl.h"
-  "./cpp/ggml-metal/ggml-metal-common.h"
-  "./cpp/ggml-metal/ggml-metal-common.cpp"
-  "./cpp/ggml-metal/ggml-metal-context.h"
-  "./cpp/ggml-metal/ggml-metal-context.m"
-  "./cpp/ggml-metal/ggml-metal-device.h"
-  "./cpp/ggml-metal/ggml-metal-device.cpp"
-  "./cpp/ggml-metal/ggml-metal-device.m"
-  "./cpp/ggml-metal/ggml-metal-ops.h"
-  "./cpp/ggml-metal/ggml-metal-ops.cpp"
-  ."/cpp/ggml-opencl.h"
-  "./cpp/ggml-opencl/ggml-opencl.cpp"
-  "./cpp/ggml-cpu.h"
-  "./cpp/ggml-cpu/ggml-cpu-impl.h"
-  "./cpp/ggml-cpu/ggml-cpu.c"
-  "./cpp/ggml-cpu/ggml-cpu.cpp"
-  "./cpp/ggml-cpu/quants.h"
-  "./cpp/ggml-cpu/quants.c"
-  "./cpp/ggml-cpu/traits.h"
-  "./cpp/ggml-cpu/traits.cpp"
-  "./cpp/ggml-cpu/arch-fallback.h"
-  "./cpp/ggml-cpu/repack.cpp"
-  "./cpp/ggml-cpu/repack.h"
-  "./cpp/ggml-cpu/common.h"
-  "./cpp/ggml-threading.h"
-  "./cpp/ggml-threading.cpp"
-  "./cpp/ggml-cpu/amx/amx.h"
-  "./cpp/ggml-cpu/amx/amx.cpp"
-  "./cpp/ggml-cpu/amx/mmq.h"
-  "./cpp/ggml-cpu/amx/mmq.cpp"
-  "./cpp/ggml-cpu/amx/common.h"
-  "./cpp/ggml-cpu/unary-ops.h"
-  "./cpp/ggml-cpu/unary-ops.cpp"
-  "./cpp/ggml-cpu/binary-ops.h"
-  "./cpp/ggml-cpu/binary-ops.cpp"
-  "./cpp/ggml-cpu/vec.h"
-  "./cpp/ggml-cpu/vec.cpp"
-  "./cpp/ggml-cpu/simd-mappings.h"
-  "./cpp/ggml-cpu/ops.h"
-  "./cpp/ggml-cpu/ops.cpp"
-  "./cpp/ggml-cpu/arch/arm/cpu-feats.cpp"
-  "./cpp/ggml-cpu/arch/arm/quants.c"
-  "./cpp/ggml-cpu/arch/arm/repack.cpp"
-  "./cpp/ggml-cpu/arch/x86/cpu-feats.cpp"
-  "./cpp/ggml-cpu/arch/x86/quants.c"
-  "./cpp/ggml-cpu/arch/x86/repack.cpp"
+  ./cpp/ggml-metal/*.cpp
+  ./cpp/ggml-metal/*.h
+  ./cpp/ggml-metal/*.m
+  ./cpp/ggml-metal/*.metal
 
-  # llama api
-    "./cpp/llama-impl.h"
-  "./cpp/llama-impl.cpp"
-  "./cpp/llama-vocab.h"
-  "./cpp/llama-vocab.cpp"
-  "./cpp/llama-grammar.h"
-  "./cpp/llama-grammar.cpp"
-  "./cpp/llama-sampling.h"
-  "./cpp/llama-sampling.cpp"
-  "./cpp/llama-adapter.h"
-  "./cpp/llama-adapter.cpp"
-  "./cpp/llama-arch.h"
-  "./cpp/llama-arch.cpp"
-  "./cpp/llama-batch.h"
-  "./cpp/llama-batch.cpp"
-  "./cpp/llama-chat.h"
-  "./cpp/llama-chat.cpp"
-  "./cpp/llama-context.h"
-  "./cpp/llama-context.cpp"
-  "./cpp/llama-model-loader.h"
-  "./cpp/llama-model-loader.cpp"
-  "./cpp/llama-model-saver.h"
-  "./cpp/llama-model-saver.cpp"
-  "./cpp/llama-model.h"
-  "./cpp/llama-model.cpp"
-  "./cpp/llama-kv-cache.h"
-  "./cpp/llama-kv-cache.cpp"
-  "./cpp/llama-kv-cache-iswa.h"
-  "./cpp/llama-kv-cache-iswa.cpp"
-  "./cpp/llama-memory-hybrid.h"
-  "./cpp/llama-memory-hybrid.cpp"
-  "./cpp/llama-memory-recurrent.h"
-  "./cpp/llama-memory-recurrent.cpp"
-  "./cpp/llama-mmap.h"
-  "./cpp/llama-mmap.cpp"
-  "./cpp/llama-hparams.h"
-  "./cpp/llama-hparams.cpp"
-  "./cpp/llama-cparams.h"
-  "./cpp/llama-cparams.cpp"
-  "./cpp/llama-graph.h"
-  "./cpp/llama-graph.cpp"
-  "./cpp/llama-io.h"
-  "./cpp/llama-io.cpp"
-  "./cpp/llama-memory.h"
-  "./cpp/llama-memory.cpp"
-  "./cpp/log.h"
-  "./cpp/log.cpp"
-  "./cpp/llama.h"
-  "./cpp/llama.cpp"
-  "./cpp/sampling.cpp"
-  "./cpp/common.h"
-  "./cpp/common.cpp"
-  "./cpp/chat.h"
-  "./cpp/chat.cpp"
-  "./cpp/chat-parser.h"
-  "./cpp/chat-parser.cpp"
-  "./cpp/json-schema-to-grammar.h"
-  "./cpp/json-schema-to-grammar.cpp"
-  "./cpp/json-partial.h"
-  "./cpp/json-partial.cpp"
+  ./cpp/ggml-blas/*.cpp
+
+  ./cpp/ggml-opencl/*.cpp
+
+  ./cpp/ggml-hexagon/*.cpp
+  ./cpp/ggml-hexagon/*.c
+  ./cpp/ggml-hexagon/*.h
+  ./cpp/ggml-hexagon/htp/*.c
+  ./cpp/ggml-hexagon/htp/*.h
+
+  ./cpp/ggml-cpu/*.h
+  ./cpp/ggml-cpu/*.c
+  ./cpp/ggml-cpu/*.cpp
+  ./cpp/ggml-cpu/amx/*.h
+  ./cpp/ggml-cpu/amx/*.cpp
+  ./cpp/ggml-cpu/arch/arm/*.c
+  ./cpp/ggml-cpu/arch/arm/*.cpp
+  ./cpp/ggml-cpu/arch/x86/*.c
+  ./cpp/ggml-cpu/arch/x86/*.cpp
+
+  # Model definitions
+  ./cpp/models/*.h
+  ./cpp/models/*.cpp
 
   # Multimodal files
-  "./cpp/tools/mtmd/mtmd.h"
-  "./cpp/tools/mtmd/mtmd.cpp"
-  "./cpp/tools/mtmd/clip.h"
-  "./cpp/tools/mtmd/clip.cpp"
-  "./cpp/tools/mtmd/clip-impl.h"
-  "./cpp/tools/mtmd/mtmd-helper.cpp"
-  "./cpp/tools/mtmd/mtmd-audio.h"
-  "./cpp/tools/mtmd/mtmd-audio.cpp"
+  ./cpp/tools/mtmd/*.h
+  ./cpp/tools/mtmd/*.cpp
+
+  # llama api
+  ./cpp/*.h
+  ./cpp/*.cpp
+  ./cpp/*.c
 )
 
 # Loop through each file and run the sed commands
-OS=$(uname)
 for file in "${files_add_lm_prefix[@]}"; do
+  # Skip cpp/rn-* files
+  if [[ $file == *"/cpp/rn-"* ]]; then
+    continue
+  fi
+
   # Add prefix to avoid redefinition with other libraries using ggml like whisper.rn
   if [ "$OS" = "Darwin" ]; then
     sed -i '' 's/GGML_/LM_GGML_/g' $file
@@ -380,41 +415,19 @@ patch -p0 -d ./cpp < ./scripts/patches/chat.h.patch
 patch -p0 -d ./cpp < ./scripts/patches/chat.cpp.patch
 patch -p0 -d ./cpp < ./scripts/patches/log.cpp.patch
 patch -p0 -d ./cpp < ./scripts/patches/ggml-metal.m.patch
-# patch -p0 -d ./cpp < ./scripts/patches/ggml.c.patch
+patch -p0 -d ./cpp < ./scripts/patches/ggml.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/ggml-quants.c.patch
 patch -p0 -d ./cpp < ./scripts/patches/llama-mmap.cpp.patch
 patch -p0 -d ./cpp/minja < ./scripts/patches/minja.hpp.patch
 patch -p0 -d ./cpp/minja < ./scripts/patches/chat-template.hpp.patch
-patch -p0 -d ./cpp/ggml-metal < ./scripts/patches/ggml-metal-device.m.patch
+patch -p0 -d ./cpp/ggml-hexagon < ./scripts/patches/ggml-hexagon.cpp.patch
 rm -rf ./cpp/*.orig
 rm -rf ./cpp/**/*.orig
 
 if [ "$OS" = "Darwin" ]; then
-  # Build metallib (~2.6MB)
-  cd "$LLAMA_DIR/ggml/src/ggml-metal"
-
-  # Create a symbolic link to ggml-common.h in the current directory
-  ln -sf ../ggml-common.h .
-
-  xcrun --sdk iphoneos metal -O3 -std=metal3.2 -mios-version-min=16.0 -c ggml-metal.metal -o ggml-metal.air -DGGML_METAL_HAS_BF16=1
-  xcrun --sdk iphoneos metallib ggml-metal.air -o ggml-llama.metallib
-  rm ggml-metal.air
-  mv ./ggml-llama.metallib "$CPP_DIR/ggml-metal/ggml-llama.metallib"
-
-  xcrun --sdk iphonesimulator metal -O3 -std=metal3.2 -mios-version-min=16.0 -c ggml-metal.metal -o ggml-metal.air -DGGML_METAL_HAS_BF16=1
-  xcrun --sdk iphonesimulator metallib ggml-metal.air -o ggml-llama.metallib
-  rm ggml-metal.air
-  mv ./ggml-llama.metallib "$CPP_DIR/ggml-metal/ggml-llama-sim.metallib"
-
-  # Remove the symbolic link
-  rm ggml-common.h
-
-  cd -
-
   # Generate .xcode.env.local in iOS example
   cd example/ios
   echo export NODE_BINARY=$(command -v node) > .xcode.env.local
-
   cd -
 fi
 
@@ -427,7 +440,7 @@ BUILD_COMMIT=$(git rev-parse --short=7 HEAD)
 # clean up version.ts
 rm -f "$SRC_DIR/version.ts"
 
-echo "export const BUILD_NUMBER = '$BUILD_NUMBER';" > "$SRC_DIR/version.ts"
-echo "export const BUILD_COMMIT = '$BUILD_COMMIT';" >> "$SRC_DIR/version.ts"
+echo "export const BUILD_NUMBER = '$BUILD_NUMBER'" > "$SRC_DIR/version.ts"
+echo "export const BUILD_COMMIT = '$BUILD_COMMIT'" >> "$SRC_DIR/version.ts"
 
 cd "$ROOT_DIR"

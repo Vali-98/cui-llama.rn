@@ -100,6 +100,11 @@
     return info;
 }
 
++ (NSString *)getBackendDevicesInfo {
+    std::string devices_info_json = rnllama::get_backend_devices_info();
+    return [NSString stringWithUTF8String:devices_info_json.c_str()];
+}
+
 + (instancetype)initWithParams:(NSDictionary *)params onProgress:(void (^)(unsigned int progress))onProgress {
     // llama_backend_init(false);
     common_params defaultParams;
@@ -124,12 +129,35 @@
     if (params[@"n_ctx"]) defaultParams.n_ctx = [params[@"n_ctx"] intValue];
     if (params[@"use_mlock"]) defaultParams.use_mlock = [params[@"use_mlock"]boolValue];
 
+    if (params[@"devices"]) {
+        std::vector<lm_ggml_backend_dev_t> devs;
+        for (size_t i = 0; i < lm_ggml_backend_dev_count(); ++i) {
+            lm_ggml_backend_dev_t dev = lm_ggml_backend_dev_get(i);
+            const char *dev_name = lm_ggml_backend_dev_name(dev);
+
+            if ([params[@"devices"] containsObject:[NSString stringWithUTF8String:dev_name]]) {
+                switch (lm_ggml_backend_dev_type(dev)) {
+                    case LM_GGML_BACKEND_DEVICE_TYPE_CPU:
+#ifndef TARGET_OS_SIMULATOR
+                    case LM_GGML_BACKEND_DEVICE_TYPE_ACCEL:
+#endif
+                    case LM_GGML_BACKEND_DEVICE_TYPE_GPU:
+                        devs.push_back(dev);
+                        break;
+                }
+            }
+        }
+        if (!devs.empty()) {
+            defaultParams.devices = devs;
+            defaultParams.devices.push_back(nullptr);
+        }
+    }
+
+
     BOOL isGpuAvailable = [self isGpuAvailable:params];
-    BOOL skipGpuDevices = !isGpuAvailable || (params[@"no_gpu_devices"] && [params[@"no_gpu_devices"] boolValue]);
 
     BOOL isMetalEnabled = false;
     NSString *reasonNoMetal = @"";
-    NSString *gpuDeviceName = @"";
     defaultParams.n_gpu_layers = 0;
 
     if (isGpuAvailable) {
@@ -140,12 +168,6 @@
 #else
         defaultParams.n_gpu_layers = [params[@"n_gpu_layers"] intValue];
         isMetalEnabled = true;
-        if (!skipGpuDevices && defaultParams.n_gpu_layers > 0) {
-            id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-            if (device) {
-                gpuDeviceName = device.name ?: @"";
-            }
-        }
 #endif
     } else {
         if (params[@"no_gpu_devices"] && [params[@"no_gpu_devices"] boolValue]) {
@@ -160,13 +182,16 @@
         isMetalEnabled = false;
     }
 
+    BOOL skipGpuDevices = !isGpuAvailable || (params[@"no_gpu_devices"] && [params[@"no_gpu_devices"] boolValue]); // Deprecated in favor of `devices`
     if (skipGpuDevices) {
         std::vector<lm_ggml_backend_dev_t> cpu_devs;
         for (size_t i = 0; i < lm_ggml_backend_dev_count(); ++i) {
             lm_ggml_backend_dev_t dev = lm_ggml_backend_dev_get(i);
             switch (lm_ggml_backend_dev_type(dev)) {
                 case LM_GGML_BACKEND_DEVICE_TYPE_CPU:
+#ifndef TARGET_OS_SIMULATOR
                 case LM_GGML_BACKEND_DEVICE_TYPE_ACCEL:
+#endif
                     cpu_devs.push_back(dev);
                     break;
                 case LM_GGML_BACKEND_DEVICE_TYPE_GPU:
@@ -177,7 +202,6 @@
             defaultParams.devices = cpu_devs;
             defaultParams.n_gpu_layers = 0;
             isMetalEnabled = false;
-            gpuDeviceName = @"";
         }
     }
 
@@ -254,6 +278,22 @@
     const int defaultNThreads = nThreads == 4 ? 2 : MIN(4, maxThreads);
     defaultParams.cpuparams.n_threads = nThreads > 0 ? nThreads : defaultNThreads;
 
+    // Handle cpu_mask and cpu_strict parameters
+    if (params[@"cpu_mask"] && [params[@"cpu_mask"] isKindOfClass:[NSString class]]) {
+        NSString *cpuMask = params[@"cpu_mask"];
+        const char *cpuMaskStr = [cpuMask UTF8String];
+        if (cpuMaskStr && cpuMaskStr[0] != '\0') {
+            bool cpumask[LM_GGML_MAX_N_THREADS] = {false};
+            if (parse_cpu_mask(cpuMaskStr, cpumask)) {
+                std::copy(std::begin(cpumask), std::end(cpumask), std::begin(defaultParams.cpuparams.cpumask));
+                defaultParams.cpuparams.mask_valid = true;
+            }
+        }
+    }
+    if (params[@"cpu_strict"]) {
+        defaultParams.cpuparams.strict_cpu = [params[@"cpu_strict"] boolValue];
+    }
+
     RNLlamaContext *context = [[RNLlamaContext alloc] init];
     context->llama = new rnllama::llama_rn_context();
     context->llama->is_load_interrupted = false;
@@ -274,6 +314,19 @@
     }
 
     context->is_model_loaded = context->llama->loadModel(defaultParams);
+    NSMutableArray *usedDevices = [NSMutableArray array];
+    if (context->is_model_loaded) {
+        context->llama->attachThreadpoolsIfAvailable();
+
+        const auto &model_devices = context->llama->llama_init.model->devices;
+        for (auto dev : model_devices) {
+            auto dev_type = lm_ggml_backend_dev_type(dev);
+            const char *used_name = lm_ggml_backend_dev_name(dev);
+            if (used_name != nullptr) {
+                [usedDevices addObject:[NSString stringWithUTF8String:used_name]];
+            }
+        }
+    }
 
     if (
         params[@"embedding"] && [params[@"embedding"] boolValue] &&
@@ -313,7 +366,8 @@
 
     context->is_metal_enabled = isMetalEnabled;
     context->reason_no_metal = reasonNoMetal;
-    context->gpu_device_name = gpuDeviceName ?: @"";
+    context->used_devices = usedDevices;
+    context->system_info = [NSString stringWithUTF8String:common_params_get_system_info(defaultParams).c_str()];
 
     return context;
 }
@@ -330,8 +384,8 @@
     return reason_no_metal;
 }
 
-- (NSString *)gpuDeviceName {
-    return gpu_device_name;
+- (NSArray *)usedDevices {
+    return used_devices;
 }
 
 - (NSDictionary *)modelInfo {
@@ -394,6 +448,10 @@
         // deprecated
         @"isChatTemplateSupported": @(llama->validateModelChatTemplate(false, nullptr))
     };
+}
+
+- (NSString *)systemInfo {
+    return system_info;
 }
 
 - (bool)isModelLoaded {
@@ -834,7 +892,7 @@
         }
     }
 
-    llama_perf_context_print(llama->ctx);
+    common_perf_print(llama->ctx, llama->completion->ctx_sampling);
     llama->completion->endCompletion();
 
     const auto timings = llama_perf_context(llama->ctx);
@@ -1490,6 +1548,9 @@
         int n_decoded = slot->n_decoded;
         std::string error_message = slot->error_message;
 
+        // Get timings
+        rnllama::slot_timings timings = slot->get_timings();
+
         // Parse final chat output
         rnllama::completion_chat_output final_output;
         bool has_final_output = false;
@@ -1510,6 +1571,19 @@
             result[@"context_full"] = @(context_full);
             result[@"incomplete"] = @(incomplete);
             result[@"n_decoded"] = @(n_decoded);
+
+            // Add timings
+            result[@"timings"] = @{
+                @"cache_n": @(timings.cache_n),
+                @"prompt_n": @(timings.prompt_n),
+                @"prompt_ms": @(timings.prompt_ms),
+                @"prompt_per_token_ms": @(timings.prompt_per_token_ms),
+                @"prompt_per_second": @(timings.prompt_per_second),
+                @"predicted_n": @(timings.predicted_n),
+                @"predicted_ms": @(timings.predicted_ms),
+                @"predicted_per_token_ms": @(timings.predicted_per_token_ms),
+                @"predicted_per_second": @(timings.predicted_per_second)
+            };
 
             // Add error message if present
             if (!error_message.empty()) {

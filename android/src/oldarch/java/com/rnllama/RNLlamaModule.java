@@ -50,6 +50,11 @@ public class RNLlamaModule extends ReactContextBaseJavaModule {
   }
 
   @ReactMethod
+  public void getBackendDevicesInfo(final Promise promise) {
+    rnllama.getBackendDevicesInfo(promise);
+  }
+
+  @ReactMethod
   public void initContext(double id, final ReadableMap params, final Promise promise) {
     rnllama.initContext(id, params, promise);
   }

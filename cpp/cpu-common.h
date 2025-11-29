@@ -11,20 +11,20 @@
 
 // convenience functions/macros for use in template calls
 // note: these won't be required after the 'traits' lookup table is used.
-static inline lm_ggml_fp16_t f32_to_f16(float x) {
-    return LM_GGML_FP32_TO_FP16(x);
+static inline lm_lm_lm_lm_ggml_fp16_t f32_to_f16(float x) {
+    return LM_LM_LM_LM_GGML_FP32_TO_FP16(x);
 }
 
-static inline float f16_to_f32(lm_ggml_fp16_t x) {
-    return LM_GGML_FP16_TO_FP32(x);
+static inline float f16_to_f32(lm_lm_lm_lm_ggml_fp16_t x) {
+    return LM_LM_LM_LM_GGML_FP16_TO_FP32(x);
 }
 
-static inline lm_ggml_bf16_t f32_to_bf16(float x) {
-    return LM_GGML_FP32_TO_BF16(x);
+static inline lm_lm_lm_lm_ggml_bf16_t f32_to_bf16(float x) {
+    return LM_LM_LM_LM_GGML_FP32_TO_BF16(x);
 }
 
-static inline float bf16_to_f32(lm_ggml_bf16_t x) {
-    return LM_GGML_BF16_TO_FP32(x);
+static inline float bf16_to_f32(lm_lm_lm_lm_ggml_bf16_t x) {
+    return LM_LM_LM_LM_GGML_BF16_TO_FP32(x);
 }
 
 static inline float f32_to_f32(float x) {
@@ -36,9 +36,9 @@ template <class T>
 struct type_conversion_table;
 
 template <>
-struct type_conversion_table<lm_ggml_fp16_t> {
-    static constexpr float (*to_f32)(lm_ggml_fp16_t) = f16_to_f32;
-    static constexpr lm_ggml_fp16_t (*from_f32)(float) = f32_to_f16;
+struct type_conversion_table<lm_lm_lm_lm_ggml_fp16_t> {
+    static constexpr float (*to_f32)(lm_lm_lm_lm_ggml_fp16_t) = f16_to_f32;
+    static constexpr lm_lm_lm_lm_ggml_fp16_t (*from_f32)(float) = f32_to_f16;
 };
 
 template <>
@@ -48,16 +48,16 @@ struct type_conversion_table<float> {
 };
 
 template <>
-struct type_conversion_table<lm_ggml_bf16_t> {
-    static constexpr float (*to_f32)(lm_ggml_bf16_t) = bf16_to_f32;
-    static constexpr lm_ggml_bf16_t (*from_f32)(float) = f32_to_bf16;
+struct type_conversion_table<lm_lm_lm_lm_ggml_bf16_t> {
+    static constexpr float (*to_f32)(lm_lm_lm_lm_ggml_bf16_t) = bf16_to_f32;
+    static constexpr lm_lm_lm_lm_ggml_bf16_t (*from_f32)(float) = f32_to_bf16;
 };
 
-static std::pair<int64_t, int64_t> get_thread_range(const struct lm_ggml_compute_params * params, const struct lm_ggml_tensor * src0) {
+static std::pair<int64_t, int64_t> get_thread_range(const struct lm_lm_lm_lm_ggml_compute_params * params, const struct lm_lm_lm_lm_ggml_tensor * src0) {
     const int64_t ith = params->ith;
     const int64_t nth = params->nth;
 
-    const int64_t nr  = lm_ggml_nrows(src0);
+    const int64_t nr  = lm_lm_lm_lm_ggml_nrows(src0);
 
     // rows per thread
     const int64_t dr = (nr + nth - 1)/nth;

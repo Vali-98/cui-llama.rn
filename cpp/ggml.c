@@ -1,7 +1,6 @@
 #define _CRT_SECURE_NO_DEPRECATE // Disables "unsafe" warnings on Windows
 #define _USE_MATH_DEFINES // For M_PI on MSVC
 
-// GGML build info
 #ifndef LM_GGML_VERSION
 #define LM_GGML_VERSION "unknown"
 #endif
@@ -956,6 +955,7 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "COS",
     "SUM",
     "SUM_ROWS",
+    "CUMSUM",
     "MEAN",
     "ARGMAX",
     "COUNT_EQUAL",
@@ -1010,7 +1010,10 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "ARANGE",
     "TIMESTEP_EMBEDDING",
     "ARGSORT",
+    "TOP_K",
     "LEAKY_RELU",
+    "TRI",
+    "FILL",
 
     "FLASH_ATTN_EXT",
     "FLASH_ATTN_BACK",
@@ -1023,6 +1026,7 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "RWKV_WKV6",
     "GATED_LINEAR_ATTN",
     "RWKV_WKV7",
+    "SOLVE_TRI",
 
     "UNARY",
 
@@ -1040,7 +1044,7 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "GLU",
 };
 
-static_assert(LM_GGML_OP_COUNT == 90, "LM_GGML_OP_COUNT != 90");
+static_assert(LM_GGML_OP_COUNT == 95, "LM_GGML_OP_COUNT != 95");
 
 static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "none",
@@ -1060,6 +1064,7 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "cos(x)",
     "Σx",
     "Σx_k",
+    "cumsum(x)",
     "Σx/n",
     "argmax(x)",
     "count_equal(x)",
@@ -1114,7 +1119,10 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "arange(start, stop, step)",
     "timestep_embedding(timesteps, dim, max_period)",
     "argsort(x)",
+    "top_k(x)",
     "leaky_relu(x)",
+    "tri(x)",
+    "fill(x, c)",
 
     "flash_attn_ext(x)",
     "flash_attn_back(x)",
@@ -1127,6 +1135,7 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "rwkv_wkv6(k, v, r, tf, td, s)",
     "gated_linear_attn(k, v, q, gate, s)",
     "rwkv_wkv7(r, w, k, v, a, b, s)",
+    "A X = B, A triangular, solve X",
 
     "unary(x)",
 
@@ -1144,7 +1153,7 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "glu(x)",
 };
 
-static_assert(LM_GGML_OP_COUNT == 90, "LM_GGML_OP_COUNT != 90");
+static_assert(LM_GGML_OP_COUNT == 95, "LM_GGML_OP_COUNT != 95");
 
 static_assert(LM_GGML_OP_POOL_COUNT == 2, "LM_GGML_OP_POOL_COUNT != 2");
 
@@ -1163,6 +1172,8 @@ static const char * LM_GGML_UNARY_OP_NAME[LM_GGML_UNARY_OP_COUNT] = {
     "HARDSWISH",
     "HARDSIGMOID",
     "EXP",
+    "EXPM1",
+    "SOFTPLUS",
     "GELU_ERF",
     "XIELU",
     "FLOOR",
@@ -1171,7 +1182,7 @@ static const char * LM_GGML_UNARY_OP_NAME[LM_GGML_UNARY_OP_COUNT] = {
     "TRUNC",
 };
 
-static_assert(LM_GGML_UNARY_OP_COUNT == 20, "LM_GGML_UNARY_OP_COUNT != 20");
+static_assert(LM_GGML_UNARY_OP_COUNT == 22, "LM_GGML_UNARY_OP_COUNT != 22");
 
 static const char * LM_GGML_GLU_OP_NAME[LM_GGML_GLU_OP_COUNT] = {
     "REGLU",
@@ -2279,6 +2290,30 @@ struct lm_ggml_tensor * lm_ggml_log_inplace(
     return lm_ggml_log_impl(ctx, a, true);
 }
 
+struct lm_ggml_tensor * lm_ggml_expm1(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary(ctx, a, LM_GGML_UNARY_OP_EXPM1);
+}
+
+struct lm_ggml_tensor * lm_ggml_expm1_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary_inplace(ctx, a, LM_GGML_UNARY_OP_EXPM1);
+}
+
+struct lm_ggml_tensor * lm_ggml_softplus(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary(ctx, a, LM_GGML_UNARY_OP_SOFTPLUS);
+}
+
+struct lm_ggml_tensor * lm_ggml_softplus_inplace(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    return lm_ggml_unary_inplace(ctx, a, LM_GGML_UNARY_OP_SOFTPLUS);
+}
+
 // lm_ggml_sin
 
 static struct lm_ggml_tensor * lm_ggml_sin_impl(
@@ -2357,6 +2392,21 @@ struct lm_ggml_tensor * lm_ggml_sum_rows(
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, a->type, LM_GGML_MAX_DIMS, ne);
 
     result->op     = LM_GGML_OP_SUM_ROWS;
+    result->src[0] = a;
+
+    return result;
+}
+
+// lm_ggml_cumsum
+
+struct lm_ggml_tensor * lm_ggml_cumsum(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a) {
+    LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32);
+
+    struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
+
+    result->op     = LM_GGML_OP_CUMSUM;
     result->src[0] = a;
 
     return result;
@@ -2689,8 +2739,8 @@ struct lm_ggml_tensor * lm_ggml_xielu(
     struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
 
     lm_ggml_set_op_params_i32(result, 0, (int32_t) LM_GGML_UNARY_OP_XIELU);
-    lm_ggml_set_op_params_f32(result, 1, beta + lm_ggml_softplus(alpha_n));
-    lm_ggml_set_op_params_f32(result, 2, lm_ggml_softplus(alpha_p));
+    lm_ggml_set_op_params_f32(result, 1, beta + lm_ggml_compute_softplus_f32(alpha_n));
+    lm_ggml_set_op_params_f32(result, 2, lm_ggml_compute_softplus_f32(alpha_p));
     lm_ggml_set_op_params_f32(result, 3, beta);
     lm_ggml_set_op_params_f32(result, 4, eps);
 
@@ -5008,28 +5058,6 @@ struct lm_ggml_tensor * lm_ggml_roll(
     return result;
 }
 
-// lm_ggml_arange
-
-struct lm_ggml_tensor * lm_ggml_arange(
-        struct lm_ggml_context * ctx,
-        float                 start,
-        float                 stop,
-        float                 step) {
-    LM_GGML_ASSERT(stop > start);
-
-    const int64_t steps = (int64_t) ceilf((stop - start) / step);
-
-    struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_F32, steps);
-
-    lm_ggml_set_op_params_f32(result, 0, start);
-    lm_ggml_set_op_params_f32(result, 1, stop);
-    lm_ggml_set_op_params_f32(result, 2, step);
-
-    result->op = LM_GGML_OP_ARANGE;
-
-    return result;
-}
-
 // lm_ggml_timestep_embedding
 
 struct lm_ggml_tensor * lm_ggml_timestep_embedding(
@@ -5049,6 +5077,61 @@ struct lm_ggml_tensor * lm_ggml_timestep_embedding(
     return result;
 }
 
+// lm_ggml_tri
+
+struct lm_ggml_tensor * lm_ggml_tri(
+    struct lm_ggml_context * ctx,
+    struct lm_ggml_tensor  * a,
+    enum lm_ggml_tri_type    type) {
+    LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32);
+
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
+    LM_GGML_ASSERT(a->ne[0] == a->ne[1]);
+
+    struct lm_ggml_tensor * result = lm_ggml_dup_tensor(ctx, a);
+
+    lm_ggml_set_op_params_i32(result, 0, type);
+
+    result->op = LM_GGML_OP_TRI;
+    result->src[0] = a;
+
+    return result;
+}
+
+// lm_ggml_fill
+
+static struct lm_ggml_tensor * lm_ggml_fill_impl(
+    struct lm_ggml_context * ctx,
+    struct lm_ggml_tensor  * a,
+    float                 c,
+    bool                  inplace) {
+    LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
+
+    struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
+
+    lm_ggml_set_op_params_f32(result, 0, c);
+
+    result->op = LM_GGML_OP_FILL;
+    result->src[0] = a;
+
+    return result;
+}
+
+struct lm_ggml_tensor * lm_ggml_fill(
+    struct lm_ggml_context * ctx,
+    struct lm_ggml_tensor  * a,
+    float                 c) {
+    return lm_ggml_fill_impl(ctx, a, c, false);
+}
+
+struct lm_ggml_tensor * lm_ggml_fill_inplace(
+    struct lm_ggml_context * ctx,
+    struct lm_ggml_tensor  * a,
+    float                 c) {
+    return lm_ggml_fill_impl(ctx, a, c, true);
+}
+
 // lm_ggml_argsort
 
 struct lm_ggml_tensor * lm_ggml_argsort(
@@ -5056,12 +5139,31 @@ struct lm_ggml_tensor * lm_ggml_argsort(
         struct lm_ggml_tensor   * a,
         enum lm_ggml_sort_order   order) {
     LM_GGML_ASSERT(a->ne[0] <= INT32_MAX);
+
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_I32, LM_GGML_MAX_DIMS, a->ne);
 
     lm_ggml_set_op_params_i32(result, 0, (int32_t) order);
 
     result->op     = LM_GGML_OP_ARGSORT;
     result->src[0] = a;
+
+    return result;
+}
+
+// lm_ggml_argsort_top_k
+
+struct lm_ggml_tensor * lm_ggml_argsort_top_k(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   k) {
+    LM_GGML_ASSERT(a->ne[0] >= k);
+
+    struct lm_ggml_tensor * result = lm_ggml_argsort(ctx, a, LM_GGML_SORT_ORDER_DESC);
+
+    result = lm_ggml_view_4d(ctx, result,
+                k, result->ne[1], result->ne[2], result->ne[3],
+                   result->nb[1], result->nb[2], result->nb[3],
+                0);
 
     return result;
 }
@@ -5074,12 +5176,32 @@ struct lm_ggml_tensor * lm_ggml_top_k(
         int                   k) {
     LM_GGML_ASSERT(a->ne[0] >= k);
 
-    struct lm_ggml_tensor * result = lm_ggml_argsort(ctx, a, LM_GGML_SORT_ORDER_DESC);
+    struct lm_ggml_tensor * result = lm_ggml_new_tensor_4d(ctx, LM_GGML_TYPE_I32, k, a->ne[1], a->ne[2], a->ne[3]);
 
-    result = lm_ggml_view_4d(ctx, result,
-                k, result->ne[1], result->ne[2], result->ne[3],
-                   result->nb[1], result->nb[2], result->nb[3],
-                0);
+    result->op     = LM_GGML_OP_TOP_K;
+    result->src[0] = a;
+
+    return result;
+}
+
+// lm_ggml_arange
+
+struct lm_ggml_tensor * lm_ggml_arange(
+        struct lm_ggml_context * ctx,
+        float                 start,
+        float                 stop,
+        float                 step) {
+    LM_GGML_ASSERT(stop > start);
+
+    const int64_t steps = (int64_t) ceilf((stop - start) / step);
+
+    struct lm_ggml_tensor * result = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_F32, steps);
+
+    lm_ggml_set_op_params_f32(result, 0, start);
+    lm_ggml_set_op_params_f32(result, 1, stop);
+    lm_ggml_set_op_params_f32(result, 2, step);
+
+    result->op = LM_GGML_OP_ARANGE;
 
     return result;
 }
@@ -5903,6 +6025,41 @@ struct lm_ggml_tensor * lm_ggml_opt_step_sgd(
     return result;
 }
 
+// solve_tri
+
+struct lm_ggml_tensor * lm_ggml_solve_tri(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        struct lm_ggml_tensor  * b,
+        bool                  left,
+        bool                  lower,
+        bool                  uni) {
+    LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(b->type == LM_GGML_TYPE_F32);
+
+    // A must be square and lower diagonal
+    LM_GGML_ASSERT(a->ne[0] == a->ne[1]);
+    // B must have same outer dimension as A
+    LM_GGML_ASSERT(a->ne[1] == b->ne[1]);
+
+    // batch dimensions must be equal
+    LM_GGML_ASSERT(a->ne[2] == b->ne[2]);
+    LM_GGML_ASSERT(a->ne[3] == b->ne[3]);
+
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(b));
+
+    LM_GGML_ASSERT(lower && left && !uni); // TODO: support other variants
+
+    struct lm_ggml_tensor * result = lm_ggml_new_tensor_4d(ctx, LM_GGML_TYPE_F32, b->ne[0], b->ne[1], b->ne[2], b->ne[3]);
+
+    result->op     = LM_GGML_OP_SOLVE_TRI;
+    result->src[0] = a;
+    result->src[1] = b;
+
+    return result;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 struct lm_ggml_hash_set lm_ggml_hash_set_new(size_t size) {
@@ -6475,6 +6632,16 @@ static void lm_ggml_compute_backward(
                         lm_ggml_add_or_set(ctx, cgraph, isrc0, lm_ggml_mul(ctx, tensor, grad));
                     }
                 } break;
+                case LM_GGML_UNARY_OP_EXPM1: {
+                    if (src0_needs_grads) {
+                        lm_ggml_add_or_set(ctx, cgraph, isrc0, lm_ggml_mul(ctx, grad, lm_ggml_exp(ctx, src0)));
+                    }
+                } break;
+                case LM_GGML_UNARY_OP_SOFTPLUS: {
+                    if (src0_needs_grads) {
+                        lm_ggml_add_or_set(ctx, cgraph, isrc0, lm_ggml_mul(ctx, grad, lm_ggml_sigmoid(ctx, src0)));
+                    }
+                } break;
                 default: {
                     fprintf(stderr, "%s: unsupported unary op for backward pass: %s\n",
                         __func__, lm_ggml_unary_op_name(lm_ggml_get_unary_op(tensor)));
@@ -6983,6 +7150,78 @@ void lm_ggml_graph_print(const struct lm_ggml_cgraph * cgraph) {
     }
 
     LM_GGML_LOG_INFO("========================================\n");
+}
+
+static int lm_ggml_node_list_find_tensor(const struct lm_ggml_cgraph * cgraph,
+                                      const int *                idxs,
+                                      int                        count,
+                                      const struct lm_ggml_tensor * tensor) {
+    LM_GGML_ASSERT(cgraph && idxs);
+    for (int i = 0; i < count; ++i) {
+        const int node_idx = idxs[i];
+
+        if (node_idx >= cgraph->n_nodes) {
+            return -1;
+        }
+        if (cgraph->nodes[node_idx] == tensor) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool lm_ggml_can_fuse_subgraph_ext(const struct lm_ggml_cgraph * cgraph,
+                                const int *                node_idxs,
+                                int                        count,
+                                const enum lm_ggml_op *       ops,
+                                const int *                outputs,
+                                int                        num_outputs) {
+    LM_GGML_ASSERT(outputs && num_outputs > 0);
+
+    for (int i = 0; i < count; ++i) {
+        if (node_idxs[i] >= cgraph->n_nodes) {
+            return false;
+        }
+
+        const struct lm_ggml_tensor * node = cgraph->nodes[node_idxs[i]];
+
+        if (node->op != ops[i]) {
+            return false;
+        }
+
+        if (lm_ggml_node_list_find_tensor(cgraph, outputs, num_outputs, node) != -1) {
+            continue;
+        }
+
+        if (node->flags & LM_GGML_TENSOR_FLAG_OUTPUT) {
+            return false;
+        }
+
+        int subgraph_uses = 0;
+        for (int j = i + 1; j < count; ++j) {
+            const struct lm_ggml_tensor * other_node = cgraph->nodes[node_idxs[j]];
+            for (int src_idx = 0; src_idx < LM_GGML_MAX_SRC; src_idx++) {
+                if (other_node->src[src_idx] == node) {
+                    subgraph_uses++;
+                }
+            }
+        }
+
+        if (subgraph_uses != lm_ggml_node_get_use_count(cgraph, node_idxs[i])) {
+            return false;
+        }
+
+        // if node is a view, check if the view_src and all it's parent view_srcs are within the subgraph
+        struct lm_ggml_tensor * view_src = node->view_src;
+        while (view_src) {
+            if (lm_ggml_node_list_find_tensor(cgraph, node_idxs, count, view_src) == -1) {
+                return false;
+            }
+            view_src = view_src->view_src;
+        }
+    }
+
+    return true;
 }
 
 // check if node is part of the graph

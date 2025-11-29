@@ -11,6 +11,14 @@ if (!NativeModules.RNLlama) {
     return requestIdCounter
   }
   NativeModules.RNLlama = {
+    getBackendDevicesInfo: jest.fn(async () => JSON.stringify([{
+      backend: 'cpu',
+      type: 'cpu',
+      deviceName: 'Test',
+      maxMemorySize: 12345678,
+      metadata: {},
+    }])),
+
     setContextLimit: jest.fn(),
 
     modelInfo: jest.fn(async () => ({})),
@@ -454,4 +462,4 @@ if (!NativeModules.RNLlama) {
   }
 }
 
-module.exports = jest.requireActual('../src')
+module.exports = jest.requireActual('llama.rn')

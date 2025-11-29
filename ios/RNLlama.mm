@@ -39,6 +39,17 @@ RCT_EXPORT_METHOD(modelInfo:(NSString *)path
     resolve([RNLlamaContext modelInfo:path skip:skip]);
 }
 
+RCT_EXPORT_METHOD(getBackendDevicesInfo:(RCTPromiseResolveBlock)resolve
+                 withRejecter:(RCTPromiseRejectBlock)reject)
+{
+    @try {
+        NSString *devicesInfoJson = [RNLlamaContext getBackendDevicesInfo];
+        resolve(devicesInfoJson);
+    } @catch (NSException *exception) {
+        reject(@"llama_error", exception.reason, nil);
+    }
+}
+
 RCT_EXPORT_METHOD(initContext:(double)contextId
                  withContextParams:(NSDictionary *)contextParams
                  withResolver:(RCTPromiseResolveBlock)resolve
@@ -80,11 +91,9 @@ RCT_EXPORT_METHOD(initContext:(double)contextId
           @"gpu": @([context isMetalEnabled]),
           @"reasonNoGPU": [context reasonNoMetal],
           @"model": [context modelInfo],
+          @"systemInfo": [context systemInfo],
       } mutableCopy];
-      NSString *gpuDevice = [context gpuDeviceName];
-      if (gpuDevice != nil && [gpuDevice length] > 0) {
-          result[@"gpuDevice"] = gpuDevice;
-      }
+      result[@"devices"] = [context usedDevices];;
       resolve(result);
     } @catch (NSException *exception) {
       reject(@"llama_cpp_error", exception.reason, nil);
