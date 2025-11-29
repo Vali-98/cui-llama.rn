@@ -2,7 +2,7 @@ require "json"
 
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 base_ld_flags = "-framework Accelerate -framework Foundation -framework Metal -framework MetalKit"
-base_compiler_flags = "-fno-objc-arc -DLM_GGML_USE_CPU -DLM_GGML_USE_ACCELERATE -Wno-shorten-64-to-32"
+base_compiler_flags = "-fno-objc-arc -DLM_GGML_USE_CPU -DLM_GGML_USE_ACCELERATE -DLM_GGML_USE_BLAS -DLM_GGML_BLAS_USE_ACCELERATE -Wno-shorten-64-to-32"
 
 if ENV["RNLLAMA_DISABLE_METAL"] != "1" then
   base_compiler_flags += " -DLM_GGML_USE_METAL" # -DLM_GGML_METAL_NDEBUG
@@ -25,8 +25,8 @@ Pod::Spec.new do |s|
 
   if ENV["RNLLAMA_BUILD_FROM_SOURCE"] == "1"
     s.source_files = "ios/**/*.{h,m,mm}", "cpp/**/*.{h,cpp,hpp,c,m,mm}"
-    s.exclude_files = "cpp/ggml-opencl/*.cpp"
-    s.resources = "cpp/**/*.{metallib}"
+    s.exclude_files = "cpp/ggml-opencl/*.{c,cpp}", "cpp/ggml-hexagon/**/*.{c,cpp}"
+    s.resources = "cpp/ggml-metal/ggml-metal.metal"
     base_compiler_flags += " -DRNLLAMA_BUILD_FROM_SOURCE"
   else
     s.source_files = "ios/**/*.{h,m,mm}"

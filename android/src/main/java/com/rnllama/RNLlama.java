@@ -108,6 +108,20 @@ public class RNLlama implements LifecycleEventListener {
     });
   }
 
+  public void getBackendDevicesInfo(final Promise promise) {
+    executorService.execute(() -> {
+      try {
+        if (LlamaContext.isArchNotSupported()) {
+          throw new IllegalStateException("Only 64-bit architectures are supported");
+        }
+        String result = LlamaContext.getBackendDevicesInfo();
+        mainHandler.post(() -> promise.resolve(result));
+      } catch (Exception e) {
+        mainHandler.post(() -> promise.reject(e));
+      }
+    });
+  }
+
   public void initContext(double id, final ReadableMap params, final Promise promise) {
     final int contextId = (int) id;
     Future<?> future = executorService.submit(() -> {
@@ -127,11 +141,9 @@ public class RNLlama implements LifecycleEventListener {
         WritableMap result = Arguments.createMap();
         result.putBoolean("gpu", llamaContext.isGpuEnabled());
         result.putString("reasonNoGPU", llamaContext.getReasonNoGpu());
-        String gpuDevice = llamaContext.getGpuDevice();
-        if (gpuDevice != null && !gpuDevice.isEmpty()) {
-          result.putString("gpuDevice", gpuDevice);
-        }
+        result.putArray("devices", llamaContext.getDevices());
         result.putMap("model", llamaContext.getModelDetails());
+        result.putString("systemInfo", llamaContext.getSystemInfo());
         result.putString("androidLib", llamaContext.getLoadedLibrary());
         mainHandler.post(() -> {
           promise.resolve(result);

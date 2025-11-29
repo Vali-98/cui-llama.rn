@@ -318,6 +318,44 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_sum_rows(lm_ggml_met
     return res;
 }
 
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_cumsum_blk(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
+    LM_GGML_ASSERT(op->op == LM_GGML_OP_CUMSUM);
+
+    char base[256];
+    char name[256];
+
+    snprintf(base, 256, "kernel_cumsum_blk_%s", lm_ggml_type_name(op->src[0]->type));
+    snprintf(name, 256, "%s", base);
+
+    lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
+    if (res) {
+        return res;
+    }
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+
+    return res;
+}
+
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_cumsum_add(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
+    LM_GGML_ASSERT(op->op == LM_GGML_OP_CUMSUM);
+
+    char base[256];
+    char name[256];
+
+    snprintf(base, 256, "kernel_cumsum_add_%s", lm_ggml_type_name(op->src[0]->type));
+    snprintf(name, 256, "%s", base);
+
+    lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
+    if (res) {
+        return res;
+    }
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+
+    return res;
+}
+
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_soft_max(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
     LM_GGML_ASSERT(!op->src[1] || op->src[1]->type == LM_GGML_TYPE_F16 || op->src[1]->type == LM_GGML_TYPE_F32);
 
@@ -677,7 +715,7 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_mul_mm_id_map0(lm_gg
     char name[256];
 
     snprintf(base, 256, "kernel_mul_mm_id_map0_ne20_%d", ne20);
-    snprintf(name, 256, "%s", base);
+    snprintf(name, 256, "%s_ne02=%d", base, ne02);
 
     lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
     if (res) {
@@ -931,6 +969,92 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_argsort(lm_ggml_meta
     };
 
     snprintf(base, 256, "kernel_argsort_%s_%s_%s", lm_ggml_type_name(op->src[0]->type), lm_ggml_type_name(op->type), order_str);
+    snprintf(name, 256, "%s", base);
+
+    lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
+    if (res) {
+        return res;
+    }
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+
+    return res;
+}
+
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_argsort_merge(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
+    assert(op->op == LM_GGML_OP_ARGSORT);
+
+    char base[256];
+    char name[256];
+
+    lm_ggml_sort_order order = (lm_ggml_sort_order) op->op_params[0];
+
+    const char * order_str = "undefined";
+    switch (order) {
+        case LM_GGML_SORT_ORDER_ASC:  order_str = "asc";  break;
+        case LM_GGML_SORT_ORDER_DESC: order_str = "desc"; break;
+        default: LM_GGML_ABORT("fatal error");
+    };
+
+    snprintf(base, 256, "kernel_argsort_merge_%s_%s_%s", lm_ggml_type_name(op->src[0]->type), lm_ggml_type_name(op->type), order_str);
+    snprintf(name, 256, "%s", base);
+
+    lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
+    if (res) {
+        return res;
+    }
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+
+    return res;
+}
+
+// note: reuse the argsort kernel for top_k
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_top_k(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
+    assert(op->op == LM_GGML_OP_TOP_K);
+
+    char base[256];
+    char name[256];
+
+    // note: the top_k kernel is always descending order
+    lm_ggml_sort_order order = LM_GGML_SORT_ORDER_DESC;
+
+    const char * order_str = "undefined";
+    switch (order) {
+        case LM_GGML_SORT_ORDER_ASC:  order_str = "asc";  break;
+        case LM_GGML_SORT_ORDER_DESC: order_str = "desc"; break;
+        default: LM_GGML_ABORT("fatal error");
+    };
+
+    snprintf(base, 256, "kernel_argsort_%s_%s_%s", lm_ggml_type_name(op->src[0]->type), lm_ggml_type_name(op->type), order_str);
+    snprintf(name, 256, "%s", base);
+
+    lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
+    if (res) {
+        return res;
+    }
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+
+    return res;
+}
+
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_top_k_merge(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
+    assert(op->op == LM_GGML_OP_TOP_K);
+
+    char base[256];
+    char name[256];
+
+    lm_ggml_sort_order order = LM_GGML_SORT_ORDER_DESC;
+
+    const char * order_str = "undefined";
+    switch (order) {
+        case LM_GGML_SORT_ORDER_ASC:  order_str = "asc";  break;
+        case LM_GGML_SORT_ORDER_DESC: order_str = "desc"; break;
+        default: LM_GGML_ABORT("fatal error");
+    };
+
+    snprintf(base, 256, "kernel_argsort_merge_%s_%s_%s", lm_ggml_type_name(op->src[0]->type), lm_ggml_type_name(op->type), order_str);
     snprintf(name, 256, "%s", base);
 
     lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
@@ -1332,11 +1456,12 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_rope(lm_ggml_metal_l
 
     const bool is_neox   = mode & LM_GGML_ROPE_TYPE_NEOX;
     const bool is_mrope  = mode & LM_GGML_ROPE_TYPE_MROPE;
+    const bool is_imrope = mode == LM_GGML_ROPE_TYPE_IMROPE;
     const bool is_vision = mode == LM_GGML_ROPE_TYPE_VISION;
 
     if (is_neox) {
         snprintf(base, 256, "kernel_rope_neox_%s", lm_ggml_type_name(op->src[0]->type));
-    } else if (is_mrope && !is_vision) {
+    } else if ((is_mrope || is_imrope) && !is_vision) {
         LM_GGML_ASSERT(op->src[1]->ne[0]*4 >= op->src[0]->ne[2]); // need at least 4 pos per token
         snprintf(base, 256, "kernel_rope_multi_%s", lm_ggml_type_name(op->src[0]->type));
     } else if (is_vision) {
@@ -1346,14 +1471,20 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_rope(lm_ggml_metal_l
         snprintf(base, 256, "kernel_rope_norm_%s", lm_ggml_type_name(op->src[0]->type));
     }
 
-    snprintf(name, 256, "%s", base);
+    snprintf(name, 256, "%s_imrope=%d", base, is_imrope ? 1 : 0);
 
     lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
     if (res) {
         return res;
     }
 
-    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+    lm_ggml_metal_cv_t cv = lm_ggml_metal_cv_init();
+
+    lm_ggml_metal_cv_set_bool(cv, is_imrope, FC_ROPE + 0);
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, cv);
+
+    lm_ggml_metal_cv_free(cv);
 
     return res;
 }
@@ -1394,6 +1525,55 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_conv_transpose_1d(lm
     char name[256];
 
     snprintf(base, 256, "kernel_conv_transpose_1d_%s_%s", lm_ggml_type_name(op->src[0]->type), lm_ggml_type_name(op->src[1]->type));
+    snprintf(name, 256, "%s", base);
+
+    lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
+    if (res) {
+        return res;
+    }
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+
+    return res;
+}
+
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_conv_transpose_2d(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
+    assert(op->op == LM_GGML_OP_CONV_TRANSPOSE_2D);
+
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(op->src[0]));
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(op->src[1]));
+    LM_GGML_ASSERT(op->src[0]->type == LM_GGML_TYPE_F16 || op->src[0]->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(op->src[1]->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(op->type         == LM_GGML_TYPE_F32);
+
+    char base[256];
+    char name[256];
+
+    snprintf(base, 256, "kernel_conv_transpose_2d_%s_%s", lm_ggml_type_name(op->src[0]->type), lm_ggml_type_name(op->src[1]->type));
+    snprintf(name, 256, "%s", base);
+
+    lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);
+    if (res) {
+        return res;
+    }
+
+    res = lm_ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
+
+    return res;
+}
+
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_conv_2d(lm_ggml_metal_library_t lib, const lm_ggml_tensor * op) {
+    assert(op->op == LM_GGML_OP_CONV_2D);
+
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(op->src[0]));
+    LM_GGML_ASSERT(op->src[0]->type == LM_GGML_TYPE_F16 || op->src[0]->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(op->src[1]->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(op->type         == LM_GGML_TYPE_F32);
+
+    char base[256];
+    char name[256];
+
+    snprintf(base, 256, "kernel_conv_2d_%s_%s", lm_ggml_type_name(op->src[0]->type), lm_ggml_type_name(op->src[1]->type));
     snprintf(name, 256, "%s", base);
 
     lm_ggml_metal_pipeline_t res = lm_ggml_metal_library_get_pipeline(lib, name);

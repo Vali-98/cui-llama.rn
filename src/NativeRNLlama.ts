@@ -28,11 +28,30 @@ export type NativeContextParams = {
   n_threads?: number
 
   /**
+   * CPU affinity mask string (e.g., "0-3" or "0,2,4,6").
+   * Specifies which CPU cores to use for inference.
+   */
+  cpu_mask?: string
+
+  /**
+   * Use strict CPU placement.
+   * When true, enforces strict CPU core affinity.
+   * Default: false
+   */
+  cpu_strict?: boolean
+
+  /**
    * Number of layers to store in VRAM (Currently only for iOS)
    */
   n_gpu_layers?: number
+
   /**
-   * Skip GPU devices (iOS only)
+   * Backend devices choice to use. Default equals to result of `getBackendDevicesInfo.
+   */
+  devices?: Array<string>
+
+  /**
+   * Skip GPU devices (iOS only) (Deprecated: Please set devices params instead)
    */
   no_gpu_devices?: boolean
 
@@ -315,6 +334,7 @@ export type NativeCompletionTokenProb = {
 }
 
 export type NativeCompletionResultTimings = {
+  cache_n: number
   prompt_n: number
   prompt_ms: number
   prompt_per_token_ms: number
@@ -433,9 +453,10 @@ export type NativeLlamaContext = {
   /**
    * Name of the GPU device used on Android/iOS (if available)
    */
-  gpuDevice?: string
+  devices?: Array<string>
   gpu: boolean
   reasonNoGPU: string
+  systemInfo: string
 }
 
 export type NativeSessionLoadResult = {
@@ -496,11 +517,20 @@ export type NativeRerankResult = {
   index: number
 }
 
+export type NativeBackendDeviceInfo = {
+  backend: string
+  type: string
+  deviceName: string
+  maxMemorySize: number
+  metadata?: Record<string, any>
+}
+
 export interface Spec extends TurboModule {
   toggleNativeLog(enabled: boolean): Promise<void>
   setContextLimit(limit: number): Promise<void>
 
   modelInfo(path: string, skip?: string[]): Promise<Object>
+  getBackendDevicesInfo(): Promise<string>
   initContext(
     contextId: number,
     params: NativeContextParams,
@@ -565,7 +595,11 @@ export interface Spec extends TurboModule {
     params?: NativeRerankParams,
   ): Promise<{ requestId: number }>
   cancelRequest(contextId: number, requestId: number): Promise<void>
-  tokenizeAsync(contextId: number, text: string, imagePaths?: Array<string>): Promise<NativeTokenizeResult>
+  tokenizeAsync(
+    contextId: number,
+    text: string,
+    imagePaths?: Array<string>,
+  ): Promise<NativeTokenizeResult>
   tokenizeSync(contextId: number, text: string, imagePaths?: Array<string>): NativeTokenizeResult
   getCpuFeatures() : Promise<NativeCPUFeatures>
   detokenize(contextId: number, tokens: number[]): Promise<string>
@@ -606,20 +640,14 @@ export interface Spec extends TurboModule {
     },
   ): Promise<boolean>
 
-  isMultimodalEnabled(
-    contextId: number,
-  ): Promise<boolean>
+  isMultimodalEnabled(contextId: number): Promise<boolean>
 
-  getMultimodalSupport(
-    contextId: number,
-  ): Promise<{
+  getMultimodalSupport(contextId: number): Promise<{
     vision: boolean
     audio: boolean
   }>
 
-  releaseMultimodal(
-    contextId: number,
-  ): Promise<void>
+  releaseMultimodal(contextId: number): Promise<void>
 
   // TTS methods
   initVocoder(
@@ -630,11 +658,18 @@ export interface Spec extends TurboModule {
     },
   ): Promise<boolean>
   isVocoderEnabled(contextId: number): Promise<boolean>
-  getFormattedAudioCompletion(contextId: number, speakerJsonStr: string, textToSpeak: string): Promise<{
+  getFormattedAudioCompletion(
+    contextId: number,
+    speakerJsonStr: string,
+    textToSpeak: string,
+  ): Promise<{
     prompt: string
     grammar?: string
   }>
-  getAudioCompletionGuideTokens(contextId: number, textToSpeak: string): Promise<Array<number>>
+  getAudioCompletionGuideTokens(
+    contextId: number,
+    textToSpeak: string,
+  ): Promise<Array<number>>
   decodeAudioTokens(contextId: number, tokens: number[]): Promise<Array<number>>
   releaseVocoder(contextId: number): Promise<void>
 

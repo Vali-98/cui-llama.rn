@@ -1,8 +1,10 @@
 #include "rn-llama.h"
+#include "ggml-cpu.h"
 #include "rn-tts.h"
 #include "rn-mtmd.hpp"
 #include "rn-completion.h"
 #include "rn-slot-manager.h"
+#include "rn-common.hpp"
 
 // Include multimodal support
 #include "tools/mtmd/mtmd.h"
@@ -12,6 +14,10 @@
 #include <cstdarg>
 
 namespace rnllama {
+
+std::string get_backend_devices_info() {
+    return backend_devices_info();
+}
 
 static const std::vector<lm_ggml_type> kv_cache_types = {
     LM_GGML_TYPE_F32,
@@ -108,7 +114,79 @@ std::string tokens_to_str(llama_context *ctx, const std::vector<llama_token>::co
 }
 
 
+void llama_rn_context::cleanupThreadpools() {
+    if (ctx != nullptr && (threadpool != nullptr || threadpool_batch != nullptr)) {
+        llama_detach_threadpool(ctx);
+    }
+
+    if (threadpool_batch != nullptr) {
+        lm_ggml_threadpool_free(threadpool_batch);
+        threadpool_batch = nullptr;
+    }
+
+    if (threadpool != nullptr) {
+        lm_ggml_threadpool_free(threadpool);
+        threadpool = nullptr;
+    }
+}
+
+bool llama_rn_context::attachThreadpoolsIfAvailable() {
+    if (ctx == nullptr) {
+        return false;
+    }
+
+    lm_ggml_backend_dev_t cpu_dev = lm_ggml_backend_dev_by_type(LM_GGML_BACKEND_DEVICE_TYPE_CPU);
+    if (cpu_dev == nullptr) {
+        LOG_WARNING("No CPU backend available; skipping threadpool attachment");
+        return false;
+    }
+
+    cleanupThreadpools();
+
+    lm_ggml_threadpool_params tpp =
+        lm_ggml_threadpool_params_from_cpu_params(params.cpuparams);
+    lm_ggml_threadpool_params tpp_batch =
+        lm_ggml_threadpool_params_from_cpu_params(params.cpuparams_batch);
+
+    if (tpp.n_threads <= 0) {
+        LOG_WARNING("Skipping threadpool attachment (n_threads = %d)", tpp.n_threads);
+        return false;
+    }
+
+    bool need_batch_pool =
+        !lm_ggml_threadpool_params_match(&tpp, &tpp_batch) && tpp_batch.n_threads > 0;
+
+    lm_ggml_threadpool *new_batch = nullptr;
+    if (need_batch_pool) {
+        new_batch = lm_ggml_threadpool_new(&tpp_batch);
+        if (new_batch == nullptr) {
+            LOG_WARNING("Failed to create batch threadpool (n_threads=%d)", tpp_batch.n_threads);
+            return false;
+        }
+        tpp.paused = true;
+    }
+
+    lm_ggml_threadpool *new_threadpool = lm_ggml_threadpool_new(&tpp);
+    if (new_threadpool == nullptr) {
+        LOG_WARNING("Failed to create threadpool (n_threads=%d)", tpp.n_threads);
+        if (new_batch != nullptr) {
+            lm_ggml_threadpool_free(new_batch);
+        }
+        return false;
+    }
+
+    llama_attach_threadpool(ctx, new_threadpool, new_batch);
+    threadpool = new_threadpool;
+    threadpool_batch = new_batch;
+    LOG_INFO("Attached ggml threadpool (n_threads=%d, n_threads_batch=%d)",
+             tpp.n_threads,
+             threadpool_batch ? tpp_batch.n_threads : tpp.n_threads);
+    return true;
+}
+
 llama_rn_context::~llama_rn_context() {
+    cleanupThreadpools();
+
     // Disable parallel mode first (cleans up slot_manager)
     disableParallelMode();
 

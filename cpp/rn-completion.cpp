@@ -127,7 +127,7 @@ void llama_rn_context_completion::loadPrompt(const std::vector<std::string> &med
         }
 
         // compare the evaluated prompt with the new prompt
-        n_past = find_common_prefix_length(embd, text_tokens);
+        n_past = is_enc_dec ? 0 : find_common_prefix_length(embd, text_tokens);
 
         embd = text_tokens;
         if (n_past == num_prompt_tokens) {
@@ -299,6 +299,15 @@ completion_token_output llama_rn_context_completion::nextToken()
 
         llama_token new_token_id = common_sampler_sample(ctx_sampling, parent_ctx->ctx, -1);
 
+        const int32_t n_probs = parent_ctx->params.sampling.n_probs;
+        if (n_probs > 0) {
+          llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling, true);
+          for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
+          {
+              result.probs.push_back({cur_p.data[i].id, cur_p.data[i].p});
+          }
+        }
+
         if (llama_vocab_is_eog(vocab, new_token_id)) {
             has_next_token = false;
             stopped_eos = true;
@@ -315,15 +324,6 @@ completion_token_output llama_rn_context_completion::nextToken()
         }
         result.tok = new_token_id;
         result.text = common_token_to_piece(parent_ctx->ctx, new_token_id);
-
-        llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling, true);
-
-        const int32_t n_probs = parent_ctx->params.sampling.n_probs;
-
-        for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
-        {
-            result.probs.push_back({cur_p.data[i].id, cur_p.data[i].p});
-        }
 
         common_sampler_accept(ctx_sampling, result.tok, true);
         if (tg) {

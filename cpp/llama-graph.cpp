@@ -810,6 +810,9 @@ lm_ggml_tensor * llm_graph_context::build_ffn(
             LM_GGML_ABORT("fatal error");
     }
 
+    //expand here so that we can fuse ffn gate
+    lm_ggml_build_forward_expand(gf, cur);
+
     if (gate && type_gate == LLM_FFN_PAR) {
         cur = lm_ggml_mul(ctx0, cur, tmp);
         cb(cur, "ffn_gate_par", il);
@@ -950,8 +953,33 @@ lm_ggml_tensor * llm_graph_context::build_moe_ffn(
         cb(selection_probs, "ffn_moe_probs_biased", il);
     }
 
+    // select top n_group_used expert groups
+    // https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/e815299b0bcbac849fa540c768ef21845365c9eb/modeling_deepseek.py#L440-L457
+    if (hparams.n_expert_groups > 1 && n_tokens > 0) {
+        const int64_t n_exp_per_group = n_expert / hparams.n_expert_groups;
+
+        // organize experts into n_expert_groups
+        lm_ggml_tensor * selection_groups = lm_ggml_reshape_3d(ctx0, selection_probs, n_exp_per_group, hparams.n_expert_groups, n_tokens); // [n_exp_per_group, n_expert_groups, n_tokens]
+
+        lm_ggml_tensor * group_scores = lm_ggml_argsort_top_k(ctx0, selection_groups, 2); // [2, n_expert_groups, n_tokens]
+        group_scores = lm_ggml_get_rows(ctx0, lm_ggml_reshape_4d(ctx0, selection_groups, 1, selection_groups->ne[0], selection_groups->ne[1], selection_groups->ne[2]), group_scores); // [1, 2, n_expert_groups, n_tokens]
+
+        // get top n_group_used expert groups
+        group_scores = lm_ggml_sum_rows(ctx0, lm_ggml_reshape_3d(ctx0, group_scores, group_scores->ne[1], group_scores->ne[2], group_scores->ne[3])); // [1, n_expert_groups, n_tokens]
+        group_scores = lm_ggml_reshape_2d(ctx0, group_scores, group_scores->ne[1], group_scores->ne[2]); // [n_expert_groups, n_tokens]
+
+        lm_ggml_tensor * expert_groups = lm_ggml_argsort_top_k(ctx0, group_scores, hparams.n_group_used); // [n_group_used, n_tokens]
+        cb(expert_groups, "ffn_moe_group_topk", il);
+
+        // mask out the other groups
+        selection_probs = lm_ggml_get_rows(ctx0, selection_groups, expert_groups); // [n_exp_per_group, n_group_used, n_tokens]
+        selection_probs = lm_ggml_set_rows(ctx0, lm_ggml_scale_bias(ctx0, selection_groups, 0.0f, -INFINITY), selection_probs, expert_groups); // [n_exp_per_group, n_expert_groups, n_tokens]
+        selection_probs = lm_ggml_reshape_2d(ctx0, selection_probs, n_expert, n_tokens); // [n_expert, n_tokens]
+        cb(selection_probs, "ffn_moe_probs_masked", il);
+    }
+
     // select experts
-    lm_ggml_tensor * selected_experts = lm_ggml_top_k(ctx0, selection_probs, n_expert_used); // [n_expert_used, n_tokens]
+    lm_ggml_tensor * selected_experts = lm_ggml_argsort_top_k(ctx0, selection_probs, n_expert_used); // [n_expert_used, n_tokens]
     cb(selected_experts->src[0], "ffn_moe_argsort", il);
     cb(selected_experts, "ffn_moe_topk", il);
 
@@ -980,6 +1008,10 @@ lm_ggml_tensor * llm_graph_context::build_moe_ffn(
 
         lm_ggml_tensor * weights_sum = lm_ggml_sum_rows(ctx0, weights); // [1, n_tokens]
         cb(weights_sum, "ffn_moe_weights_sum", il);
+
+        // Avoid division by zero, clamp to smallest number representable by F16
+        weights_sum = lm_ggml_clamp(ctx0, weights_sum, 6.103515625e-5, INFINITY);
+        cb(weights_sum, "ffn_moe_weights_sum_clamped", il);
 
         weights = lm_ggml_div(ctx0, weights, weights_sum); // [n_expert_used, n_tokens]
         cb(weights, "ffn_moe_weights_norm", il);
@@ -1061,6 +1093,9 @@ lm_ggml_tensor * llm_graph_context::build_moe_ffn(
             LM_GGML_ABORT("fatal error");
     }
 
+    //expand here so that we can fuse ffn gate
+    lm_ggml_build_forward_expand(gf, cur);
+
     experts = build_lora_mm_id(down_exps, cur, selected_experts); // [n_embd, n_expert_used, n_tokens]
     cb(experts, "ffn_moe_down", il);
 
@@ -1107,7 +1142,7 @@ lm_ggml_tensor * llm_graph_context::build_moe_ffn(
 
 // input embeddings with optional lora
 lm_ggml_tensor * llm_graph_context::build_inp_embd(lm_ggml_tensor * tok_embd) const {
-    const int64_t n_embd = hparams.n_embd;
+    const int64_t n_embd = hparams.n_embd_inp();
 
     auto inp = std::make_unique<llm_graph_input_embd>();
 
@@ -1244,7 +1279,7 @@ lm_ggml_tensor * llm_graph_context::build_inp_cross_embd() const {
     //    return cur;
     //}
 
-    const auto n_embd = !cross->v_embd.empty() ? cross->n_embd : hparams.n_embd;
+    const auto n_embd = !cross->v_embd.empty() ? cross->n_embd : hparams.n_embd_inp();
     const auto n_enc  = !cross->v_embd.empty() ? cross->n_enc : hparams.n_ctx_train;
 
     cur = lm_ggml_new_tensor_2d(ctx0, LM_GGML_TYPE_F32, n_embd, n_enc);
@@ -1557,9 +1592,10 @@ lm_ggml_tensor * llm_graph_context::build_attn(
             int       il) const {
     // these nodes are added to the graph together so that they are not reordered
     // by doing so, the number of splits in the graph is reduced
+    // expand k later to enable rope fusion which directly writes into k-v cache
     lm_ggml_build_forward_expand(gf, q_cur);
-    lm_ggml_build_forward_expand(gf, k_cur);
     lm_ggml_build_forward_expand(gf, v_cur);
+    lm_ggml_build_forward_expand(gf, k_cur);
 
     const auto * mctx_cur = inp->mctx;
 
@@ -2000,7 +2036,7 @@ int32_t llama_relative_position_bucket(llama_pos x, llama_pos y, uint64_t n_buck
 
     if (bidirectional) {
         relative_bucket += (relative_position > 0) * n_buckets;
-        relative_position = abs(relative_position);
+        relative_position = std::abs(relative_position);
     } else {
         relative_position = -std::min<int32_t>(relative_position, 0);
     }

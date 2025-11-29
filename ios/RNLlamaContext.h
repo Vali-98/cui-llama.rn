@@ -9,6 +9,7 @@
 #import "rn-slot.h"
 #import "rn-slot-manager.h"
 #import "json-schema-to-grammar.h"
+#import "common.h"
 #else
 #import <rnllama/llama.h>
 #import <rnllama/llama-impl.h>
@@ -18,6 +19,7 @@
 #import <rnllama/rn-slot.h>
 #import <rnllama/rn-slot-manager.h>
 #import <rnllama/json-schema-to-grammar.h>
+#import <rnllama/common.h>
 #endif
 #endif
 
@@ -26,7 +28,8 @@
     bool is_metal_enabled;
     bool is_model_loaded;
     NSString * reason_no_metal;
-    NSString * gpu_device_name;
+    NSArray * used_devices;
+    NSString * system_info;
 
     void (^onProgress)(unsigned int progress);
 
@@ -35,12 +38,14 @@
 
 + (void)toggleNativeLog:(BOOL)enabled onEmitLog:(void (^)(NSString *level, NSString *text))onEmitLog;
 + (NSDictionary *)modelInfo:(NSString *)path skip:(NSArray *)skip;
++ (NSString *)getBackendDevicesInfo;
 + (instancetype)initWithParams:(NSDictionary *)params onProgress:(void (^)(unsigned int progress))onProgress;
 - (void)interruptLoad;
 - (bool)isMetalEnabled;
 - (NSString *)reasonNoMetal;
-- (NSString *)gpuDeviceName;
+- (NSArray *)usedDevices;
 - (NSDictionary *)modelInfo;
+- (NSString *)systemInfo;
 - (bool)isModelLoaded;
 - (bool)isPredicting;
 - (bool)initMultimodal:(NSDictionary *)params;

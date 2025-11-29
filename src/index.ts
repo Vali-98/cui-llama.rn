@@ -21,6 +21,7 @@ import type {
   FormattedChatResult,
   NativeImageProcessingResult,
   NativeLlamaChatMessage,
+  NativeBackendDeviceInfo,
 } from './NativeRNLlama'
 import type {
   SchemaGrammarConverterPropOrder,
@@ -65,6 +66,7 @@ export type {
   FormattedChatResult,
   JinjaFormattedChatResult,
   NativeImageProcessingResult,
+  NativeBackendDeviceInfo,
 
   // Deprecated
   SchemaGrammarConverterPropOrder,
@@ -110,7 +112,7 @@ export type ToolCall = {
   id?: string
   function: {
     name: string
-    arguments: string  // JSON string
+    arguments: string // JSON string
   }
 }
 
@@ -260,13 +262,15 @@ export class LlamaContext {
 
   gpu: boolean = false
 
-  gpuDevice: NativeLlamaContext['gpuDevice']
-
   reasonNoGPU: string = ''
+
+  devices: NativeLlamaContext['devices']
 
   model: NativeLlamaContext['model']
 
   androidLib: NativeLlamaContext['androidLib']
+
+  systemInfo: NativeLlamaContext['systemInfo']
 
   /**
    * Parallel processing namespace for non-blocking queue operations
@@ -358,30 +362,36 @@ export class LlamaContext {
       // Create promise that resolves when completion finishes
       const promise = new Promise<NativeCompletionResult>((resolve, reject) => {
         if (onToken) {
-          tokenListener = EventEmitter.addListener(EVENT_ON_TOKEN, (evt: TokenNativeEvent) => {
-            const { contextId, requestId: evtRequestId, tokenResult } = evt
-            if (contextId !== this.id) return
-            if (evtRequestId !== requestId) return
-            onToken(requestId, tokenResult)
-          })
+          tokenListener = EventEmitter.addListener(
+            EVENT_ON_TOKEN,
+            (evt: TokenNativeEvent) => {
+              const { contextId, requestId: evtRequestId, tokenResult } = evt
+              if (contextId !== this.id) return
+              if (evtRequestId !== requestId) return
+              onToken(requestId, tokenResult)
+            },
+          )
         }
 
-        completeListener = EventEmitter.addListener(EVENT_ON_COMPLETE, (evt: any) => {
-          const { contextId, requestId: evtRequestId, result } = evt
-          if (contextId !== this.id || evtRequestId !== requestId) return
+        completeListener = EventEmitter.addListener(
+          EVENT_ON_COMPLETE,
+          (evt: any) => {
+            const { contextId, requestId: evtRequestId, result } = evt
+            if (contextId !== this.id || evtRequestId !== requestId) return
 
-          // Clean up listeners
-          tokenListener?.remove()
-          completeListener?.remove()
+            // Clean up listeners
+            tokenListener?.remove()
+            completeListener?.remove()
 
-          // Check if there's an error in the result (e.g., state load failure)
-          if (result.error) {
-            reject(new Error(result.error))
-          } else {
-            // Resolve the promise
-            resolve(result as NativeCompletionResult)
-          }
-        })
+            // Check if there's an error in the result (e.g., state load failure)
+            if (result.error) {
+              reject(new Error(result.error))
+            } else {
+              // Resolve the promise
+              resolve(result as NativeCompletionResult)
+            }
+          },
+        )
       })
 
       // Create stop function
@@ -405,27 +415,37 @@ export class LlamaContext {
      * @param params Optional embedding parameters
      * @returns Promise resolving to object with requestId and promise (resolves to embedding result)
      */
-    embedding: async (text: string, params?: EmbeddingParams): Promise<{
+    embedding: async (
+      text: string,
+      params?: EmbeddingParams,
+    ): Promise<{
       requestId: number
       promise: Promise<NativeEmbeddingResult>
     }> => {
       let embeddingListener: any
 
-      const { requestId } = await RNLlama.queueEmbedding(this.id, text, params || {})
+      const { requestId } = await RNLlama.queueEmbedding(
+        this.id,
+        text,
+        params || {},
+      )
 
       // Create promise that resolves when embedding completes
       const promise = new Promise<NativeEmbeddingResult>((resolve, _reject) => {
-        embeddingListener = EventEmitter.addListener(EVENT_ON_EMBEDDING_RESULT, (evt: any) => {
-          const { contextId, requestId: evtRequestId, embedding } = evt
-          // Filter by both contextId AND requestId to ensure correct matching
-          if (contextId !== this.id || evtRequestId !== requestId) return
+        embeddingListener = EventEmitter.addListener(
+          EVENT_ON_EMBEDDING_RESULT,
+          (evt: any) => {
+            const { contextId, requestId: evtRequestId, embedding } = evt
+            // Filter by both contextId AND requestId to ensure correct matching
+            if (contextId !== this.id || evtRequestId !== requestId) return
 
-          // Clean up listener
-          embeddingListener?.remove()
+            // Clean up listener
+            embeddingListener?.remove()
 
-          // Resolve the promise
-          resolve({ embedding })
-        })
+            // Resolve the promise
+            resolve({ embedding })
+          },
+        )
       })
 
       return {
@@ -451,29 +471,37 @@ export class LlamaContext {
     }> => {
       let rerankListener: any
 
-      const { requestId } = await RNLlama.queueRerank(this.id, query, documents, params || {})
+      const { requestId } = await RNLlama.queueRerank(
+        this.id,
+        query,
+        documents,
+        params || {},
+      )
 
       // Create promise that resolves when reranking completes
       const promise = new Promise<RerankResult[]>((resolve, _reject) => {
-        rerankListener = EventEmitter.addListener(EVENT_ON_RERANK_RESULTS, (evt: any) => {
-          const { contextId, requestId: evtRequestId, results } = evt
-          // Filter by both contextId AND requestId to ensure correct matching
-          if (contextId !== this.id || evtRequestId !== requestId) return
+        rerankListener = EventEmitter.addListener(
+          EVENT_ON_RERANK_RESULTS,
+          (evt: any) => {
+            const { contextId, requestId: evtRequestId, results } = evt
+            // Filter by both contextId AND requestId to ensure correct matching
+            if (contextId !== this.id || evtRequestId !== requestId) return
 
-          // Clean up listener
-          rerankListener?.remove()
+            // Clean up listener
+            rerankListener?.remove()
 
-          // Sort by score descending (highest score first = most relevant) and add document text
-          const sortedResults = results
-            .map((result: NativeRerankResult) => ({
-              ...result,
-              document: documents[result.index],
-            }))
-            .sort((a: RerankResult, b: RerankResult) => b.score - a.score)
+            // Sort by score descending (highest score first = most relevant) and add document text
+            const sortedResults = results
+              .map((result: NativeRerankResult) => ({
+                ...result,
+                document: documents[result.index],
+              }))
+              .sort((a: RerankResult, b: RerankResult) => b.score - a.score)
 
-          // Resolve the promise
-          resolve(sortedResults)
-        })
+            // Resolve the promise
+            resolve(sortedResults)
+          },
+        )
       })
 
       return {
@@ -525,13 +553,22 @@ export class LlamaContext {
       RNLlama.enableParallelMode(this.id, { enabled: true, ...config }),
   }
 
-  constructor({ contextId, gpu, gpuDevice, reasonNoGPU, model, androidLib }: NativeLlamaContext) {
+  constructor({
+    contextId,
+    gpu,
+    devices,
+    reasonNoGPU,
+    model,
+    androidLib,
+    systemInfo,
+  }: NativeLlamaContext) {
     this.id = contextId
     this.gpu = gpu
-    this.gpuDevice = gpuDevice
+    this.devices = devices
     this.reasonNoGPU = reasonNoGPU
     this.model = model
     this.androidLib = androidLib
+    this.systemInfo = systemInfo
   }
 
   /**
@@ -570,11 +607,11 @@ export class LlamaContext {
       response_format?: CompletionResponseFormat
       tools?: object
       parallel_tool_calls?: object
-      tool_choice?: string,
-      enable_thinking?: boolean,
-      add_generation_prompt?: boolean,
-      now?: string | number,
-      chat_template_kwargs?: Record<string, string>,
+      tool_choice?: string
+      enable_thinking?: boolean
+      add_generation_prompt?: boolean
+      now?: string | number
+      chat_template_kwargs?: Record<string, string>
     },
   ): Promise<FormattedChatResult | JinjaFormattedChatResult> {
     const mediaPaths: string[] = []
@@ -639,13 +676,19 @@ export class LlamaContext {
         tool_choice: params?.tool_choice,
         enable_thinking: params?.enable_thinking ?? true,
         add_generation_prompt: params?.add_generation_prompt,
-        now: typeof params?.now === 'number' ? params.now.toString() : params?.now,
-        chat_template_kwargs: params?.chat_template_kwargs ? JSON.stringify(
-          Object.entries(params.chat_template_kwargs).reduce((acc, [key, value]) => {
-            acc[key] = JSON.stringify(value) // Each value is a stringified JSON object
-            return acc
-          }, {} as Record<string, any>)
-        ) : undefined,
+        now:
+          typeof params?.now === 'number' ? params.now.toString() : params?.now,
+        chat_template_kwargs: params?.chat_template_kwargs
+          ? JSON.stringify(
+              Object.entries(params.chat_template_kwargs).reduce(
+                (acc, [key, value]) => {
+                  acc[key] = JSON.stringify(value) // Each value is a stringified JSON object
+                  return acc
+                },
+                {} as Record<string, any>,
+              ),
+            )
+          : undefined,
       },
     )
     if (!useJinja) {
@@ -818,7 +861,12 @@ export class LlamaContext {
     documents: string[],
     params?: RerankParams,
   ): Promise<RerankResult[]> {
-    const results = await RNLlama.rerank(this.id, query, documents, params || {})
+    const results = await RNLlama.rerank(
+      this.id,
+      query,
+      documents,
+      params || {},
+    )
 
     // Sort by score descending and add document text if requested
     return results
@@ -936,7 +984,13 @@ export class LlamaContext {
    * @param params.n_batch Batch size for the vocoder model
    * @returns Promise resolving to true if initialization was successful
    */
-  async initVocoder({ path, n_batch: nBatch }: { path: string; n_batch?: number }): Promise<boolean> {
+  async initVocoder({
+    path,
+    n_batch: nBatch,
+  }: {
+    path: string
+    n_batch?: number
+  }): Promise<boolean> {
     if (path.startsWith('file://')) path = path.slice(7)
     return await RNLlama.initVocoder(this.id, { path, n_batch: nBatch })
   }
@@ -1061,6 +1115,13 @@ const poolTypeMap = {
   rank: 4,
 }
 
+export async function getBackendDevicesInfo(): Promise<
+  Array<NativeBackendDeviceInfo>
+> {
+  const jsonString = await RNLlama.getBackendDevicesInfo()
+  return JSON.parse(jsonString as string)
+}
+
 export async function initLlama(
   {
     model,
@@ -1068,6 +1129,7 @@ export async function initLlama(
     pooling_type: poolingType,
     lora,
     lora_list: loraList,
+    devices,
     ...rest
   }: ContextParams,
   onProgress?: (progress: number) => void,
@@ -1102,20 +1164,46 @@ export async function initLlama(
   const poolType = poolTypeMap[poolingType as keyof typeof poolTypeMap]
 
   if (rest.cache_type_k && !validCacheTypes.includes(rest.cache_type_k)) {
-    console.warn(`[RNLlama] initLlama: Invalid cache K type: ${rest.cache_type_k}, falling back to f16`)
+    console.warn(
+      `[RNLlama] initLlama: Invalid cache K type: ${rest.cache_type_k}, falling back to f16`,
+    )
     delete rest.cache_type_k
   }
   if (rest.cache_type_v && !validCacheTypes.includes(rest.cache_type_v)) {
-    console.warn(`[RNLlama] initLlama: Invalid cache V type: ${rest.cache_type_v}, falling back to f16`)
+    console.warn(
+      `[RNLlama] initLlama: Invalid cache V type: ${rest.cache_type_v}, falling back to f16`,
+    )
     delete rest.cache_type_v
+  }
+
+  let filteredDevs: Array<string> = []
+  if (Array.isArray(devices)) {
+    filteredDevs = [...devices]
+    const backendDevices = await getBackendDevicesInfo()
+
+    // Handle HTP* to use all HTP devices on Android (Hexagon)
+    if (Platform.OS === 'android' && devices.includes('HTP*')) {
+      const htpDevices = backendDevices
+        .filter((d) => d.deviceName.startsWith('HTP'))
+        .map((d) => d.deviceName)
+      filteredDevs = filteredDevs.reduce((acc, dev) => {
+        if (dev.startsWith('HTP*')) {
+          acc.push(...htpDevices)
+        } else if (!dev.startsWith('HTP')) {
+          acc.push(dev)
+        }
+        return acc
+      }, [] as Array<string>)
+    }
   }
 
   const {
     gpu,
-    gpuDevice,
+    devices: usedDevices,
     reasonNoGPU,
     model: modelDetails,
     androidLib,
+    systemInfo,
   } = await RNLlama.initContext(contextId, {
     model: path,
     is_model_asset: !!isModelAsset,
@@ -1123,6 +1211,7 @@ export async function initLlama(
     pooling_type: poolType,
     lora: loraPath,
     lora_list: loraAdapters,
+    devices: filteredDevs.length > 0 ? filteredDevs : undefined,
     ...rest,
   }).catch((err: any) => {
     removeProgressListener?.remove()
@@ -1132,10 +1221,11 @@ export async function initLlama(
   return new LlamaContext({
     contextId,
     gpu,
-    gpuDevice,
+    devices: usedDevices,
     reasonNoGPU,
     model: modelDetails,
     androidLib,
+    systemInfo,
   })
 }
 

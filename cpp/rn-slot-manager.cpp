@@ -394,7 +394,6 @@ void llama_rn_slot_manager::process_pending_queue() {
         // Assign request to slot
         slot->request_id = request.request_id;
         slot->task_type = request.task_type;
-        slot->t_start_process = lm_ggml_time_us();
         slot->is_interrupted = false;
 
         // Reset callbacks from previous usage
@@ -406,11 +405,13 @@ void llama_rn_slot_manager::process_pending_queue() {
         // Ensure we start without a sampling context unless set below
         if (slot->ctx_sampling != nullptr) {
             common_sampler_free(slot->ctx_sampling);
+            slot->params = nullptr;
             slot->ctx_sampling = nullptr;
         }
 
         switch (request.task_type) {
             case SLOT_TASK_TYPE_COMPLETION: {
+                slot->params = &request.params;
                 slot->ctx_sampling = common_sampler_init(parent_ctx->model, request.params.sampling);
 
                 // Assign state parameters
@@ -434,6 +435,9 @@ void llama_rn_slot_manager::process_pending_queue() {
                         continue;
                     }
                 }
+
+                // Start timing AFTER state loading completes
+                slot->t_start_process = lm_ggml_time_us();
 
                 // Always load prompt - it will detect and preserve state if appropriate
                 bool has_media = !request.media_paths.empty();
@@ -464,6 +468,10 @@ void llama_rn_slot_manager::process_pending_queue() {
             }
 
             case SLOT_TASK_TYPE_EMBEDDING: {
+                slot->params = &request.params;
+                // Start timing (no state loading for embeddings)
+                slot->t_start_process = lm_ggml_time_us();
+
                 slot->media_paths.clear();
                 slot->prompt_text.clear();
                 slot->media_processed = true;
@@ -477,6 +485,10 @@ void llama_rn_slot_manager::process_pending_queue() {
             }
 
             case SLOT_TASK_TYPE_RERANK: {
+                slot->params = nullptr;
+                // Start timing (memory clear is part of the task, not overhead)
+                slot->t_start_process = lm_ggml_time_us();
+
                 if (parent_ctx && parent_ctx->ctx) {
                     llama_memory_clear(llama_get_memory(parent_ctx->ctx), false);
                 }
@@ -601,7 +613,12 @@ void llama_rn_slot_manager::build_batch() {
 
                     // Transition to GENERATING state immediately since all prompt tokens are processed
                     slot.state = SLOT_STATE_GENERATING;
-                    slot.t_start_generation = lm_ggml_time_us();
+
+                    // Mark that prompt processing just finished - timing will be calculated after decode
+                    // Note: for media processing, processMedia() already decoded everything, so timing
+                    // calculation will happen immediately after this in the main loop
+                    slot.prompt_processing_finished = true;
+                    slot.n_prompt_tokens_processed = slot.num_prompt_tokens - slot.n_prompt_tokens_cache;
 
                     // Set i_batch to -1 to indicate logits from media processing are ready to sample
                     // In sample_and_callback(), batch index -1 will be handled specially
@@ -653,7 +670,10 @@ void llama_rn_slot_manager::build_batch() {
             // If we've processed all prompt tokens, transition based on task type
             if (slot.n_past >= (llama_pos)slot.num_prompt_tokens) {
                 slot.state = SLOT_STATE_GENERATING;
-                slot.t_start_generation = lm_ggml_time_us();
+
+                // Mark that prompt processing just finished - timing will be calculated after decode
+                slot.prompt_processing_finished = true;
+                slot.n_prompt_tokens_processed = slot.num_prompt_tokens - slot.n_prompt_tokens_cache;
 
                 if (slot.task_type == SLOT_TASK_TYPE_COMPLETION) {
                     LOG_INFO("Slot %d: Transitioned to GENERATING state", slot.id);
@@ -705,6 +725,10 @@ bool llama_rn_slot_manager::process_batch() {
 
         return false;
     }
+
+    // Synchronize to ensure GPU work completes before timing measurements
+    // This is critical for accurate performance metrics when using Metal/GPU
+    llama_synchronize(parent_ctx->ctx);
 
     LOG_VERBOSE("Batch processed successfully");
     return true;
@@ -784,17 +808,22 @@ void llama_rn_slot_manager::sample_and_callback() {
                 std::string token_text = common_token_to_piece(parent_ctx->ctx, new_token_id);
                 slot.generated_text += token_text;
 
+                // Update token generation timing
+                const int64_t t_current = lm_ggml_time_us();
+                slot.t_token_generation = (t_current - slot.t_start_generation) / 1e6;
+
                 completion_token_output token_output;
                 token_output.tok = new_token_id;
                 token_output.text = token_text;
                 token_output.request_id = slot.request_id;
 
-                llama_token_data_array* cur_p = common_sampler_get_candidates(slot.ctx_sampling, true);
-                if (cur_p != nullptr) {
-                    const int32_t n_probs = std::min(10, (int32_t)cur_p->size);
-                    for (int32_t i = 0; i < n_probs; ++i) {
-                        token_output.probs.push_back({cur_p->data[i].id, cur_p->data[i].p});
-                    }
+                const int32_t n_probs = slot.params->sampling.n_probs;
+                if (n_probs > 0) {
+                  llama_token_data_array cur_p = *common_sampler_get_candidates(slot.ctx_sampling, true);
+                  for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
+                  {
+                      token_output.probs.push_back({cur_p.data[i].id, cur_p.data[i].p});
+                  }
                 }
 
                 slot.generated_tokens.push_back(new_token_id);
@@ -997,6 +1026,23 @@ void llama_rn_slot_manager::update_slots() {
                 }
             }
             return;
+        }
+
+        // Step 4.5: Calculate timing for slots that just finished prompt processing
+        // This must happen AFTER batch has been decoded
+        {
+            std::lock_guard<std::mutex> lock(slots_mutex);
+            const int64_t t_now = lm_ggml_time_us();
+            for (auto& slot : slots) {
+                if (slot.prompt_processing_finished) {
+                    slot.t_start_generation = t_now;
+                    slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process) / 1e6;
+                    slot.prompt_processing_finished = false;  // Clear the flag
+
+                    LOG_VERBOSE("Slot %d: Prompt processing complete, time=%.3fs, tokens=%d (cached=%d)",
+                               slot.id, slot.t_prompt_processing, slot.n_prompt_tokens_processed, slot.n_prompt_tokens_cache);
+                }
+            }
         }
     }
 

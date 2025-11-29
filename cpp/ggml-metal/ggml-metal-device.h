@@ -95,7 +95,9 @@ void lm_ggml_metal_encoder_end_encoding(lm_ggml_metal_encoder_t encoder);
 
 typedef struct lm_ggml_metal_library * lm_ggml_metal_library_t;
 
-lm_ggml_metal_library_t lm_ggml_metal_library_init(lm_ggml_metal_device_t dev);
+lm_ggml_metal_library_t lm_ggml_metal_library_init            (lm_ggml_metal_device_t dev);
+lm_ggml_metal_library_t lm_ggml_metal_library_init_from_source(lm_ggml_metal_device_t dev, const char * source, bool verbose);
+
 void lm_ggml_metal_library_free(lm_ggml_metal_library_t lib);
 
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline    (lm_ggml_metal_library_t lib, const char * name);
@@ -111,6 +113,8 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_unary             (l
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_glu               (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_sum               (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_sum_rows          (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_cumsum_blk        (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_cumsum_add        (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_soft_max          (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_ssm_conv          (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_ssm_scan          (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
@@ -123,6 +127,9 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_mul_mm_id         (l
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_mul_mv_id         (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_argmax            (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_argsort           (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_argsort_merge     (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_top_k             (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_top_k_merge       (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_bin               (lm_ggml_metal_library_t lib, enum lm_ggml_op op, int32_t n_fuse, bool row);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_l2_norm           (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_group_norm        (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
@@ -130,6 +137,8 @@ lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_norm              (l
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_rope              (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_im2col            (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_conv_transpose_1d (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_conv_transpose_2d (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
+lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_conv_2d           (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_upscale           (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_pad               (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
 lm_ggml_metal_pipeline_t lm_ggml_metal_library_get_pipeline_pad_reflect_1d    (lm_ggml_metal_library_t lib, const struct lm_ggml_tensor * op);
@@ -192,6 +201,7 @@ struct lm_ggml_metal_device_props {
     bool has_simdgroup_mm;
     bool has_unified_memory;
     bool has_bfloat;
+    bool has_tensor;
     bool use_residency_sets;
     bool use_shared_buffers;
 
