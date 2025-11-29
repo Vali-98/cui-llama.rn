@@ -1065,7 +1065,8 @@ export async function getCpuFeatures() : Promise<NativeCPUFeatures> {
     i8mm: false,
     armv8: false,
     dotprod: false,
-    adreno: false
+    adreno: false,
+    hexagon: false,
   }
 }
 

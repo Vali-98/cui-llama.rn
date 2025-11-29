@@ -414,6 +414,8 @@ public class RNLlama implements LifecycleEventListener {
         String cpuFeatures = LlamaContext.getCpuFeatures();
         boolean hasDotProd = cpuFeatures.contains("dotprod") || cpuFeatures.contains("asimddp");
         boolean hasInt8Matmul = cpuFeatures.contains("i8mm");
+        boolean hasHexagon = LlamaContext.isHexagonSupported();
+        result.putBoolean("hexagon", hasHexagon);
         result.putBoolean("i8mm", hasInt8Matmul);
         result.putBoolean("dotprod", hasDotProd);
       } else {

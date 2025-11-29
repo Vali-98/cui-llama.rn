@@ -850,7 +850,7 @@ public class LlamaContext {
     }
   }
 
-  private static boolean isHexagonSupported() {
+  public static boolean isHexagonSupported() {
     // Check SOC_MODEL on Android 12+
     if (Build.VERSION.SDK_INT >= 31) {
       String socModel = Build.SOC_MODEL;

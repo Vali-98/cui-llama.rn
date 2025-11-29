@@ -479,6 +479,7 @@ export type NativeCPUFeatures = {
   i8mm: boolean
   dotprod: boolean
   adreno: boolean
+  hexagon: boolean
 }
 
 export type FormattedChatResult = {
