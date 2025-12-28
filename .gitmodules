@@ -1,6 +1,7 @@
 [submodule "third_party/llama.cpp"]
 	path = third_party/llama.cpp
-	url = https://github.com/ggml-org/llama.cpp
+	url = https://github.com/Vali-98/llama.cpp
+    branch = cui-llama.rn
 
 [submodule "third_party/OpenCL-ICD-Loader"]
 	path = third_party/OpenCL-ICD-Loader

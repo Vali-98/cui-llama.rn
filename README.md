@@ -1,3 +1,18 @@
+# cui-llama.rn
+
+
+This is a fork of [llama.rn](https://github.com/mybigday/llama.rn) meant for [ChatterUI](https://github.com/Vali-98/ChatterUI)
+
+
+This fork exists for adding ChatterUI specific features:
+
+- Context Shift taken from [kobold.cpp](https://github.com/LostRuins/koboldcpp)
+
+- Loading files from FileDescriptors on Android
+
+
+Original repo README.md below.
+
 # llama.rn
 
 [![Actions Status](https://github.com/mybigday/llama.rn/workflows/CI/badge.svg)](https://github.com/mybigday/llama.rn/actions)
