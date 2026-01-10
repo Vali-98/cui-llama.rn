@@ -259,6 +259,7 @@ common_chat_params llama_rn_context::getFormattedChatWithJinja(
         const bool& parallel_tool_calls,
         const std::string& tool_choice,
         const bool& enable_thinking,
+        const std::string& reasoning_format,
         const bool& add_generation_prompt,
         const std::string& now_str,
         const std::map<std::string, std::string>& chat_template_kwargs
@@ -275,9 +276,10 @@ common_chat_params llama_rn_context::getFormattedChatWithJinja(
         inputs.tool_choice = common_chat_tool_choice_parse_oaicompat(tool_choice);
     }
     if (!json_schema.empty()) {
-        inputs.json_schema = json::parse(json_schema);
+        inputs.json_schema = json_schema;
     }
     inputs.enable_thinking = enable_thinking;
+    inputs.reasoning_format = common_reasoning_format_from_name(reasoning_format);
     inputs.add_generation_prompt = add_generation_prompt;
 
     // Handle now parameter - parse timestamp or use current time

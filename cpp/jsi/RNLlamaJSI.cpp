@@ -233,6 +233,8 @@ namespace rnllama_jsi {
         model.setProperty(runtime, "size", (double)llama_model_size(ctx->model));
         model.setProperty(runtime, "nEmbd", (double)llama_model_n_embd(ctx->model));
         model.setProperty(runtime, "nParams", (double)llama_model_n_params(ctx->model));
+        model.setProperty(runtime, "is_recurrent", llama_model_is_recurrent(ctx->model));
+        model.setProperty(runtime, "is_hybrid", llama_model_is_hybrid(ctx->model));
 
         // Metadata
         jsi::Object metadata(runtime);
@@ -742,6 +744,7 @@ namespace rnllama_jsi {
                  bool parallelToolCalls = false;
                  std::string toolChoice = "";
                  bool enableThinking = false;
+                 std::string reasoningFormat = "none";
                  bool addGenerationPrompt = true;
                  std::string nowStr = "";
                  std::map<std::string, std::string> chatTemplateKwargs;
@@ -757,6 +760,7 @@ namespace rnllama_jsi {
                          parallelToolCalls = getPropertyAsBool(runtime, params, "parallel_tool_calls", false);
                          toolChoice = getPropertyAsString(runtime, params, "tool_choice");
                          enableThinking = getPropertyAsBool(runtime, params, "enable_thinking", false);
+                         reasoningFormat = getPropertyAsString(runtime, params, "reasoning_format", "none");
                          addGenerationPrompt = getPropertyAsBool(runtime, params, "add_generation_prompt", true);
                          nowStr = getPropertyAsString(runtime, params, "now");
 
@@ -774,12 +778,12 @@ namespace rnllama_jsi {
                      }
                  }
 
-                 return createPromiseTask(runtime, callInvoker, [contextId, messages, chatTemplate, jsonSchema, tools, parallelToolCalls, toolChoice, enableThinking, addGenerationPrompt, nowStr, chatTemplateKwargs, useJinja]() -> PromiseResultGenerator {
+                 return createPromiseTask(runtime, callInvoker, [contextId, messages, chatTemplate, jsonSchema, tools, parallelToolCalls, toolChoice, enableThinking, reasoningFormat, addGenerationPrompt, nowStr, chatTemplateKwargs, useJinja]() -> PromiseResultGenerator {
                       auto ctx = getContextOrThrow(contextId);
                       if (useJinja) {
                           auto chatParams = ctx->getFormattedChatWithJinja(
                                messages, chatTemplate, jsonSchema, tools, parallelToolCalls,
-                               toolChoice, enableThinking, addGenerationPrompt, nowStr, chatTemplateKwargs
+                               toolChoice, enableThinking, reasoningFormat, addGenerationPrompt, nowStr, chatTemplateKwargs
                           );
 
                           return [chatParams](jsi::Runtime& rt) {
@@ -814,6 +818,11 @@ namespace rnllama_jsi {
                                   triggers.setValueAtIndex(rt, i, trigger);
                               }
                               result.setProperty(rt, "grammar_triggers", triggers);
+
+                              // Return the PEG parser string for COMMON_CHAT_FORMAT_PEG_* formats
+                              if (!chatParams.parser.empty()) {
+                                  result.setProperty(rt, "chat_parser", jsi::String::createFromUtf8(rt, chatParams.parser));
+                              }
 
                               return result;
                           };
@@ -1214,10 +1223,11 @@ namespace rnllama_jsi {
                 std::string prefill_text = getPropertyAsString(runtime, params, "prefill_text");
                 std::string load_state_path = stripFileScheme(getPropertyAsString(runtime, params, "load_state_path"));
                 std::string save_state_path = stripFileScheme(getPropertyAsString(runtime, params, "save_state_path"));
+                std::string save_prompt_state_path = stripFileScheme(getPropertyAsString(runtime, params, "save_prompt_state_path"));
                 int load_state_size = getPropertyAsInt(runtime, params, "load_state_size", -1);
                 int save_state_size = getPropertyAsInt(runtime, params, "save_state_size", -1);
 
-                return createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, cparams, mediaPaths, chat_format, reasoning_format, thinking_forced_open, chat_parser, prefill_text, load_state_path, save_state_path, load_state_size, save_state_size, onToken, onComplete, callInvoker]() -> PromiseResultGenerator {
+                return createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, cparams, mediaPaths, chat_format, reasoning_format, thinking_forced_open, chat_parser, prefill_text, load_state_path, save_state_path, save_prompt_state_path, load_state_size, save_state_size, onToken, onComplete, callInvoker]() -> PromiseResultGenerator {
                     auto ctx = getContextOrThrow(contextId);
                     if (!ctx->parallel_mode_enabled || !ctx->slot_manager) {
                         throw std::runtime_error("Parallel mode not enabled");
@@ -1358,7 +1368,7 @@ namespace rnllama_jsi {
                     };
 
                     int requestId = ctx->slot_manager->queue_request(
-                        cparams, tokens, mediaPaths, cparams.prompt, chat_format, reasoning_format, thinking_forced_open, chat_parser, prefill_text, load_state_path, save_state_path, load_state_size, save_state_size,
+                        cparams, tokens, mediaPaths, cparams.prompt, chat_format, reasoning_format, thinking_forced_open, chat_parser, prefill_text, load_state_path, save_state_path, save_prompt_state_path, load_state_size, save_state_size,
                         tokenCallback, completeCallback
                     );
 
