@@ -273,6 +273,7 @@ function(build_rnllama_library target_name arch cpu_flags)
             tsembd
             upscale
             tanh
+            expm1
             pad
             repeat
             mul_mat_f16_f32

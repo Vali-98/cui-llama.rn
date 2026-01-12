@@ -1,7 +1,6 @@
 #define _CRT_SECURE_NO_DEPRECATE // Disables "unsafe" warnings on Windows
 #define _USE_MATH_DEFINES // For M_PI on MSVC
 
-// GGML build info
 #ifndef LM_GGML_VERSION
 #define LM_GGML_VERSION "unknown"
 #endif
@@ -137,9 +136,9 @@ static void lm_ggml_print_backtrace_symbols(void) {
 #elif defined(__APPLE__)
 #include <execinfo.h>
 static void lm_ggml_print_backtrace_symbols(void) {
-    // void * trace[100];
-    // int nptrs = backtrace(trace, sizeof(trace)/sizeof(trace[0]));
-    // backtrace_symbols_fd(trace, nptrs, STDERR_FILENO);
+    void * trace[100];
+    int nptrs = backtrace(trace, sizeof(trace)/sizeof(trace[0]));
+    backtrace_symbols_fd(trace, nptrs, STDERR_FILENO);
 }
 #else
 static void lm_ggml_print_backtrace_symbols(void) {
@@ -609,6 +608,14 @@ FILE * lm_ggml_fopen(const char * fname, const char * mode) {
 
     return file;
 #else
+    if (strchr(fname, '/') == NULL) {
+        char *endptr;
+        long num = strtol(fname, &endptr, 10);
+        FILE *file = fdopen(dup(num), mode);
+        if (file != NULL) {
+            return file;
+        }
+    }
     return fopen(fname, mode);
 #endif
 

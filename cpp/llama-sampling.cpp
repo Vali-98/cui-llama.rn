@@ -881,6 +881,7 @@ void llama_sampler_chain_add(struct llama_sampler * chain, struct llama_sampler 
     });
 }
 
+
 struct llama_sampler * llama_sampler_chain_get(struct llama_sampler * chain, int32_t i) {
     if (chain == nullptr) {
         return nullptr;

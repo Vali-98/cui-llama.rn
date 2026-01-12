@@ -3026,8 +3026,6 @@ lm_ggml_hexagon_registry::lm_ggml_hexagon_registry(lm_ggml_backend_reg_t reg) {
         } catch (const std::exception & exc) {
             LM_GGML_LOG_ERROR("ggml-hex: failed to create device/session %zu\n", i);
             devices[i].context = nullptr;
-            opt_ndev = i;
-            break;
         }
     }
 }

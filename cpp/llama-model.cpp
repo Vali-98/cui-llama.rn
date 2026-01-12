@@ -149,7 +149,7 @@ static const char * llama_expert_gating_func_name(llama_expert_gating_func_type 
 
 static const std::map<llama_rope_scaling_type, const char *> LLAMA_ROPE_SCALING_TYPES = {
     { LLAMA_ROPE_SCALING_TYPE_NONE,       "none"       },
-    { LLAMA_ROPE_SCALING_TYPE_LINEAR,     "linear"     },
+    { LLAMA_ROPE_SCALING_TYPE_LINEAR,     "linear"     }, 
     { LLAMA_ROPE_SCALING_TYPE_YARN,       "yarn"       },
     { LLAMA_ROPE_SCALING_TYPE_LONGROPE,   "longrope"   },
 };

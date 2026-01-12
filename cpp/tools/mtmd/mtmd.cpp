@@ -14,6 +14,15 @@
 #include <windows.h>
 #endif
 
+// fix problem with std::min and std::max
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#   define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
@@ -266,7 +275,7 @@ struct mtmd_context {
         }
 
         // set boi/eoi
-        if (proj == PROJECTOR_TYPE_GEMMA3) {
+        if (proj == PROJECTOR_TYPE_GEMMA3 || proj == PROJECTOR_TYPE_GEMMA3NV) {
             // <start_of_image> ... (image embeddings) ... <end_of_image>
             img_beg = "<start_of_image>";
             img_end = "<end_of_image>";
@@ -862,10 +871,15 @@ float * mtmd_get_output_embd(mtmd_context * ctx) {
 }
 
 bool mtmd_decode_use_non_causal(mtmd_context * ctx) {
-    if (ctx->ctx_v && clip_get_projector_type(ctx->ctx_v) == PROJECTOR_TYPE_GEMMA3) {
-        return true;
+    switch (ctx->proj_type_v()) {
+        case PROJECTOR_TYPE_QWEN2VL:
+        case PROJECTOR_TYPE_QWEN25VL:
+        case PROJECTOR_TYPE_QWEN3VL:
+        case PROJECTOR_TYPE_YOUTUVL:
+            return true;
+        default:
+            return false;
     }
-    return false;
 }
 
 bool mtmd_decode_use_mrope(mtmd_context * ctx) {
