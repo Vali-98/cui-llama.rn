@@ -1044,10 +1044,10 @@ bool lm_ggml_metal_device_supports_op(lm_ggml_metal_device_t dev, const struct l
                    op->src[1]->type == LM_GGML_TYPE_F32 &&
                    op->type == LM_GGML_TYPE_F32 &&
                    (op->src[0]->type == LM_GGML_TYPE_F16 || op->src[0]->type == LM_GGML_TYPE_F32);
-        case LM_GGML_OP_POOL_1D:
-            return false;
         case LM_GGML_OP_UPSCALE:
             return op->src[0]->type == LM_GGML_TYPE_F32 && op->op_params[0] == LM_GGML_SCALE_MODE_NEAREST && !(op->op_params[0] & LM_GGML_SCALE_FLAG_ANTIALIAS);
+        case LM_GGML_OP_POOL_1D:
+            return lm_ggml_is_contiguous(op->src[0]) && op->src[0]->type == LM_GGML_TYPE_F32;
         case LM_GGML_OP_POOL_2D:
             return op->src[0]->type == LM_GGML_TYPE_F32;
         case LM_GGML_OP_PAD:
@@ -1078,12 +1078,8 @@ bool lm_ggml_metal_device_supports_op(lm_ggml_metal_device_t dev, const struct l
                 op->src[0]->ne[0] != 112 &&
                 op->src[0]->ne[0] != 128 &&
                 op->src[0]->ne[0] != 192 &&
-                op->src[0]->ne[0] != 256) {
-                return false;
-            }
-            if (op->src[0]->ne[0] == 576) {
-                // DeepSeek sizes
-                // TODO: disabled for now, until optmized
+                op->src[0]->ne[0] != 256 &&
+                op->src[0]->ne[0] != 576) {
                 return false;
             }
             if (op->src[1]->type != op->src[2]->type) {
