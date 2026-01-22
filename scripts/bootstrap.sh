@@ -219,6 +219,8 @@ cp ./$LLAMA_DIR/src/llama-kv-cache-iswa.h ./cpp/llama-kv-cache-iswa.h
 cp ./$LLAMA_DIR/src/llama-kv-cache-iswa.cpp ./cpp/llama-kv-cache-iswa.cpp
 cp ./$LLAMA_DIR/src/llama-memory-hybrid.h ./cpp/llama-memory-hybrid.h
 cp ./$LLAMA_DIR/src/llama-memory-hybrid.cpp ./cpp/llama-memory-hybrid.cpp
+cp ./$LLAMA_DIR/src/llama-memory-hybrid-iswa.h ./cpp/llama-memory-hybrid-iswa.h
+cp ./$LLAMA_DIR/src/llama-memory-hybrid-iswa.cpp ./cpp/llama-memory-hybrid-iswa.cpp
 cp ./$LLAMA_DIR/src/llama-memory-recurrent.h ./cpp/llama-memory-recurrent.h
 cp ./$LLAMA_DIR/src/llama-memory-recurrent.cpp ./cpp/llama-memory-recurrent.cpp
 cp ./$LLAMA_DIR/src/llama-adapter.h ./cpp/llama-adapter.h
@@ -295,9 +297,21 @@ cp ./$LLAMA_DIR/tools/mtmd/mtmd-helper.h ./cpp/tools/mtmd/mtmd-helper.h
 cp ./$LLAMA_DIR/tools/mtmd/mtmd-audio.h ./cpp/tools/mtmd/mtmd-audio.h
 cp ./$LLAMA_DIR/tools/mtmd/mtmd-audio.cpp ./cpp/tools/mtmd/mtmd-audio.cpp
 
-rm -rf ./cpp/minja
+rm -rf ./cpp/common/jinja
+cp -r ./$LLAMA_DIR/common/jinja ./cpp/common/jinja
+
+# Rename jinja/string.h to avoid conflict with system <string.h>
+mv ./cpp/common/jinja/string.h ./cpp/common/jinja/jinja-string.h
+# Update includes in jinja files
+if [ "$OS" = "Darwin" ]; then
+  sed -i '' 's|#include "string.h"|#include "jinja-string.h"|g' ./cpp/common/jinja/value.h
+  sed -i '' 's|#include "jinja/string.h"|#include "jinja/jinja-string.h"|g' ./cpp/common/jinja/string.cpp
+else
+  sed -i 's|#include "string.h"|#include "jinja-string.h"|g' ./cpp/common/jinja/value.h
+  sed -i 's|#include "jinja/string.h"|#include "jinja/jinja-string.h"|g' ./cpp/common/jinja/string.cpp
+fi
+
 rm -rf ./cpp/nlohmann
-cp -r ./$LLAMA_DIR/vendor/minja ./cpp/minja
 cp -r ./$LLAMA_DIR/vendor/nlohmann ./cpp/nlohmann
 rm -rf ./cpp/tools/mtmd/miniaudio
 rm -rf ./cpp/tools/mtmd/stb

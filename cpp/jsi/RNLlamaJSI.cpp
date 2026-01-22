@@ -253,44 +253,38 @@ namespace rnllama_jsi {
         bool llamaChat = ctx->validateModelChatTemplate(false, nullptr);
         chatTemplates.setProperty(runtime, "llamaChat", llamaChat);
 
-        jsi::Object minja(runtime);
-        bool minjaDefault = ctx->validateModelChatTemplate(true, nullptr);
-        minja.setProperty(runtime, "default", minjaDefault);
+        jsi::Object jinja(runtime);
+        bool jinjaDefault = ctx->validateModelChatTemplate(true, nullptr);
+        jinja.setProperty(runtime, "default", jinjaDefault);
 
         jsi::Object defaultCaps(runtime);
-        if (ctx->templates && ctx->templates->template_default) {
-            auto caps = ctx->templates->template_default->original_caps();
+        if (ctx->templates && common_chat_templates_has_variant(ctx->templates.get(), "")) {
+            auto caps = common_chat_templates_get_caps(ctx->templates.get(), "");
             defaultCaps.setProperty(runtime, "tools", caps.supports_tools);
             defaultCaps.setProperty(runtime, "toolCalls", caps.supports_tool_calls);
             defaultCaps.setProperty(runtime, "parallelToolCalls", caps.supports_parallel_tool_calls);
-            defaultCaps.setProperty(runtime, "toolResponses", caps.supports_tool_responses);
             defaultCaps.setProperty(runtime, "systemRole", caps.supports_system_role);
-            defaultCaps.setProperty(runtime, "toolCallId", caps.supports_tool_call_id);
         } else {
             defaultCaps.setProperty(runtime, "tools", false);
             defaultCaps.setProperty(runtime, "toolCalls", false);
             defaultCaps.setProperty(runtime, "parallelToolCalls", false);
-            defaultCaps.setProperty(runtime, "toolResponses", false);
             defaultCaps.setProperty(runtime, "systemRole", false);
-            defaultCaps.setProperty(runtime, "toolCallId", false);
         }
-        minja.setProperty(runtime, "defaultCaps", defaultCaps);
+        jinja.setProperty(runtime, "defaultCaps", defaultCaps);
 
         bool toolUseSupported = ctx->validateModelChatTemplate(true, "tool_use");
-        minja.setProperty(runtime, "toolUse", toolUseSupported);
-        if (ctx->templates && ctx->templates->template_tool_use) {
-            auto caps = ctx->templates->template_tool_use->original_caps();
+        jinja.setProperty(runtime, "toolUse", toolUseSupported);
+        if (ctx->templates && common_chat_templates_has_variant(ctx->templates.get(), "tool_use")) {
+            auto caps = common_chat_templates_get_caps(ctx->templates.get(), "tool_use");
             jsi::Object toolUseCaps(runtime);
             toolUseCaps.setProperty(runtime, "tools", caps.supports_tools);
             toolUseCaps.setProperty(runtime, "toolCalls", caps.supports_tool_calls);
             toolUseCaps.setProperty(runtime, "parallelToolCalls", caps.supports_parallel_tool_calls);
             toolUseCaps.setProperty(runtime, "systemRole", caps.supports_system_role);
-            toolUseCaps.setProperty(runtime, "toolResponses", caps.supports_tool_responses);
-            toolUseCaps.setProperty(runtime, "toolCallId", caps.supports_tool_call_id);
-            minja.setProperty(runtime, "toolUseCaps", toolUseCaps);
+            jinja.setProperty(runtime, "toolUseCaps", toolUseCaps);
         }
 
-        chatTemplates.setProperty(runtime, "minja", minja);
+        chatTemplates.setProperty(runtime, "jinja", jinja);
         model.setProperty(runtime, "chatTemplates", chatTemplates);
 
         // Deprecated flag maintained for compatibility
@@ -363,6 +357,7 @@ namespace rnllama_jsi {
         jsi::Runtime& runtime,
         std::shared_ptr<react::CallInvoker> callInvoker
     ) {
+        TaskManager::getInstance().reset();
         auto initContext = jsi::Function::createFromHostFunction(runtime,
             jsi::PropNameID::forAscii(runtime, "llamaInitContext"),
             3,
@@ -377,7 +372,7 @@ namespace rnllama_jsi {
                 if (count > 2 && arguments[2].isObject() && arguments[2].asObject(runtime).isFunction(runtime)) {
                     useProgressCallback = true;
                     progressData = std::make_shared<ProgressCallbackData>();
-                    progressData->callback = std::make_shared<jsi::Function>(arguments[2].asObject(runtime).asFunction(runtime));
+                    progressData->callback = makeJsiFunction(runtime, arguments[2], callInvoker);
                     progressData->callInvoker = callInvoker;
                     progressData->runtime = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){});
                     progressData->contextId = contextId;
@@ -952,7 +947,7 @@ namespace rnllama_jsi {
                 std::shared_ptr<jsi::Function> onToken;
 
                 if (count > 2 && arguments[2].isObject() && arguments[2].asObject(runtime).isFunction(runtime)) {
-                    onToken = std::make_shared<jsi::Function>(arguments[2].asObject(runtime).asFunction(runtime));
+                    onToken = makeJsiFunction(runtime, arguments[2], callInvoker);
                 }
 
                 bool emitPartial = getPropertyAsBool(runtime, params, "emit_partial_completion", false);
@@ -1134,7 +1129,7 @@ namespace rnllama_jsi {
                 bool enabled = count > 0 && arguments[0].isBool() ? arguments[0].getBool() : false;
                 std::shared_ptr<jsi::Function> onLog;
                 if (enabled && count > 1 && arguments[1].isObject() && arguments[1].asObject(runtime).isFunction(runtime)) {
-                    onLog = std::make_shared<jsi::Function>(arguments[1].asObject(runtime).asFunction(runtime));
+                    onLog = makeJsiFunction(runtime, arguments[1], callInvoker);
                 }
 
                 return createPromiseTask(runtime, callInvoker, [enabled, onLog, callInvoker, runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){})]() -> PromiseResultGenerator {
@@ -1198,8 +1193,8 @@ namespace rnllama_jsi {
                 int contextId = (int)arguments[0].asNumber();
                 jsi::Object params = arguments[1].asObject(runtime);
 
-                auto onToken = std::make_shared<jsi::Function>(arguments[2].asObject(runtime).asFunction(runtime));
-                auto onComplete = std::make_shared<jsi::Function>(arguments[3].asObject(runtime).asFunction(runtime));
+                auto onToken = makeJsiFunction(runtime, arguments[2], callInvoker);
+                auto onComplete = makeJsiFunction(runtime, arguments[3], callInvoker);
 
                 auto ctxPtr = getContextOrThrow(contextId);
                 auto originalParams = ctxPtr->params;
@@ -1409,7 +1404,7 @@ namespace rnllama_jsi {
                 int contextId = (int)arguments[0].asNumber();
                 std::string text = arguments[1].asString(runtime).utf8(runtime);
                 jsi::Object params = arguments[2].asObject(runtime);
-                auto onResult = std::make_shared<jsi::Function>(arguments[3].asObject(runtime).asFunction(runtime));
+                auto onResult = makeJsiFunction(runtime, arguments[3], callInvoker);
 
                 int embd_normalize = 0;
                 bool has_embd_normalize = false;
@@ -1476,7 +1471,7 @@ namespace rnllama_jsi {
                     documents.push_back(documentsArr.getValueAtIndex(runtime, i).asString(runtime).utf8(runtime));
                 }
                 jsi::Object params = arguments[3].asObject(runtime);
-                auto onResult = std::make_shared<jsi::Function>(arguments[4].asObject(runtime).asFunction(runtime));
+                auto onResult = makeJsiFunction(runtime, arguments[4], callInvoker);
 
                 int normalize = getPropertyAsInt(runtime, params, "normalize", 0);
 
@@ -1599,9 +1594,7 @@ namespace rnllama_jsi {
             2,
             [callInvoker](jsi::Runtime& runtime, const jsi::Value& thisValue, const jsi::Value* arguments, size_t count) -> jsi::Value {
                 int contextId = (int)arguments[0].asNumber();
-                auto onStatus = std::make_shared<jsi::Function>(
-                    arguments[1].asObject(runtime).asFunction(runtime)
-                );
+                auto onStatus = makeJsiFunction(runtime, arguments[1], callInvoker);
 
                 auto runtimePtr = std::make_shared<jsi::Runtime*>(&runtime);
 
@@ -1698,15 +1691,25 @@ namespace rnllama_jsi {
                          }
                      }
 
-                     TaskManager::getInstance().waitForContext(contextId, 1);
+                     // Wait for ALL other tasks on this context to complete (including their
+                     // invokeAsync callbacks) before deleting. This prevents race conditions
+                     // where we delete the context while a completion's JS callback is still
+                     // accessing ctx->completion.
+                     TaskManager::getInstance().waitForContext(contextId, 0);
+                     if (TaskManager::getInstance().isShuttingDown()) {
+                         return [](jsi::Runtime& rt) { return jsi::Value::undefined(); };
+                     }
 
                      if (ctxPtr) {
                          auto ctx = reinterpret_cast<rnllama::llama_rn_context*>(ctxPtr);
-                         delete ctx;
+                         // Remove from map FIRST, then delete.
+                         // This ensures any concurrent lookups via g_llamaContexts.get()
+                         // will return 0 (not found) rather than a dangling pointer.
                          removeContext(contextId);
+                         delete ctx;
                      }
                      return [](jsi::Runtime& rt) { return jsi::Value::undefined(); };
-                 }, contextId);
+                 }, contextId, false);  // trackTask=false - release should not count itself
             }
         );
         runtime.global().setProperty(runtime, "llamaReleaseContext", releaseContext);
@@ -1733,7 +1736,11 @@ namespace rnllama_jsi {
                          }
                      }
 
-                     TaskManager::getInstance().waitForAll(1);
+                     // Wait for ALL tasks to complete (including their invokeAsync callbacks)
+                     TaskManager::getInstance().waitForAll(0);
+                     if (TaskManager::getInstance().isShuttingDown()) {
+                         return [](jsi::Runtime& rt) { return jsi::Value::undefined(); };
+                     }
 
                      g_llamaContexts.clear([](long ptr) {
                         if (ptr) {
@@ -1742,7 +1749,7 @@ namespace rnllama_jsi {
                         }
                      });
                      return [](jsi::Runtime& rt) { return jsi::Value::undefined(); };
-                 });
+                 }, -1, false);  // contextId=-1 (not tracked), trackTask=false
             }
         );
         runtime.global().setProperty(runtime, "llamaReleaseAllContexts", releaseAllContexts);
@@ -1840,13 +1847,15 @@ namespace rnllama_jsi {
                 jsi::Object params = arguments[1].asObject(runtime);
                 std::string path = getPropertyAsString(runtime, params, "path");
                 bool use_gpu = getPropertyAsBool(runtime, params, "use_gpu", true);
+                int image_min_tokens = getPropertyAsInt(runtime, params, "image_min_tokens", -1);
+                int image_max_tokens = getPropertyAsInt(runtime, params, "image_max_tokens", -1);
 
-                return createPromiseTask(runtime, callInvoker, [contextId, path, use_gpu]() -> PromiseResultGenerator {
+                return createPromiseTask(runtime, callInvoker, [contextId, path, use_gpu, image_min_tokens, image_max_tokens]() -> PromiseResultGenerator {
                     auto ctx = getContextOrThrow(contextId);
                     if (ctx->completion && ctx->completion->is_predicting) {
                          throw std::runtime_error("Context is busy");
                     }
-                    bool result = ctx->initMultimodal(path, use_gpu);
+                    bool result = ctx->initMultimodal(path, use_gpu, image_min_tokens, image_max_tokens);
                     return [result](jsi::Runtime& rt) { return jsi::Value(result); };
                 }, contextId);
             }
@@ -2061,6 +2070,15 @@ namespace rnllama_jsi {
     }
 
     void cleanupJSIBindings() {
+        TaskManager::getInstance().beginShutdown();
+        {
+            std::lock_guard<std::mutex> lock(g_log_mutex);
+            g_log_handler.reset();
+            g_log_invoker.reset();
+            g_log_runtime.reset();
+        }
+        llama_log_set(llama_log_callback_default, nullptr);
+
         RequestManager::getInstance().clearAll();
         auto contexts = g_llamaContexts.snapshot();
         for (const auto& entry : contexts) {
@@ -2077,8 +2095,10 @@ namespace rnllama_jsi {
             }
         }
 
-        llama_log_set(llama_log_callback_default, nullptr);
-        TaskManager::getInstance().waitForAll();
+        if (contexts.empty()) {
+            g_context_limit.store(-1);
+            return;
+        }
         ThreadPool::getInstance().shutdown();
 
         g_llamaContexts.clear([](long ptr) {
@@ -2088,11 +2108,5 @@ namespace rnllama_jsi {
             }
         });
         g_context_limit.store(-1);
-        {
-            std::lock_guard<std::mutex> lock(g_log_mutex);
-            g_log_handler.reset();
-            g_log_invoker.reset();
-        }
-        g_log_runtime.reset();
     }
 }
