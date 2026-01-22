@@ -1,6 +1,4 @@
 {
-  "name": "llama.rn",
-  "version": "0.11.0-rc.2",
   "name": "cui-llama.rn",
   "version": "1.11.0",
   "description": "React Native binding of llama.cpp",
