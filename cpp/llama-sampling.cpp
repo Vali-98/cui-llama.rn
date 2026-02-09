@@ -1026,11 +1026,7 @@ struct llama_sampler_dist : public llama_sampler_backend {
 
     std::mt19937 rng;
 
-    // backend input
-    struct lm_ggml_tensor * inp_uniform;
-
-    lm_ggml_context_ptr        inp_ctx;
-    lm_ggml_backend_buffer_ptr inp_buf;
+    lm_ggml_tensor * inp_uniform;
 };
 
 static const char * llama_sampler_dist_name(const struct llama_sampler * smpl) {
@@ -1139,36 +1135,9 @@ static bool llama_sampler_dist_backend_init(
         lm_ggml_backend_buffer_type_t   buft) {
     auto * sctx = (llama_sampler_dist *) smpl->ctx;
 
-    // allocate inputs
-    {
-        lm_ggml_init_params params = {
-            /*.mem_size   =*/ lm_ggml_tensor_overhead(),
-            /*.mem_buffer =*/ nullptr,
-            /*.no_alloc   =*/ true,
-        };
-
-        sctx->inp_ctx.reset(lm_ggml_init(params));
-
-        // Create the uniform random scalar input tensor. This will be set by
-        // llama_sampler_dist_backend_set_input after this graph is built.
-        sctx->inp_uniform = lm_ggml_new_tensor_1d(sctx->inp_ctx.get(), LM_GGML_TYPE_F32, 1);
-        lm_ggml_set_name (sctx->inp_uniform, "uniform");
-        lm_ggml_set_input(sctx->inp_uniform);
-
-        // Allocate all tensors from our context to the backend
-        sctx->inp_buf.reset(lm_ggml_backend_alloc_ctx_tensors_from_buft(sctx->inp_ctx.get(), buft));
-
-        lm_ggml_backend_buffer_clear(sctx->inp_buf.get(), 0);
-    }
-
     const bool res = llama_sampler_backend_support(smpl, buft);
 
     sctx->init(res);
-
-    if (!res) {
-        sctx->inp_ctx.reset(nullptr);
-        sctx->inp_buf.reset(nullptr);
-    }
 
     return res;
 }
@@ -1179,7 +1148,12 @@ static void llama_sampler_dist_backend_apply(
         struct lm_ggml_cgraph        * gf,
         struct llama_sampler_data * data) {
     LM_GGML_UNUSED(gf);
+
     auto * sctx = (llama_sampler_dist *) smpl->ctx;
+
+    sctx->inp_uniform = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_F32, 1);
+    lm_ggml_set_name (sctx->inp_uniform, "uniform");
+    lm_ggml_set_input(sctx->inp_uniform);
 
     struct lm_ggml_tensor * probs = lm_ggml_soft_max(ctx, data->logits);
     lm_ggml_set_name(probs, "dist_probs");
@@ -1227,6 +1201,7 @@ static void llama_sampler_dist_backend_apply(
 
 static void llama_sampler_dist_backend_set_input(struct llama_sampler * smpl) {
     auto * sctx = (llama_sampler_dist *) smpl->ctx;
+
     LM_GGML_ASSERT(sctx->inp_uniform != nullptr);
 
     // We sample in double precision and cast to float to match rnd numbers of
@@ -1263,8 +1238,6 @@ struct llama_sampler * llama_sampler_init_dist(uint32_t seed) {
             /* .seed_cur    = */ seed_cur,
             /* .rng         = */ std::mt19937(seed_cur),
             /* .inp_uniform = */ nullptr,
-            /* .inp_ctx     = */ nullptr,
-            /* .inp_buf     = */ nullptr,
         }
     );
 }
@@ -3462,9 +3435,6 @@ struct llama_sampler_logit_bias : public llama_sampler_backend {
 
     struct lm_ggml_tensor * inp_logit_bias;
     struct lm_ggml_tensor * inp_logit_idxs;
-
-    lm_ggml_context_ptr        inp_ctx;
-    lm_ggml_backend_buffer_ptr inp_buf;
 };
 
 static const char * llama_sampler_logit_bias_name(const struct llama_sampler * smpl) {
@@ -3527,6 +3497,16 @@ static void llama_sampler_logit_bias_backend_apply(
         return;
     }
 
+    const size_t n = sctx->logit_bias.size();
+
+    sctx->inp_logit_bias = lm_ggml_new_tensor_2d(ctx, LM_GGML_TYPE_F32, 1, n);
+    lm_ggml_set_name(sctx->inp_logit_bias, "logit_bias");
+    lm_ggml_set_input(sctx->inp_logit_bias);
+
+    sctx->inp_logit_idxs = lm_ggml_new_tensor_1d(ctx, LM_GGML_TYPE_I32, n);
+    lm_ggml_set_name(sctx->inp_logit_idxs, "logit_idxs");
+    lm_ggml_set_input(sctx->inp_logit_idxs);
+
     lm_ggml_tensor * cur = lm_ggml_fill(ctx, data->logits, 0.0f);
 
     cur = lm_ggml_reshape_2d(ctx, cur, 1, lm_ggml_nelements(cur));
@@ -3563,6 +3543,8 @@ static void llama_sampler_logit_bias_backend_set_input(struct llama_sampler * sm
 static bool llama_sampler_logit_bias_backend_init(
         struct llama_sampler       * smpl,
         lm_ggml_backend_buffer_type_t   buft) {
+    LM_GGML_UNUSED(buft);
+
     auto * sctx = (llama_sampler_logit_bias *) smpl->ctx;
 
     sctx->init(true);
@@ -3570,29 +3552,6 @@ static bool llama_sampler_logit_bias_backend_init(
     if (sctx->logit_bias.empty()) {
         return true;
     }
-
-    lm_ggml_init_params params = {
-        /*.mem_size   =*/ 2*lm_ggml_tensor_overhead(),
-        /*.mem_buffer =*/ nullptr,
-        /*.no_alloc   =*/ true,
-    };
-
-    sctx->inp_ctx.reset(lm_ggml_init(params));
-
-    const size_t n = sctx->logit_bias.size();
-
-    sctx->inp_logit_bias = lm_ggml_new_tensor_2d(sctx->inp_ctx.get(), LM_GGML_TYPE_F32, 1, n);
-    lm_ggml_set_name(sctx->inp_logit_bias, "logit_bias");
-    lm_ggml_set_input(sctx->inp_logit_bias);
-
-    sctx->inp_logit_idxs = lm_ggml_new_tensor_1d(sctx->inp_ctx.get(), LM_GGML_TYPE_I32, n);
-    lm_ggml_set_name(sctx->inp_logit_idxs, "logit_idxs");
-    lm_ggml_set_input(sctx->inp_logit_idxs);
-
-    // Allocate all tensors from our context to the backend
-    sctx->inp_buf.reset(lm_ggml_backend_alloc_ctx_tensors_from_buft(sctx->inp_ctx.get(), buft));
-
-    lm_ggml_backend_buffer_clear(sctx->inp_buf.get(), 0);
 
     return true;
 }
@@ -3629,8 +3588,6 @@ struct llama_sampler * llama_sampler_init_logit_bias(
             /* .to_search      = */ {},
             /* .inp_logit_bias = */ nullptr,
             /* .inp_logit_idxs = */ nullptr,
-            /* .inp_ctx        = */ nullptr,
-            /* .inp_buf        = */ nullptr,
         }
     );
 }

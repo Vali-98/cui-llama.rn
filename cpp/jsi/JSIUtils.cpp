@@ -54,13 +54,13 @@ namespace rnllama_jsi {
 
                     auto resolve = makeJsiFunction(runtime, arguments[0], callInvoker);
                     auto reject = makeJsiFunction(runtime, arguments[1], callInvoker);
-                    bool shouldTrack = trackTask && !TaskManager::getInstance().isShuttingDown();
 
-                    if (shouldTrack) {
-                        TaskManager::getInstance().startTask(contextId);
-                    }
-
-                    ThreadPool::getInstance().enqueue([callInvoker, task, resolve, reject, contextId, shouldTrack, runtimePtr]() {
+                    ThreadPool::getInstance().enqueue([callInvoker, task, resolve, reject, contextId, trackTask, runtimePtr]() {
+                        // Track tasks when the worker starts to avoid waiting on queued work.
+                        bool shouldTrack = trackTask && !TaskManager::getInstance().isShuttingDown();
+                        if (shouldTrack) {
+                            TaskManager::getInstance().startTask(contextId);
+                        }
                         // Track whether we successfully scheduled the invokeAsync callback.
                         // The task should only be marked complete after the JS callback finishes,
                         // not when the thread pool work completes - this prevents race conditions
@@ -153,5 +153,28 @@ namespace rnllama_jsi {
                 }
             )
         );
+    }
+
+    void invokeAsyncTracked(
+        std::shared_ptr<react::CallInvoker> callInvoker,
+        int contextId,
+        std::function<void(bool shouldProceed)> callback
+    ) {
+        bool shouldTrack = !TaskManager::getInstance().isShuttingDown();
+        if (shouldTrack) {
+            TaskManager::getInstance().startTask(contextId);
+        }
+        try {
+            callInvoker->invokeAsync([contextId, shouldTrack, callback]() {
+                TaskFinishGuard guard(contextId, shouldTrack);
+                bool shouldProceed = !TaskManager::getInstance().isShuttingDown();
+                callback(shouldProceed);
+            });
+        } catch (...) {
+            // invokeAsync failed - finish task to prevent waitForContext hanging
+            if (shouldTrack) {
+                TaskManager::getInstance().finishTask(contextId);
+            }
+        }
     }
 }
