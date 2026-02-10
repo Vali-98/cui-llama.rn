@@ -491,8 +491,8 @@ struct common_params {
 
     bool single_turn       = false; // single turn chat conversation
 
-    void * progress_callback_user_data        = nullptr;
     llama_progress_callback progress_callback = nullptr;
+    void * progress_callback_user_data        = nullptr;
 
     lm_ggml_type cache_type_k = LM_GGML_TYPE_F16; // KV cache data type for the K
     lm_ggml_type cache_type_v = LM_GGML_TYPE_F16; // KV cache data type for the V
