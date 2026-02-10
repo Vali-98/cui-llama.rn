@@ -1565,5 +1565,4 @@ extern "C" {
 }
 #endif
 
-
 #endif // LLAMA_H

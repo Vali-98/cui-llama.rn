@@ -2197,10 +2197,6 @@ struct clip_init_result clip_init(const char * fname, struct clip_context_params
         delete ctx_vision;
         delete ctx_audio;
 
-
-        delete ctx_vision;
-        delete ctx_audio;
-
         return {nullptr, nullptr};
     }
 
