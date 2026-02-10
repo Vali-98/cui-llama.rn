@@ -358,10 +358,7 @@ struct lr_opt {
 struct lm_ggml_opt_optimizer_params common_opt_lr_pars(void * userdata);
 
 struct common_params {
-    void * progress_callback_user_data        = nullptr;
-    llama_progress_callback progress_callback = nullptr;
     bool vocab_only               = false;
-    
     int32_t n_predict             =    -1; // max. number of new tokens to predict, -1 == no limit
     int32_t n_ctx                 =     0; // context size, 0 == context the model was trained with
     int32_t n_batch               =  2048; // logical batch size for prompt processing (must be >=32 to use BLAS)
@@ -493,6 +490,9 @@ struct common_params {
     bool no_host           = false; // bypass host buffer allowing extra buffers to be used
 
     bool single_turn       = false; // single turn chat conversation
+
+    void * progress_callback_user_data        = nullptr;
+    llama_progress_callback progress_callback = nullptr;
 
     lm_ggml_type cache_type_k = LM_GGML_TYPE_F16; // KV cache data type for the K
     lm_ggml_type cache_type_v = LM_GGML_TYPE_F16; // KV cache data type for the V
