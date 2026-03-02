@@ -172,6 +172,7 @@ cp ./$LLAMA_DIR/ggml/src/ggml-cpu/binary-ops.cpp ./cpp/ggml-cpu/binary-ops.cpp
 cp ./$LLAMA_DIR/ggml/src/ggml-cpu/vec.h ./cpp/ggml-cpu/vec.h
 cp ./$LLAMA_DIR/ggml/src/ggml-cpu/vec.cpp ./cpp/ggml-cpu/vec.cpp
 cp ./$LLAMA_DIR/ggml/src/ggml-cpu/simd-mappings.h ./cpp/ggml-cpu/simd-mappings.h
+cp ./$LLAMA_DIR/ggml/src/ggml-cpu/simd-gemm.h ./cpp/ggml-cpu/simd-gemm.h
 cp ./$LLAMA_DIR/ggml/src/ggml-cpu/ops.h ./cpp/ggml-cpu/ops.h
 cp ./$LLAMA_DIR/ggml/src/ggml-cpu/ops.cpp ./cpp/ggml-cpu/ops.cpp
 
@@ -242,8 +243,8 @@ cp ./$LLAMA_DIR/src/llama-vocab.h ./cpp/llama-vocab.h
 cp ./$LLAMA_DIR/src/llama-vocab.cpp ./cpp/llama-vocab.cpp
 cp ./$LLAMA_DIR/src/llama-grammar.h ./cpp/llama-grammar.h
 cp ./$LLAMA_DIR/src/llama-grammar.cpp ./cpp/llama-grammar.cpp
-cp ./$LLAMA_DIR/src/llama-sampling.h ./cpp/llama-sampling.h
-cp ./$LLAMA_DIR/src/llama-sampling.cpp ./cpp/llama-sampling.cpp
+cp ./$LLAMA_DIR/src/llama-sampler.h ./cpp/llama-sampler.h
+cp ./$LLAMA_DIR/src/llama-sampler.cpp ./cpp/llama-sampler.cpp
 
 cp ./$LLAMA_DIR/src/unicode.h ./cpp/unicode.h
 cp ./$LLAMA_DIR/src/unicode.cpp ./cpp/unicode.cpp
