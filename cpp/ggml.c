@@ -1511,6 +1511,10 @@ bool lm_ggml_are_same_stride(const struct lm_ggml_tensor * t0, const struct lm_g
         (t0->nb[3] == t1->nb[3]);
 }
 
+bool lm_ggml_is_view(const struct lm_ggml_tensor * t) {
+    return lm_ggml_impl_is_view(t);
+}
+
 // check if t1 can be represented as a repetition of t0
 bool lm_ggml_can_repeat(const struct lm_ggml_tensor * t0, const struct lm_ggml_tensor * t1) {
     static_assert(LM_GGML_MAX_DIMS == 4, "LM_GGML_MAX_DIMS is not 4 - update this function");
@@ -5764,7 +5768,7 @@ static struct lm_ggml_tensor * lm_ggml_unary_impl(
         struct lm_ggml_tensor  * a,
         enum lm_ggml_unary_op    op,
         bool                  inplace) {
-    LM_GGML_ASSERT(lm_ggml_is_contiguous_1(a));
+    LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(a));
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
 
