@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Clipboard,
   StyleSheet,
+  Platform,
 } from 'react-native'
 import ModelDownloadCard from '../components/ModelDownloadCard'
 import ContextParamsModal from '../components/ContextParamsModal'
@@ -22,8 +23,7 @@ import type { ContextParams, CustomModel } from '../utils/storage'
 import { loadContextParams, loadCustomModels } from '../utils/storage'
 import { initLlama, LlamaContext } from '../../../src' // import 'llama.rn'
 
-
-// Filter models to only include LLM models (no mmproj or vocoder)
+// Filter models to only include models that Bench can initialize directly.
 const LLM_MODELS = Object.entries(MODELS).filter(([_key, model]) => {
   const modelWithExtras = model as typeof model & { vocoder?: any }
   return !modelWithExtras.vocoder
@@ -220,6 +220,20 @@ export default function BenchScreen({ navigation }: { navigation: any }) {
     setCustomModels(models)
   }
 
+  const logContextInfo = (llamaContext: LlamaContext) => {
+    addLog('')
+    addLog('📦 Context Info:')
+    if (Platform.OS === 'android') {
+      addLog(`androidLib=${llamaContext.androidLib || 'N/A'}`)
+    }
+    addLog(`gpu=${llamaContext.gpu}`)
+    addLog(`devices=${llamaContext.devices?.join(', ') || 'N/A'}`)
+    if (!llamaContext.gpu && llamaContext.reasonNoGPU) {
+      addLog(`reasonNoGPU=${llamaContext.reasonNoGPU}`)
+    }
+    addLog(`systemInfo=${llamaContext.systemInfo}`)
+  }
+
   const initializeModel = async (modelPath: string, modelKey?: string) => {
     try {
       setIsLoading(true)
@@ -257,6 +271,7 @@ export default function BenchScreen({ navigation }: { navigation: any }) {
       setIsModelReady(true)
       setInitProgress(100)
 
+      logContextInfo(llamaContext)
       addLog('Model initialized successfully!')
       addLog('Ready to run benchmarks.')
     } catch (error: any) {
@@ -348,24 +363,20 @@ export default function BenchScreen({ navigation }: { navigation: any }) {
           </Text>
 
           {/* Custom Models Section */}
-          {customModels.filter((model) => !model.mmprojFilename).length > 0 && (
+          {customModels.length > 0 && (
             <>
               <Text style={themedStyles.modelSectionTitle}>
                 Custom Models
               </Text>
-              {customModels
-                .filter((model) => !model.mmprojFilename) // Only show non-multimodal models
-                .map((model) => (
-                  <CustomModelCard
-                    key={model.id}
-                    model={model}
-                    onInitialize={(modelPath: string) =>
-                      initializeModel(modelPath)
-                    }
-                    onModelRemoved={handleCustomModelRemoved}
-                    initializeButtonText="Bench"
-                  />
-                ))}
+              {customModels.map((model) => (
+                <CustomModelCard
+                  key={model.id}
+                  model={model}
+                  onInitialize={(modelPath: string) => initializeModel(modelPath)}
+                  onModelRemoved={handleCustomModelRemoved}
+                  initializeButtonText="Bench"
+                />
+              ))}
             </>
           )}
 
