@@ -21,35 +21,16 @@
 #    include <unistd.h>
 #endif // defined(_WIN32)
 
+#if defined(__ANDROID__) && defined(RNLLAMA_ANDROID_ENABLE_LOGGING)
+#include <android/log.h>
+#endif
+
 int common_log_verbosity_thold = LOG_DEFAULT_LLAMA;
 
 void common_log_set_verbosity_thold(int verbosity) {
     common_log_verbosity_thold = verbosity;
 }
 
-// Auto-detect if colors should be enabled based on terminal and environment
-static bool common_log_should_use_colors_auto() {
-    // Check NO_COLOR environment variable (https://no-color.org/)
-    if (const char * no_color = std::getenv("NO_COLOR")) {
-        if (no_color[0] != '\0') {
-            return false;
-        }
-    }
-
-    // Check TERM environment variable
-    if (const char * term = std::getenv("TERM")) {
-        if (std::strcmp(term, "dumb") == 0) {
-            return false;
-        }
-    }
-
-    // Check if stdout and stderr are connected to a terminal
-    // We check both because log messages can go to either
-    bool stdout_is_tty = isatty(fileno(stdout));
-    bool stderr_is_tty = isatty(fileno(stderr));
-
-    return stdout_is_tty || stderr_is_tty;
-}
 
 static int64_t t_us() {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -93,7 +74,36 @@ struct common_log_entry {
     // signals the worker thread to stop
     bool is_end;
 
+    #if defined(__ANDROID__) && defined(RNLLAMA_ANDROID_ENABLE_LOGGING)
+    void android_print() const {
+        int android_log_priority;
+        switch (level) {
+            case LM_GGML_LOG_LEVEL_INFO:
+                android_log_priority = ANDROID_LOG_INFO;
+                break;
+            case LM_GGML_LOG_LEVEL_WARN:
+                android_log_priority = ANDROID_LOG_WARN;
+                break;
+            case LM_GGML_LOG_LEVEL_ERROR:
+                android_log_priority = ANDROID_LOG_ERROR;
+                break;
+            case LM_GGML_LOG_LEVEL_DEBUG:
+                android_log_priority = ANDROID_LOG_DEBUG;
+                break;
+            default:
+                android_log_priority = ANDROID_LOG_DEFAULT;
+                break;
+        }
+
+        const char * tag = "RNLLAMA_LOG_ANDROID";
+        __android_log_print(android_log_priority, tag, "%s", msg.data());
+    }
+    #endif
+
     void print(FILE * file = nullptr) const {
+        #if defined(__ANDROID__) && defined(RNLLAMA_ANDROID_ENABLE_LOGGING)
+        android_print();
+        #else
         FILE * fcur = file;
         if (!fcur) {
             // stderr displays DBG messages only when their verbosity level is not higher than the threshold
@@ -138,6 +148,7 @@ struct common_log_entry {
         }
 
         fflush(fcur);
+        #endif
     }
 };
 

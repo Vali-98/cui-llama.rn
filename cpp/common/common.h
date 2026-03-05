@@ -357,8 +357,6 @@ struct lr_opt {
 struct lm_ggml_opt_optimizer_params common_opt_lr_pars(void * userdata);
 
 struct common_params {
-    void * progress_callback_user_data        = nullptr;
-    llama_progress_callback progress_callback = nullptr;
     bool vocab_only               = false;
     
     int32_t n_predict             =    -1; // max. number of new tokens to predict, -1 == no limit
