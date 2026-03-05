@@ -1322,14 +1322,10 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
     if (!params.devices.empty()) {
         mparams.devices = params.devices.data();
     }
-
-    if (params.n_gpu_layers != -1) {
-        mparams.n_gpu_layers = params.n_gpu_layers;
-    }
-    
     mparams.progress_callback_user_data = params.progress_callback_user_data;
     mparams.progress_callback = params.progress_callback;
     mparams.vocab_only      = params.vocab_only;
+    mparams.n_gpu_layers = params.n_gpu_layers;
     mparams.main_gpu        = params.main_gpu;
     mparams.split_mode      = params.split_mode;
     mparams.tensor_split    = params.tensor_split;
