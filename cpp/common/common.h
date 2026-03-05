@@ -357,6 +357,8 @@ struct lr_opt {
 struct lm_ggml_opt_optimizer_params common_opt_lr_pars(void * userdata);
 
 struct common_params {
+    void * progress_callback_user_data        = nullptr;
+    llama_progress_callback progress_callback = nullptr;
     bool vocab_only               = false;
     
     int32_t n_predict             =    -1; // max. number of new tokens to predict, -1 == no limit
@@ -611,11 +613,6 @@ struct common_params {
 
     // common params
     std::string out_file; // output filename for all example programs
-    // optional callback for model loading progress and cancellation:
-    // called with a progress value between 0.0 and 1.0.
-    // return false from callback to abort model loading or true to continue
-    llama_progress_callback load_progress_callback = NULL;
-    void *                  load_progress_callback_user_data = NULL;
 };
 
 // call once at the start of a program if it uses libcommon
