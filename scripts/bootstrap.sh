@@ -7,8 +7,8 @@ LLAMA_DIR=third_party/llama.cpp
 CPP_DIR="$ROOT_DIR/cpp"
 SRC_DIR="$ROOT_DIR/src"
 
-# git submodule init "$LLAMA_DIR"
-# git submodule update --recursive "$LLAMA_DIR"
+git submodule init "$LLAMA_DIR"
+git submodule update --recursive "$LLAMA_DIR"
 
 # Hexagon SDK setup for Android builds
 echo ""
