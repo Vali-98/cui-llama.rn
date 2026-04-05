@@ -2224,7 +2224,7 @@ struct clip_model_loader {
             fin.close();
 
             LOG_DBG("%s: loaded %zu tensors from %s\n", __func__, tensors_to_load.size(), fname.c_str());
-            }
+            
             }
         }
     }
