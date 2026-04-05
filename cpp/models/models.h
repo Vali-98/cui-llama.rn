@@ -3,7 +3,7 @@
 #include "llama-model.h"
 #include "llama-graph.h"
 
-// note: almost all graphs require atleast sqrtf, so include cmath globally
+// note: almost all graphs require at least sqrtf, so include cmath globally
 #include <cmath>
 
 //
@@ -44,6 +44,26 @@ struct llm_build_delta_net_base : public llm_graph_context {
                 lm_ggml_tensor * b,
                 lm_ggml_tensor * s,
                 int           il);
+
+    // use the lm_ggml_gated_delta_net fused operator
+    std::pair<lm_ggml_tensor *, lm_ggml_tensor *> build_delta_net_fused(
+                lm_ggml_tensor * q,
+                lm_ggml_tensor * k,
+                lm_ggml_tensor * v,
+                lm_ggml_tensor * g,
+                lm_ggml_tensor * b,
+                lm_ggml_tensor * s,
+                        int   il);
+
+    // choose one of two implementations above based on the number of tokens
+    std::pair<lm_ggml_tensor *, lm_ggml_tensor *> build_delta_net(
+                lm_ggml_tensor * q,
+                lm_ggml_tensor * k,
+                lm_ggml_tensor * v,
+                lm_ggml_tensor * g,
+                lm_ggml_tensor * b,
+                lm_ggml_tensor * s,
+                        int   il);
 };
 
 struct llm_build_rwkv6_base : public llm_graph_context {
@@ -244,6 +264,17 @@ struct llm_build_gemma3n_iswa : public llm_graph_context {
     lm_ggml_tensor * altup_predict(lm_ggml_tensor * cur, int il);
     lm_ggml_tensor * laurel(lm_ggml_tensor * cur, int il);
     lm_ggml_tensor * altup_correct(lm_ggml_tensor * predictions, lm_ggml_tensor * activated, int il);
+};
+
+struct llm_build_gemma4_iswa : public llm_graph_context {
+    const llama_model & model;
+
+    const int64_t n_embd_per_layer;
+
+    llm_build_gemma4_iswa(const llama_model & model, const llm_graph_params & params);
+    lm_ggml_tensor * view_2d_slice(lm_ggml_tensor * x, int idx);
+    lm_ggml_tensor * get_per_layer_inputs();
+    lm_ggml_tensor * project_per_layer_inputs(lm_ggml_tensor * inputs_embeds, lm_ggml_tensor * inp_per_layer);
 };
 
 struct llm_build_gemma_embedding : public llm_graph_context {

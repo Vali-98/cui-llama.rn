@@ -224,6 +224,24 @@ namespace rnllama_jsi {
         return arr;
     }
 
+    static bool isThinkingForcedOpen(const common_chat_params& chatParams) {
+        if (!chatParams.supports_thinking || chatParams.thinking_start_tag.empty()) {
+            return false;
+        }
+
+        const size_t lastStart = chatParams.generation_prompt.rfind(chatParams.thinking_start_tag);
+        if (lastStart == std::string::npos) {
+            return false;
+        }
+
+        if (chatParams.thinking_end_tag.empty()) {
+            return true;
+        }
+
+        const size_t lastEnd = chatParams.generation_prompt.rfind(chatParams.thinking_end_tag);
+        return lastEnd == std::string::npos || lastEnd < lastStart;
+    }
+
     static jsi::Object createModelDetails(jsi::Runtime& runtime, rnllama::llama_rn_context* ctx) {
         jsi::Object model(runtime);
 
@@ -744,6 +762,7 @@ namespace rnllama_jsi {
                  std::string nowStr = "";
                  std::map<std::string, std::string> chatTemplateKwargs;
                  bool useJinja = false;
+                 bool forcePureContent = false;
 
                  if (count > 3 && arguments[3].isObject()) {
                      jsi::Object params = arguments[3].asObject(runtime);
@@ -758,6 +777,7 @@ namespace rnllama_jsi {
                          reasoningFormat = getPropertyAsString(runtime, params, "reasoning_format", "none");
                          addGenerationPrompt = getPropertyAsBool(runtime, params, "add_generation_prompt", true);
                          nowStr = getPropertyAsString(runtime, params, "now");
+                         forcePureContent = getPropertyAsBool(runtime, params, "force_pure_content", false);
 
                          std::string kwargsStr = getPropertyAsString(runtime, params, "chat_template_kwargs");
                           if (!kwargsStr.empty()) {
@@ -773,12 +793,12 @@ namespace rnllama_jsi {
                      }
                  }
 
-                 return createPromiseTask(runtime, callInvoker, [contextId, messages, chatTemplate, jsonSchema, tools, parallelToolCalls, toolChoice, enableThinking, reasoningFormat, addGenerationPrompt, nowStr, chatTemplateKwargs, useJinja]() -> PromiseResultGenerator {
+                 return createPromiseTask(runtime, callInvoker, [contextId, messages, chatTemplate, jsonSchema, tools, parallelToolCalls, toolChoice, enableThinking, reasoningFormat, addGenerationPrompt, nowStr, chatTemplateKwargs, useJinja, forcePureContent]() -> PromiseResultGenerator {
                       auto ctx = getContextOrThrow(contextId);
                       if (useJinja) {
                           auto chatParams = ctx->getFormattedChatWithJinja(
                                messages, chatTemplate, jsonSchema, tools, parallelToolCalls,
-                               toolChoice, enableThinking, reasoningFormat, addGenerationPrompt, nowStr, chatTemplateKwargs
+                               toolChoice, enableThinking, reasoningFormat, addGenerationPrompt, nowStr, chatTemplateKwargs, forcePureContent
                           );
 
                           return [chatParams](jsi::Runtime& rt) {
@@ -787,7 +807,14 @@ namespace rnllama_jsi {
                               result.setProperty(rt, "chat_format", (int)chatParams.format);
                               result.setProperty(rt, "grammar", jsi::String::createFromUtf8(rt, chatParams.grammar));
                               result.setProperty(rt, "grammar_lazy", chatParams.grammar_lazy);
-                              result.setProperty(rt, "thinking_forced_open", chatParams.thinking_forced_open);
+                              result.setProperty(rt, "generation_prompt", jsi::String::createFromUtf8(rt, chatParams.generation_prompt));
+                              result.setProperty(rt, "thinking_forced_open", isThinkingForcedOpen(chatParams));
+                              if (!chatParams.thinking_start_tag.empty()) {
+                                  result.setProperty(rt, "thinking_start_tag", jsi::String::createFromUtf8(rt, chatParams.thinking_start_tag));
+                              }
+                              if (!chatParams.thinking_end_tag.empty()) {
+                                  result.setProperty(rt, "thinking_end_tag", jsi::String::createFromUtf8(rt, chatParams.thinking_end_tag));
+                              }
 
                               // Preserve the same shape as legacy native bridge
                               result.setProperty(rt, "type", jsi::String::createFromUtf8(rt, "jinja"));
@@ -956,6 +983,7 @@ namespace rnllama_jsi {
                 if (ctx->completion && ctx->completion->is_predicting) {
                      throw std::runtime_error("Context is busy");
                 }
+                ctx->completion->rewind();
 
                 parseCompletionParams(runtime, params, ctx);
 
@@ -970,7 +998,7 @@ namespace rnllama_jsi {
                 int chat_format = getPropertyAsInt(runtime, params, "chat_format", 0);
                 std::string reasoningFormatStr = getPropertyAsString(runtime, params, "reasoning_format", "none");
                 common_reasoning_format reasoning_format = common_reasoning_format_from_name(reasoningFormatStr);
-                bool thinking_forced_open = getPropertyAsBool(runtime, params, "thinking_forced_open", false);
+                std::string generation_prompt = getPropertyAsString(runtime, params, "generation_prompt");
                 std::string chat_parser = getPropertyAsString(runtime, params, "chat_parser");
                 std::string prefill_text = getPropertyAsString(runtime, params, "prefill_text");
                 std::vector<llama_token> guide_tokens;
@@ -988,7 +1016,7 @@ namespace rnllama_jsi {
                     }
                 }
 
-                return createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, onToken, emitPartial, mediaPaths, chat_format, reasoning_format, thinking_forced_open, chat_parser, prefill_text, guide_tokens, callInvoker]() -> PromiseResultGenerator {
+                return createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, onToken, emitPartial, mediaPaths, chat_format, reasoning_format, generation_prompt, chat_parser, prefill_text, guide_tokens, callInvoker]() -> PromiseResultGenerator {
                     auto ctx = getContextOrThrow(contextId);
 
                     if (ctx->completion == nullptr) {
@@ -1000,13 +1028,12 @@ namespace rnllama_jsi {
                         ctx->tts_wrapper->setGuideTokens(guide_tokens);
                     }
 
-                    ctx->completion->rewind();
                     if (!ctx->completion->initSampling()) {
                         throw std::runtime_error("Failed to initialize sampling");
                     }
 
                     ctx->completion->prefill_text = prefill_text;
-                    ctx->completion->beginCompletion(chat_format, reasoning_format, thinking_forced_open, chat_parser);
+                    ctx->completion->beginCompletion(chat_format, reasoning_format, generation_prompt, chat_parser);
 
                     try {
                         if (!mediaPaths.empty() && !ctx->isMultimodalEnabled()) {
@@ -1213,7 +1240,7 @@ namespace rnllama_jsi {
                 int chat_format = getPropertyAsInt(runtime, params, "chat_format", 0);
                 std::string reasoningFormatStr = getPropertyAsString(runtime, params, "reasoning_format", "none");
                 common_reasoning_format reasoning_format = common_reasoning_format_from_name(reasoningFormatStr);
-                bool thinking_forced_open = getPropertyAsBool(runtime, params, "thinking_forced_open", false);
+                std::string generation_prompt = getPropertyAsString(runtime, params, "generation_prompt");
                 std::string chat_parser = getPropertyAsString(runtime, params, "chat_parser");
                 std::string prefill_text = getPropertyAsString(runtime, params, "prefill_text");
                 std::string load_state_path = stripFileScheme(getPropertyAsString(runtime, params, "load_state_path"));
@@ -1222,7 +1249,7 @@ namespace rnllama_jsi {
                 int load_state_size = getPropertyAsInt(runtime, params, "load_state_size", -1);
                 int save_state_size = getPropertyAsInt(runtime, params, "save_state_size", -1);
 
-                return createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, cparams, mediaPaths, chat_format, reasoning_format, thinking_forced_open, chat_parser, prefill_text, load_state_path, save_state_path, save_prompt_state_path, load_state_size, save_state_size, onToken, onComplete, callInvoker]() -> PromiseResultGenerator {
+                return createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, cparams, mediaPaths, chat_format, reasoning_format, generation_prompt, chat_parser, prefill_text, load_state_path, save_state_path, save_prompt_state_path, load_state_size, save_state_size, onToken, onComplete, callInvoker]() -> PromiseResultGenerator {
                     auto ctx = getContextOrThrow(contextId);
                     if (!ctx->parallel_mode_enabled || !ctx->slot_manager) {
                         throw std::runtime_error("Parallel mode not enabled");
@@ -1365,7 +1392,7 @@ namespace rnllama_jsi {
                     };
 
                     int requestId = ctx->slot_manager->queue_request(
-                        cparams, tokens, mediaPaths, cparams.prompt, chat_format, reasoning_format, thinking_forced_open, chat_parser, prefill_text, load_state_path, save_state_path, save_prompt_state_path, load_state_size, save_state_size,
+                        cparams, tokens, mediaPaths, cparams.prompt, chat_format, reasoning_format, generation_prompt, chat_parser, prefill_text, load_state_path, save_state_path, save_prompt_state_path, load_state_size, save_state_size,
                         tokenCallback, completeCallback
                     );
 
