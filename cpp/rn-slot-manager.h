@@ -191,6 +191,7 @@ struct llama_rn_slot_manager {
 
     // Status methods
     llama_rn_parallel_status get_status();
+    bool has_pending_work();
     void notify_status_change();
     int32_t add_status_subscriber(std::function<void(const llama_rn_parallel_status&)> callback);
     void remove_status_subscriber(int32_t subscriber_id);

@@ -40,6 +40,24 @@ React Native binding of [llama.cpp](https://github.com/ggerganov/llama.cpp) - LL
 npm install llama.rn
 ```
 
+`llama.rn` downloads the pre-built `ios/rnllama.xcframework` and `android/src/main/jniLibs` from the matching GitHub release during `postinstall`. Existing downloads are reused, and each archive is verified with SHA-256 before extraction.
+
+#### Bun
+
+Bun does not run dependency lifecycle scripts unless the package is trusted. If you install `llama.rn` with Bun and want the native downloads to run automatically, add it to `trustedDependencies` and re-run `bun install`:
+
+```json
+{
+  "trustedDependencies": ["llama.rn"]
+}
+```
+
+If you prefer not to trust dependency lifecycle scripts, run the downloader manually before `npx pod-install` or your Android build:
+
+```sh
+node ./node_modules/llama.rn/install/download-native-artifacts.js
+```
+
 #### iOS
 
 Please re-run `npx pod-install` again.
@@ -184,6 +202,53 @@ The binding's deisgn inspired by [server.cpp](https://github.com/ggerganov/llama
 Please visit the [Documentation](docs/API) for more details.
 
 You can also visit the [example](example) to see how to use it.
+
+## MTP Speculative Decoding
+
+MTP speculative decoding can be enabled for GGUF models that contain MTP/NextN layers:
+
+```js
+const context = await initLlama({
+  model: modelPath,
+  n_ctx: 4096,
+  n_batch: 1024,
+  n_ubatch: 512,
+  n_gpu_layers: 99,
+  flash_attn_type: 'auto',
+  cache_type_k: 'q8_0',
+  cache_type_v: 'q8_0',
+  speculative: {
+    type: 'draft-mtp',
+    n_max: 3,
+  },
+})
+
+const result = await context.completion({
+  messages: [
+    {
+      role: 'user',
+      content:
+        'Write a concise TypeScript function that groups an array of objects by a key.',
+    },
+  ],
+  chat_template_kwargs: {
+    preserve_thinking: true,
+  },
+  n_predict: 128,
+  temperature: 0.6,
+  top_k: 20,
+  top_p: 0.95,
+  speculative: {
+    type: 'draft-mtp',
+    n_max: 3,
+  },
+})
+
+console.log(result.text)
+console.log(result.draft_tokens, result.draft_tokens_accepted)
+```
+
+Use `speculative: false` on a completion call to disable MTP for that request. For recurrent or hybrid models, enable MTP at `initLlama` time with a positive `spec_draft_n_max` or `speculative.draft.n_max` so llama.cpp can allocate rollback state. Current MTP support is text-only, including queued parallel completions.
 
 ## Multimodal (Vision & Audio)
 
@@ -673,6 +738,7 @@ See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the 
 - [ChatterUI](https://github.com/Vali-98/ChatterUI): Simple frontend for LLMs built in react-native.
 - [PocketPal AI](https://github.com/a-ghorbani/pocketpal-ai): An app that brings language models directly to your phone.
 - [InferrLM](https://github.com/sbhjt-gr/InferrLM): On-device AI for iOS & Android.
+- [Airgap](https://github.com/xmpuspus/airgap): Open-source React Native framework for shipping on-device, offline-first customer support chatbots. Runs Gemma 4 E2B locally via `llama.rn`. Seven industry templates ship in the repo (telco, retail, healthcare, banking, education, insurance, airlines).
 
 ## Node.js binding
 

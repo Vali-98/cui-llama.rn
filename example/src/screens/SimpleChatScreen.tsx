@@ -7,6 +7,7 @@ import ContextParamsModal from '../components/ContextParamsModal'
 import CompletionParamsModal from '../components/CompletionParamsModal'
 import { Bubble } from '../components/Bubble'
 import { Menu } from '../components/Menu'
+import LoraModal from '../components/LoraModal'
 import { MessagesModal } from '../components/MessagesModal'
 import SessionModal from '../components/SessionModal'
 import { StopButton } from '../components/StopButton'
@@ -60,6 +61,7 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
     useState(false)
   const [showMessagesModal, setShowMessagesModal] = useState(false)
   const [showSessionModal, setShowSessionModal] = useState(false)
+  const [showLoraModal, setShowLoraModal] = useState(false)
   const [showCustomModelModal, setShowCustomModelModal] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const insets = useSafeAreaInsets()
@@ -180,6 +182,11 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
             title: 'Sessions',
             onPress: () => setShowSessionModal(true),
           },
+          {
+            id: 'lora',
+            title: 'LoRA Adapters',
+            onPress: () => setShowLoraModal(true),
+          },
         ]}
       />
     ),
@@ -210,6 +217,7 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
       setInitProgress(0)
 
       const params = contextParams || (await loadContextParams())
+      console.log(params)
       const llamaContext = await initLlama(
         {
           model: modelPath,
@@ -396,6 +404,12 @@ export default function SimpleChatScreen({ navigation }: { navigation: any }) {
       <SessionModal
         visible={showSessionModal}
         onClose={() => setShowSessionModal(false)}
+        context={context}
+      />
+
+      <LoraModal
+        visible={showLoraModal}
+        onClose={() => setShowLoraModal(false)}
         context={context}
       />
     </View>

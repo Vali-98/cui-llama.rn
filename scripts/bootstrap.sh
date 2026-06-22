@@ -113,7 +113,7 @@ cp ./$LLAMA_DIR/ggml/include/gguf.h ./cpp/gguf.h
 
 cp -r ./$LLAMA_DIR/ggml/src/ggml-metal ./cpp/
 rm ./cpp/ggml-metal/CMakeLists.txt
-# Keep ggml-metal.metal for runtime compilation
+# Keep ggml-metal.metal as build-time input — it is embedded into the framework via ggml-metal-embed.s
 # rm ./cpp/ggml-metal/ggml-metal.metal
 
 # Embed headers into ggml-metal.metal for runtime compilation
@@ -147,6 +147,7 @@ echo "Headers embedded successfully"
 cp -r ./$LLAMA_DIR/ggml/src/ggml-blas ./cpp/
 rm ./cpp/ggml-blas/CMakeLists.txt
 
+rm -rf ./cpp/ggml-opencl
 cp -r ./$LLAMA_DIR/ggml/src/ggml-opencl ./cpp/
 rm ./cpp/ggml-opencl/CMakeLists.txt
 
@@ -187,6 +188,7 @@ cp ./$LLAMA_DIR/ggml/src/ggml-alloc.c ./cpp/ggml-alloc.c
 cp ./$LLAMA_DIR/ggml/src/ggml-backend.cpp ./cpp/ggml-backend.cpp
 cp ./$LLAMA_DIR/ggml/src/ggml-backend-impl.h ./cpp/ggml-backend-impl.h
 cp ./$LLAMA_DIR/ggml/src/ggml-backend-reg.cpp ./cpp/ggml-backend-reg.cpp
+cp ./$LLAMA_DIR/ggml/src/ggml-backend-meta.cpp ./cpp/ggml-backend-meta.cpp
 cp ./$LLAMA_DIR/ggml/src/ggml-backend-dl.h ./cpp/ggml-backend-dl.h
 cp ./$LLAMA_DIR/ggml/src/ggml-backend-dl.cpp ./cpp/ggml-backend-dl.cpp
 cp ./$LLAMA_DIR/ggml/src/ggml-common.h ./cpp/ggml-common.h
@@ -266,6 +268,14 @@ cp ./$LLAMA_DIR/common/common.h ./cpp/common/common.h
 cp ./$LLAMA_DIR/common/common.cpp ./cpp/common/common.cpp
 cp ./$LLAMA_DIR/common/sampling.h ./cpp/common/sampling.h
 cp ./$LLAMA_DIR/common/sampling.cpp ./cpp/common/sampling.cpp
+cp ./$LLAMA_DIR/common/speculative.h ./cpp/common/speculative.h
+cp ./$LLAMA_DIR/common/speculative.cpp ./cpp/common/speculative.cpp
+cp ./$LLAMA_DIR/common/ngram-cache.h ./cpp/common/ngram-cache.h
+cp ./$LLAMA_DIR/common/ngram-cache.cpp ./cpp/common/ngram-cache.cpp
+cp ./$LLAMA_DIR/common/ngram-map.h ./cpp/common/ngram-map.h
+cp ./$LLAMA_DIR/common/ngram-map.cpp ./cpp/common/ngram-map.cpp
+cp ./$LLAMA_DIR/common/ngram-mod.h ./cpp/common/ngram-mod.h
+cp ./$LLAMA_DIR/common/ngram-mod.cpp ./cpp/common/ngram-mod.cpp
 cp ./$LLAMA_DIR/common/json-schema-to-grammar.h ./cpp/common/json-schema-to-grammar.h
 cp ./$LLAMA_DIR/common/json-schema-to-grammar.cpp ./cpp/common/json-schema-to-grammar.cpp
 cp ./$LLAMA_DIR/common/json-partial.h ./cpp/common/json-partial.h
@@ -287,6 +297,9 @@ cp ./$LLAMA_DIR/common/unicode.h ./cpp/common/unicode.h
 cp ./$LLAMA_DIR/common/unicode.cpp ./cpp/common/unicode.cpp
 cp ./$LLAMA_DIR/common/reasoning-budget.h ./cpp/common/reasoning-budget.h
 cp ./$LLAMA_DIR/common/reasoning-budget.cpp ./cpp/common/reasoning-budget.cpp
+cp ./$LLAMA_DIR/common/fit.h ./cpp/common/fit.h
+cp ./$LLAMA_DIR/common/fit.cpp ./cpp/common/fit.cpp
+cp ./$LLAMA_DIR/common/build-info.h ./cpp/common/build-info.h
 
 # Copy multimodal files from tools/mtmd
 rm -rf ./cpp/tools/mtmd
@@ -316,9 +329,16 @@ mv ./cpp/common/jinja/string.h ./cpp/common/jinja/jinja-string.h
 if [ "$OS" = "Darwin" ]; then
   sed -i '' 's|#include "string.h"|#include "jinja-string.h"|g' ./cpp/common/jinja/value.h
   sed -i '' 's|#include "jinja/string.h"|#include "jinja/jinja-string.h"|g' ./cpp/common/jinja/string.cpp
+  # llama-ext.h lives at cpp/llama-ext.h, not cpp/src/llama-ext.h
+  sed -i '' 's|#include "../src/llama-ext.h"|#include "../llama-ext.h"|g' ./cpp/common/fit.h
+  sed -i '' 's|#include "../src/llama-ext.h"|#include "../llama-ext.h"|g' ./cpp/common/fit.cpp
+  sed -i '' 's|#include "../src/llama-ext.h"|#include "../llama-ext.h"|g' ./cpp/common/speculative.cpp
 else
   sed -i 's|#include "string.h"|#include "jinja-string.h"|g' ./cpp/common/jinja/value.h
   sed -i 's|#include "jinja/string.h"|#include "jinja/jinja-string.h"|g' ./cpp/common/jinja/string.cpp
+  sed -i 's|#include "../src/llama-ext.h"|#include "../llama-ext.h"|g' ./cpp/common/fit.h
+  sed -i 's|#include "../src/llama-ext.h"|#include "../llama-ext.h"|g' ./cpp/common/fit.cpp
+  sed -i 's|#include "../src/llama-ext.h"|#include "../llama-ext.h"|g' ./cpp/common/speculative.cpp
 fi
 
 rm -rf ./cpp/nlohmann
@@ -383,6 +403,11 @@ for file in "${files_add_lm_prefix[@]}"; do
     continue
   fi
 
+  # ggml-ext.h is a local compatibility shim, not a copied upstream header.
+  if [[ $file == "./cpp/ggml-ext.h" ]]; then
+    continue
+  fi
+
   # Add prefix to avoid redefinition with other libraries using ggml like whisper.rn
   if [ "$OS" = "Darwin" ]; then
     sed -i '' 's/GGML_/LM_GGML_/g' $file
@@ -432,6 +457,33 @@ for file in "${files_iq_add_lm_prefix[@]}"; do
   fi
 done
 
+# Embed ggml-metal.metal into an assembly file so the framework binary carries
+# the merged shader source as a __DATA symbol range. ggml-metal-device.m's
+# LM_GGML_METAL_EMBED_LIBRARY branch then compiles directly from those bytes,
+# avoiding the runtime NSBundle resource load + .metal file path resolution
+# (and the associated MTLCompilerService XPC interruptions on some iOS devices,
+# see llama.rn#348).
+echo "Generating ggml-metal-embed.s..."
+EMBED_ASM="./cpp/ggml-metal/ggml-metal-embed.s"
+METAL_FILE="./cpp/ggml-metal/ggml-metal.metal"
+{
+  # Mach-O section name limit is 16 chars; drop the LM_ prefix here (only the
+  # exported symbols carry it). Matches upstream llama.cpp's __ggml_metallib.
+  echo '.section __DATA,__ggml_metallib'
+  echo '.globl _lm_ggml_metallib_start'
+  echo '_lm_ggml_metallib_start:'
+  # 16 bytes per line, .byte 0xNN,0xNN,...,0xNN
+  # (no -w16: macOS BSD od rejects it; both GNU od and BSD od default to 16 bytes/line)
+  od -An -vtx1 "$METAL_FILE" | awk 'NF>0 {
+    printf ".byte 0x%s", $1
+    for (i=2; i<=NF; i++) printf ",0x%s", $i
+    printf "\n"
+  }'
+  echo '.globl _lm_ggml_metallib_end'
+  echo '_lm_ggml_metallib_end:'
+} > "$EMBED_ASM"
+echo "ggml-metal-embed.s generated ($(wc -l < "$EMBED_ASM") lines)"
+
 echo "Replacement completed successfully!"
 
 cd example && npm install && cd ..
@@ -447,6 +499,12 @@ rm -rf ./cpp/**/*.orig
 rm -rf ./cpp/**/*/*.orig
 
 if [ "$OS" = "Darwin" ]; then
+  # Refresh Pods after source list changes so the example target picks up
+  # renamed/added/removed native files from the updated llama.cpp snapshot.
+  cd example
+  npm run pods
+  cd ..
+
   # Generate .xcode.env.local in iOS example
   cd example/ios
   echo export NODE_BINARY=$(command -v node) > .xcode.env.local
@@ -466,3 +524,10 @@ echo "export const BUILD_NUMBER = '$BUILD_NUMBER'" > "$SRC_DIR/version.ts"
 echo "export const BUILD_COMMIT = '$BUILD_COMMIT'" >> "$SRC_DIR/version.ts"
 
 cd "$ROOT_DIR"
+
+# Generate build-info.cpp from upstream template (used by common.cpp's debug log)
+sed -e "s|@LLAMA_BUILD_NUMBER@|$BUILD_NUMBER|g" \
+    -e "s|@LLAMA_BUILD_COMMIT@|$BUILD_COMMIT|g" \
+    -e "s|@BUILD_COMPILER@|unknown|g" \
+    -e "s|@BUILD_TARGET@|unknown|g" \
+    "$LLAMA_DIR/common/build-info.cpp.in" > "$CPP_DIR/common/build-info.cpp"

@@ -21,6 +21,9 @@ import type {
   NativeImageProcessingResult,
   NativeLlamaChatMessage,
   NativeBackendDeviceInfo,
+  NativeSpeculativeConfig,
+  NativeSpeculativeParams,
+  NativeSpeculativeType,
   ParallelStatus,
   ParallelRequestStatus,
 } from './types'
@@ -64,6 +67,9 @@ export type {
   JinjaFormattedChatResult,
   NativeImageProcessingResult,
   NativeBackendDeviceInfo,
+  NativeSpeculativeConfig,
+  NativeSpeculativeParams,
+  NativeSpeculativeType,
   ParallelStatus,
   ParallelRequestStatus,
 }
@@ -244,6 +250,8 @@ export type CompletionResponseFormat = {
   schema?: object // for json_object type
 }
 
+export type ChatTemplateKwargs = Record<string, string | number | boolean>
+
 export type CompletionBaseParams = {
   prompt?: string
   messages?: RNLlamaOAICompatibleMessage[]
@@ -260,7 +268,7 @@ export type CompletionBaseParams = {
    * Timestamp in seconds since epoch to apply to chat template's strftime_now
    */
   now?: string | number
-  chat_template_kwargs?: Record<string, string>
+  chat_template_kwargs?: ChatTemplateKwargs
   /**
    * When enabled, forces the chat parser to treat the entire model output as
    * plain content, skipping separate parsing of reasoning tokens and tool calls.
@@ -274,6 +282,7 @@ export type CompletionBaseParams = {
    */
   prefill_text?: string
 }
+
 export type CompletionParams = Omit<
   NativeCompletionParams,
   'emit_partial_completion' | 'prompt'
@@ -382,6 +391,7 @@ export class LlamaContext {
             tools: params.tools,
             parallel_tool_calls: params.parallel_tool_calls,
             tool_choice: params.tool_choice,
+            response_format: params.response_format,
             enable_thinking: params.enable_thinking,
             reasoning_format: params.reasoning_format,
             add_generation_prompt: params.add_generation_prompt,
@@ -666,7 +676,7 @@ export class LlamaContext {
       reasoning_format?: 'none' | 'auto' | 'deepseek'
       add_generation_prompt?: boolean
       now?: string | number
-      chat_template_kwargs?: Record<string, string>
+      chat_template_kwargs?: ChatTemplateKwargs
       force_pure_content?: boolean
     },
   ): Promise<FormattedChatResult | JinjaFormattedChatResult> {
@@ -791,6 +801,7 @@ export class LlamaContext {
           tools: params.tools,
           parallel_tool_calls: params.parallel_tool_calls,
           tool_choice: params.tool_choice,
+          response_format: params.response_format,
           enable_thinking: params.enable_thinking,
           reasoning_format: params.reasoning_format,
           add_generation_prompt: params.add_generation_prompt,
@@ -936,12 +947,7 @@ export class LlamaContext {
     loraList: Array<{ path: string; scaled?: number }>,
   ): Promise<void> {
     const { llamaApplyLoraAdapters } = getJsi()
-    let loraAdapters: Array<{ path: string; scaled?: number }> = []
-    if (loraList)
-      loraAdapters = loraList.map((l) => ({
-        path: l.path.replace(/file:\/\//, ''),
-        scaled: l.scaled,
-      }))
+    const loraAdapters = normalizeLoraAdapters({ loraList })
     return llamaApplyLoraAdapters(this.id, loraAdapters)
   }
 
@@ -1127,6 +1133,48 @@ const poolTypeMap = {
   rank: 4,
 }
 
+type LoraAdapterInput = {
+  path: string
+  scaled?: number
+}
+
+const stripFilePrefix = (path: string) => path.replace(/^file:\/\//, '')
+
+function normalizeLoraAdapters({
+  lora,
+  loraScaled,
+  loraList,
+}: {
+  lora?: string
+  loraScaled?: number
+  loraList?: Array<LoraAdapterInput>
+}): Array<LoraAdapterInput> {
+  const adapters = new Map<string, LoraAdapterInput>()
+
+  if (lora) {
+    const normalizedPath = stripFilePrefix(lora)
+    if (normalizedPath) {
+      adapters.set(normalizedPath, {
+        path: normalizedPath,
+        scaled: loraScaled,
+      })
+    }
+  }
+
+  if (loraList) {
+    loraList.forEach((adapter) => {
+      const normalizedPath = stripFilePrefix(adapter.path)
+      if (!normalizedPath) return
+      adapters.set(normalizedPath, {
+        path: normalizedPath,
+        scaled: adapter.scaled,
+      })
+    })
+  }
+
+  return Array.from(adapters.values())
+}
+
 export async function getBackendDevicesInfo(): Promise<
   Array<NativeBackendDeviceInfo>
 > {
@@ -1150,6 +1198,7 @@ export async function initLlama(
     is_model_asset: isModelAsset,
     pooling_type: poolingType,
     lora,
+    lora_scaled: loraScaled,
     lora_list: loraList,
     devices,
     ...rest
@@ -1161,15 +1210,11 @@ export async function initLlama(
   let path = model
   if (path.startsWith('file://')) path = path.slice(7)
 
-  let loraPath = lora
-  if (loraPath?.startsWith('file://')) loraPath = loraPath.slice(7)
-
-  let loraAdapters: Array<{ path: string; scaled?: number }> = []
-  if (loraList)
-    loraAdapters = loraList.map((l) => ({
-      path: l.path.replace(/file:\/\//, ''),
-      scaled: l.scaled,
-    }))
+  const loraAdapters = normalizeLoraAdapters({
+    lora,
+    loraScaled,
+    loraList,
+  })
 
   const contextId = contextIdCounter + contextIdRandom()
   contextIdCounter += 1
@@ -1237,8 +1282,7 @@ export async function initLlama(
       is_model_asset: !!isModelAsset,
       use_progress_callback: !!progressCallback,
       pooling_type: poolType,
-      lora: loraPath,
-      lora_list: loraAdapters,
+      ...(loraAdapters.length > 0 ? { lora_list: loraAdapters } : {}),
       devices: filteredDevs.length > 0 ? filteredDevs : undefined,
       ...rest,
     },
