@@ -30,6 +30,17 @@
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
 
+#if defined(__ANDROID__) && defined(RNLLAMA_ANDROID_ENABLE_LOGGING)
+#include <android/log.h>
+#define LLAMA_ANDROID_TAG "RNLLAMA_LOG_ANDROID"
+#undef LLAMA_LOG_INFO
+#undef LLAMA_LOG_WARN
+#undef LLAMA_LOG_ERROR
+#define LLAMA_LOG_INFO(...)  __android_log_print(ANDROID_LOG_INFO , LLAMA_ANDROID_TAG, __VA_ARGS__)
+#define LLAMA_LOG_WARN(...)  __android_log_print(ANDROID_LOG_WARN , LLAMA_ANDROID_TAG, __VA_ARGS__)
+#define LLAMA_LOG_ERROR(...) __android_log_print(ANDROID_LOG_ERROR, LLAMA_ANDROID_TAG, __VA_ARGS__)
+#endif // __ANDROID__
+
 //
 // interface implementation
 //
@@ -225,7 +236,9 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
                     }
 
                     case LM_GGML_BACKEND_DEVICE_TYPE_IGPU:
-                        igpus.push_back({false, dev});
+                        if (igpus.empty()) {
+                            igpus.push_back({false, dev});
+                        }
                         break;
                     case LM_GGML_BACKEND_DEVICE_TYPE_META:
                         LM_GGML_ABORT("fatal error");
@@ -239,14 +252,15 @@ static bool llama_prepare_model_devices(const llama_model_params & params, llama
         // add GPUs
         model->devices.insert(model->devices.end(), gpus.begin(), gpus.end());
 
-        // add integrated GPUs only if no other devices were found
-        if (model->devices.empty()) {
+        // add integrated GPUs only if no discrete GPUs were found
+        // (RPC servers do not count, otherwise the local iGPU would be dropped on iGPU+RPC setups)
+        if (gpus.empty()) {
             model->devices.insert(model->devices.end(), igpus.begin(), igpus.end());
         }
     }
 
     // if using single GPU mode, remove all except the main GPU
-    if (params.split_mode == LLAMA_SPLIT_MODE_NONE) {
+    if (params.split_mode == LLAMA_SPLIT_MODE_NONE && !model->devices.empty()) {
         if (params.main_gpu < 0) {
             model->devices.clear();
         } else {

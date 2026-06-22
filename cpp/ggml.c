@@ -151,9 +151,9 @@ static void lm_ggml_print_backtrace_symbols(void) {
 #elif defined(__APPLE__)
 #include <execinfo.h>
 static void lm_ggml_print_backtrace_symbols(void) {
-    // void * trace[100];
-    // int nptrs = backtrace(trace, sizeof(trace)/sizeof(trace[0]));
-    // backtrace_symbols_fd(trace, nptrs, STDERR_FILENO);
+    void * trace[100];
+    int nptrs = backtrace(trace, sizeof(trace)/sizeof(trace[0]));
+    backtrace_symbols_fd(trace, nptrs, STDERR_FILENO);
 }
 #else
 static void lm_ggml_print_backtrace_symbols(void) {
@@ -607,18 +607,15 @@ FILE * lm_ggml_fopen(const char * fname, const char * mode) {
     // convert fname (UTF-8)
     wchar_t * wfname = lm_ggml_mbstowcs(fname);
     if (wfname) {
-        // convert mode (ANSI)
-        wchar_t * wmode = LM_GGML_MALLOC((strlen(mode) + 1) * sizeof(wchar_t));
-        wchar_t * wmode_p = wmode;
-        do {
-            *wmode_p++ = (wchar_t)*mode;
-        } while (*mode++);
-
-        // open file
-        file = _wfopen(wfname, wmode);
+        // convert mode (UTF-8)
+        wchar_t * wmode = lm_ggml_mbstowcs(mode);
+        if (wmode) {
+            // open file
+            file = _wfopen(wfname, wmode);
+            LM_GGML_FREE(wmode);
+        }
 
         LM_GGML_FREE(wfname);
-        LM_GGML_FREE(wmode);
     }
 
     return file;
@@ -1046,6 +1043,7 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "IM2COL",
     "IM2COL_BACK",
     "IM2COL_3D",
+    "COL2IM_1D",
     "CONV_2D",
     "CONV_3D",
     "CONV_2D_DW",
@@ -1095,7 +1093,7 @@ static const char * LM_GGML_OP_NAME[LM_GGML_OP_COUNT] = {
     "GLU",
 };
 
-static_assert(LM_GGML_OP_COUNT == 96, "LM_GGML_OP_COUNT != 96");
+static_assert(LM_GGML_OP_COUNT == 97, "LM_GGML_OP_COUNT != 97");
 
 static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "none",
@@ -1156,6 +1154,7 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "im2col(x)",
     "im2col_back(x)",
     "im2col_3d(x)",
+    "col2im_1d(x)",
     "conv_2d(x)",
     "conv_3d(x)",
     "conv_2d_dw(x)",
@@ -1205,7 +1204,7 @@ static const char * LM_GGML_OP_SYMBOL[LM_GGML_OP_COUNT] = {
     "glu(x)",
 };
 
-static_assert(LM_GGML_OP_COUNT == 96, "LM_GGML_OP_COUNT != 96");
+static_assert(LM_GGML_OP_COUNT == 97, "LM_GGML_OP_COUNT != 97");
 
 static_assert(LM_GGML_OP_POOL_COUNT == 2, "LM_GGML_OP_POOL_COUNT != 2");
 
@@ -4556,6 +4555,41 @@ struct lm_ggml_tensor * lm_ggml_conv_1d_dw_ph(
     return lm_ggml_conv_1d_dw(ctx, a, b, s0, a->ne[0] / 2, d0);
 }
 
+// lm_ggml_col2im_1d
+
+struct lm_ggml_tensor * lm_ggml_col2im_1d(
+        struct lm_ggml_context * ctx,
+        struct lm_ggml_tensor  * a,
+        int                   s0,
+        int                   oc,
+        int                   p0) {
+    LM_GGML_ASSERT(lm_ggml_is_matrix(a));
+    LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
+    LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32 || a->type == LM_GGML_TYPE_F16 || a->type == LM_GGML_TYPE_BF16);
+    LM_GGML_ASSERT(s0 > 0);
+    LM_GGML_ASSERT(oc > 0);
+    LM_GGML_ASSERT(p0 >= 0);
+
+    const int64_t K_OC = a->ne[0];
+    const int64_t T_in = a->ne[1];
+    const int64_t K = K_OC / oc;
+    const int64_t T_out = (T_in - 1) * s0 + K - 2 * p0;
+
+    LM_GGML_ASSERT(K_OC == K * oc);  // a->ne[0] must be a whole number of oc blocks
+    LM_GGML_ASSERT(K > 0 && T_out > 0);
+
+    const int64_t ne[4] = { T_out, oc, 1, 1 };
+    struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, a->type, 2, ne);
+
+    int32_t params[] = { s0, (int32_t)oc, (int32_t)p0 };
+    lm_ggml_set_op_params(result, params, sizeof(params));
+
+    result->op     = LM_GGML_OP_COL2IM_1D;
+    result->src[0] = a;
+
+    return result;
+}
+
 // lm_ggml_conv_transpose_1d
 
 static int64_t lm_ggml_calc_conv_transpose_1d_output_size(int64_t ins, int64_t ks, int s, int p, int d) {
@@ -5238,7 +5272,7 @@ static struct lm_ggml_tensor * lm_ggml_fill_impl(
     struct lm_ggml_tensor  * a,
     float                 c,
     bool                  inplace) {
-    LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32);
+    LM_GGML_ASSERT(a->type == LM_GGML_TYPE_F32 || a->type == LM_GGML_TYPE_F16);
     LM_GGML_ASSERT(lm_ggml_is_contiguous(a));
 
     struct lm_ggml_tensor * result = inplace ? lm_ggml_view_tensor(ctx, a) : lm_ggml_dup_tensor(ctx, a);
@@ -6201,7 +6235,8 @@ struct lm_ggml_tensor * lm_ggml_gated_delta_net(
         struct lm_ggml_tensor  * v,
         struct lm_ggml_tensor  * g,
         struct lm_ggml_tensor  * beta,
-        struct lm_ggml_tensor  * state) {
+        struct lm_ggml_tensor  * state,
+        int64_t               K) {
     LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(q));
     LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(k));
     LM_GGML_ASSERT(lm_ggml_is_contiguous_rows(v));
@@ -6225,14 +6260,17 @@ struct lm_ggml_tensor * lm_ggml_gated_delta_net(
     LM_GGML_ASSERT(g->ne[0] == 1 || g->ne[0] == S_v);
     LM_GGML_ASSERT(beta->ne[0] == 1);
 
-    // state is a 3D tensor (S_v*S_v*H, K, n_seqs). K is the snapshot slot count.
-    LM_GGML_ASSERT(state->ne[0] == S_v * S_v * H);
-    LM_GGML_ASSERT(state->ne[2] == n_seqs);
-    LM_GGML_ASSERT(state->ne[3] == 1);
-    const int64_t K = state->ne[1];
+    // state holds the initial state s0 only: [S_v, S_v, H, n_seqs]. K (snapshot slot count) is an op param.
+    LM_GGML_ASSERT(state->ne[0] == S_v);
+    LM_GGML_ASSERT(state->ne[1] == S_v);
+    LM_GGML_ASSERT(state->ne[2] == H);
+    LM_GGML_ASSERT(state->ne[3] == n_seqs);
+    LM_GGML_ASSERT(K >= 1);
     const int64_t state_rows = K * S_v * n_seqs;
     const int64_t ne[4] = { S_v * H, n_tokens * n_seqs + state_rows, 1, 1 };
     struct lm_ggml_tensor * result = lm_ggml_new_tensor(ctx, LM_GGML_TYPE_F32, 4, ne);
+
+    lm_ggml_set_op_params_i32(result, 0, (int32_t) K);
 
     result->op     = LM_GGML_OP_GATED_DELTA_NET;
     result->src[0] = q;

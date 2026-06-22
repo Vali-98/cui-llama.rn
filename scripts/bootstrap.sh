@@ -7,8 +7,8 @@ LLAMA_DIR=third_party/llama.cpp
 CPP_DIR="$ROOT_DIR/cpp"
 SRC_DIR="$ROOT_DIR/src"
 
-git submodule init "$LLAMA_DIR"
-git submodule update --recursive "$LLAMA_DIR"
+#git submodule init "$LLAMA_DIR"
+#git submodule update --recursive "$LLAMA_DIR"
 
 # Hexagon SDK setup for Android builds
 echo ""
@@ -222,6 +222,8 @@ cp ./$LLAMA_DIR/src/llama-kv-cache.h ./cpp/llama-kv-cache.h
 cp ./$LLAMA_DIR/src/llama-kv-cache.cpp ./cpp/llama-kv-cache.cpp
 cp ./$LLAMA_DIR/src/llama-kv-cache-iswa.h ./cpp/llama-kv-cache-iswa.h
 cp ./$LLAMA_DIR/src/llama-kv-cache-iswa.cpp ./cpp/llama-kv-cache-iswa.cpp
+cp ./$LLAMA_DIR/src/llama-kv-cache-dsa.h ./cpp/llama-kv-cache-dsa.h
+cp ./$LLAMA_DIR/src/llama-kv-cache-dsa.cpp ./cpp/llama-kv-cache-dsa.cpp
 cp ./$LLAMA_DIR/src/llama-memory-hybrid.h ./cpp/llama-memory-hybrid.h
 cp ./$LLAMA_DIR/src/llama-memory-hybrid.cpp ./cpp/llama-memory-hybrid.cpp
 cp ./$LLAMA_DIR/src/llama-memory-hybrid-iswa.h ./cpp/llama-memory-hybrid-iswa.h

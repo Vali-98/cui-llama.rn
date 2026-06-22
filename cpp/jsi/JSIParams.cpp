@@ -464,7 +464,6 @@ namespace rnllama_jsi {
         sparams.grammar_triggers.clear();
         sparams.preserved_tokens.clear();
         sparams.reasoning_budget_tokens = -1;
-        sparams.reasoning_budget_activate_immediately = false;
         sparams.reasoning_budget_start.clear();
         sparams.reasoning_budget_end.clear();
         sparams.reasoning_budget_forced.clear();
@@ -499,8 +498,6 @@ namespace rnllama_jsi {
 
                 if (!sparams.reasoning_budget_end.empty() && !sparams.reasoning_budget_forced.empty()) {
                     sparams.reasoning_budget_tokens = thinkingBudgetTokens;
-                    sparams.reasoning_budget_activate_immediately = getPropertyAsBool(
-                        runtime, params, "thinking_forced_open", false);
                 } else {
                     sparams.reasoning_budget_start.clear();
                     sparams.reasoning_budget_end.clear();

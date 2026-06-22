@@ -462,14 +462,14 @@ struct llama_mmap::impl {
         if (prefetch > 0) {
             if (madvise(addr, std::min(file->size(), prefetch), MADV_WILLNEED)) {
                 fprintf(stderr, "warning: madvise(.., MADV_WILLNEED) failed: %s\n",
-                        strerror(errno));
-            }
+                strerror(errno));
+             }
         }
         if (numa) {
             if (madvise(addr, file->size(), MADV_RANDOM)) {
                 fprintf(stderr, "warning: madvise(.., MADV_RANDOM) failed: %s\n",
-                        strerror(errno));
-            }
+                strerror(errno));
+             }
         }
 
         mapped_fragments.emplace_back(0, file->size());
