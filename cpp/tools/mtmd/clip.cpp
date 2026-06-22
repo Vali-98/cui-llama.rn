@@ -1767,9 +1767,25 @@ struct clip_model_loader {
         std::map<std::string, size_t> tensor_offset;
         std::vector<lm_ggml_tensor *> tensors_to_load;
 
-        auto fin = open_ifstream_binary(fname);
-        if (!fin) {
-            throw std::runtime_error(string_format("%s: failed to open %s\n", __func__, fname.c_str()));
+        bool is_fd =
+            !fname.empty() &&
+            fname.find('/') == std::string::npos &&
+            std::all_of(fname.begin(), fname.end(), ::isdigit);
+
+        int fd = -1;
+
+        std::ifstream fin;
+        if (is_fd) {
+            fd = std::stoi(fname);
+
+            if (fd < 0) {
+                throw std::runtime_error(string_format("%s: invalid fd %s\n", __func__, fname.c_str()));
+            }
+        } else {
+            fin = open_ifstream_binary(fname);
+            if (!fin) {
+                throw std::runtime_error(string_format("%s: failed to open %s\n",  __func__, fname.c_str()));
+            }
         }
 
         // TODO @ngxson : support both audio and video in the future
@@ -1821,9 +1837,44 @@ struct clip_model_loader {
                 return default_val;
             }
             size_t offset = it->second;
-            fin.seekg(offset, std::ios::beg);
             float value;
-            fin.read(reinterpret_cast<char*>(&value), sizeof(float));
+            if (is_fd) {
+                ssize_t n =
+                    pread(fd,
+                        &value,
+                        sizeof(float),
+                        static_cast<off_t>(offset));
+
+                if (n != (ssize_t)sizeof(float)) {
+                    throw std::runtime_error(
+                        string_format(
+                            "%s: failed to read scalar %s from fd\n",
+                            __func__,
+                            name.c_str()));
+                }
+            } else {
+                fin.seekg(offset, std::ios::beg);
+
+                if (!fin) {
+                    throw std::runtime_error(
+                        string_format(
+                            "%s: failed to seek scalar %s\n",
+                            __func__,
+                            name.c_str()));
+                }
+
+                fin.read(reinterpret_cast<char *>(&value),
+                        sizeof(float));
+
+                if (!fin) {
+                    throw std::runtime_error(
+                        string_format(
+                            "%s: failed to read scalar %s\n",
+                            __func__,
+                            name.c_str()));
+                }
+            }
+
             return value;
         };
 

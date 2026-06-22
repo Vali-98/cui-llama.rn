@@ -1,6 +1,6 @@
 {
   "name": "cui-llama.rn",
-  "version": "1.11.11",
+  "version": "1.11.12",
   "description": "React Native binding of llama.cpp",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
