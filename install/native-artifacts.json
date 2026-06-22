@@ -6,7 +6,7 @@
       "relativePath": "android/src/main/jniLibs",
       "markerPath": "android/src/main/jniLibs/.llama-rn.sha256",
       "legacyMarkerPath": "android/src/main/.llama-rn-android-jni-libs.sha256",
-      "sha256": "9db1d71bc29f6e585be6691b508905098eed1ab4dc0578bba1440d865d31b902"
+      "sha256": "88ae2bb713f0ff15afa436b4ba945d008640dac753e8cee3cc1a59b7aad80729"
     },
     {
       "name": "ios-xcframework",
@@ -14,7 +14,7 @@
       "relativePath": "ios/rnllama.xcframework",
       "markerPath": "ios/rnllama.xcframework/.llama-rn.sha256",
       "legacyMarkerPath": "ios/.llama-rn-ios-xcframework.sha256",
-      "sha256": "10fa26e9d275e8b789e355ac50a6ab371915c59f83c3a117e6c658cd446457b6"
+      "sha256": "c5841674835829b6a24f998278d06aa4542b31d79749f90ca4f34323cad091ce"
     }
   ]
 }
