@@ -17,6 +17,7 @@ struct lm_ggml_context;
 struct lm_ggml_tensor;
 
 struct llama_cparams;
+struct llama_layer;
 
 struct llama_memory_context_i;
 
@@ -31,6 +32,7 @@ enum llm_graph_type {
     LLM_GRAPH_TYPE_DEFAULT,
     LLM_GRAPH_TYPE_ENCODER,
     LLM_GRAPH_TYPE_DECODER,
+    LLM_GRAPH_TYPE_DECODER_MTP,
 };
 
 enum llm_ffn_op_type {
@@ -308,7 +310,7 @@ public:
     lm_ggml_tensor * self_kq_mask     = nullptr; // F32 [n_kv, n_batch/n_stream, 1, n_stream]
     lm_ggml_tensor * self_kq_mask_cnv = nullptr; //     [n_kv, n_batch/n_stream, 1, n_stream]
 
-    // note: assumes v_rot^ == I
+    // note: assumes v_rot^2 == I
     lm_ggml_tensor * self_k_rot = nullptr;
     lm_ggml_tensor * self_v_rot = nullptr;
 
@@ -388,9 +390,11 @@ public:
     lm_ggml_tensor * self_kq_mask_swa     = nullptr; // F32 [n_kv, n_batch/n_stream, 1, n_stream]
     lm_ggml_tensor * self_kq_mask_swa_cnv = nullptr; //     [n_kv, n_batch/n_stream, 1, n_stream]
 
-    // note: using same rotation matrices for both base and swa cache
     lm_ggml_tensor * self_k_rot = nullptr;
     lm_ggml_tensor * self_v_rot = nullptr;
+
+    lm_ggml_tensor * self_k_rot_swa = nullptr;
+    lm_ggml_tensor * self_v_rot_swa = nullptr;
 
     const llama_hparams hparams;
     const llama_cparams cparams;
@@ -577,7 +581,8 @@ struct llm_graph_params {
             ubatch.n_seqs_unq   == other.ubatch.n_seqs_unq &&
             (
                 (!ubatch.token && !other.ubatch.token) ||
-                (!ubatch.embd  && !other.ubatch.embd)
+                (!ubatch.embd  && !other.ubatch.embd)  ||
+                (ubatch.token && other.ubatch.token && ubatch.embd && other.ubatch.embd)
             );
 
         // when we split the batch using "equal_seqs" we have to verify that the participating sequences are the same
@@ -641,6 +646,7 @@ public:
     lm_ggml_tensor * get_logits()      const { return t_logits; }
     lm_ggml_tensor * get_embd()        const { return t_embd; }
     lm_ggml_tensor * get_embd_pooled() const { return t_embd_pooled; }
+    lm_ggml_tensor * get_h_pre_norm()  const { return t_h_pre_norm; }
 
     lm_ggml_cgraph  * get_gf()  const { return gf; }
     lm_ggml_context * get_ctx() const { return ctx_compute.get(); }
@@ -669,6 +675,7 @@ public:
     lm_ggml_tensor * t_logits      = nullptr;
     lm_ggml_tensor * t_embd        = nullptr;
     lm_ggml_tensor * t_embd_pooled = nullptr;
+    lm_ggml_tensor * t_h_pre_norm  = nullptr; // [n_embd, n_outputs] hidden state before final output norm
 
     std::map<llama_seq_id, lm_ggml_tensor*> t_sampled_logits;
     std::map<llama_seq_id, lm_ggml_tensor*> t_candidates;
@@ -704,6 +711,12 @@ using llm_graph_result_ptr = std::unique_ptr<llm_graph_result>;
 
 // used in build_rs to properly order writes and avoid unnecessary copies
 using llm_graph_get_rows_fn = std::function<lm_ggml_tensor * (lm_ggml_context *, lm_ggml_tensor * states, lm_ggml_tensor * ids)>;
+
+struct llm_graph_qkv {
+    lm_ggml_tensor * q; // [n_embd_head, n_head,    n_tokens]
+    lm_ggml_tensor * k; // [n_embd_head, n_head_kv, n_tokens]
+    lm_ggml_tensor * v; // [n_embd_head, n_head_kv, n_tokens]
+};
 
 struct llm_graph_context {
     const llm_arch arch;
@@ -790,6 +803,17 @@ struct llm_graph_context {
              lm_ggml_tensor * mb,
            llm_norm_type   type,
                      int   il) const;
+
+
+    // compute Q, K, V projections with optional bias and reshape
+    // supports both fused wqkv and separate wq/wk/wv paths
+    llm_graph_qkv build_qkv(
+        const llama_layer & layer,
+              lm_ggml_tensor * cur,
+                  int64_t   n_embd_head,
+                  int64_t   n_head,
+                  int64_t   n_head_kv,
+                      int   il) const;
 
     lm_ggml_tensor * build_ffn(
              lm_ggml_tensor * cur,
@@ -890,6 +914,7 @@ struct llm_graph_context {
             llm_graph_input_attn_no_cache * inp,
             lm_ggml_tensor * wo,
             lm_ggml_tensor * wo_b,
+            lm_ggml_tensor * wo_s,
             lm_ggml_tensor * q_cur, // [n_embd_head_q, n_head_q, n_tokens]
             lm_ggml_tensor * k_cur, // [n_embd_head_k, n_head_k, n_tokens]
             lm_ggml_tensor * v_cur, // [n_embd_head_v, n_head_v, n_tokens]
@@ -905,6 +930,7 @@ struct llm_graph_context {
             llm_graph_input_attn_kv * inp,
             lm_ggml_tensor * wo,
             lm_ggml_tensor * wo_b,
+            lm_ggml_tensor * wo_s,
             lm_ggml_tensor * q_cur, // [n_embd_head_q, n_head_q, n_tokens]
             lm_ggml_tensor * k_cur, // [n_embd_head_k, n_head_k, n_tokens]
             lm_ggml_tensor * v_cur, // [n_embd_head_v, n_head_v, n_tokens]
@@ -920,6 +946,7 @@ struct llm_graph_context {
             llm_graph_input_attn_k * inp,
             lm_ggml_tensor * wo,
             lm_ggml_tensor * wo_b,
+            lm_ggml_tensor * wo_s,
             lm_ggml_tensor * q_cur, // [n_embd_head_q, n_head_q, n_tokens]
             lm_ggml_tensor * k_cur, // [n_embd_head_k, n_head_k, n_tokens]
             lm_ggml_tensor * v_cur, // [n_embd_head_v, n_head_v, n_tokens]
@@ -936,6 +963,7 @@ struct llm_graph_context {
             llm_graph_input_attn_kv_iswa * inp,
             lm_ggml_tensor * wo,
             lm_ggml_tensor * wo_b,
+            lm_ggml_tensor * wo_s,
             lm_ggml_tensor * q_cur, // [n_embd_head_q, n_head_q, n_tokens]
             lm_ggml_tensor * k_cur, // [n_embd_head_k, n_head_k, n_tokens] optional
             lm_ggml_tensor * v_cur, // [n_embd_head_v, n_head_v, n_tokens] optional
@@ -951,6 +979,7 @@ struct llm_graph_context {
             llm_graph_input_attn_cross * inp,
             lm_ggml_tensor * wo,
             lm_ggml_tensor * wo_b,
+            lm_ggml_tensor * wo_s,
             lm_ggml_tensor * q_cur, // [n_embd_head_q, n_head_q, n_tokens]
             lm_ggml_tensor * k_cur, // [n_embd_head_k, n_head_k, n_tokens]
             lm_ggml_tensor * v_cur, // [n_embd_head_v, n_head_v, n_tokens]

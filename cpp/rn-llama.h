@@ -62,7 +62,7 @@ struct llama_rn_context {
     common_init_result_ptr llama_init;
     llama_context *ctx = nullptr;
     common_chat_templates_ptr templates;
-    int n_ctx;
+    int n_ctx = 0;
 
     // Completion context (DEPRECATED: Use slot_manager for parallel decoding)
     llama_rn_context_completion *completion = nullptr;
@@ -108,7 +108,10 @@ struct llama_rn_context {
 
     // Lora methods
     std::vector<common_adapter_lora_info> lora;
-    int applyLoraAdapters(std::vector<common_adapter_lora_info> lora);
+    // Init-time adapters are owned by common_init_result. Runtime apply/remove
+    // operations load their own adapter handles and release them here.
+    std::vector<llama_adapter_lora_ptr> owned_lora;
+    void applyLoraAdapters(std::vector<common_adapter_lora_info> lora);
     void removeLoraAdapters();
     std::vector<common_adapter_lora_info> getLoadedLoraAdapters();
 
