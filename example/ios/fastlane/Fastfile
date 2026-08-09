@@ -22,11 +22,39 @@ def changelog_from_file
   end
 end
 
+def latest_uploaded_build_number
+  require "spaceship"
+
+  app_identifier = ENV.fetch("IOS_APP_IDENTIFIER")
+  Spaceship::ConnectAPI.login(
+    ENV.fetch("IOS_APPLE_ID"),
+    use_portal: false,
+    use_tunes: true,
+    tunes_team_id: ENV["IOS_ITC_TEAM_ID"]
+  )
+
+  app = Spaceship::ConnectAPI::App.find(app_identifier)
+  UI.user_error!("Could not find #{app_identifier} on App Store Connect") unless app
+
+  # fastlane 2.237's app_store_build_number uses the buildUploads endpoint,
+  # which incorrectly returns a 404 for this app when using Apple ID auth.
+  build = Spaceship::ConnectAPI.get_builds(
+    filter: { app: app.id },
+    sort: "-uploadedDate",
+    includes: "preReleaseVersion",
+    limit: 1
+  ).first
+  UI.user_error!("Could not find a TestFlight build for #{app_identifier}") unless build
+
+  UI.message("Latest TestFlight build is #{build.app_version} (#{build.version})")
+  build.version.to_i
+end
+
 platform :ios do
 
   desc "Local upload using Apple ID authentication (no API key required)"
   lane :deploy do
-    build_number = app_store_build_number(live: false).to_i + 1
+    build_number = latest_uploaded_build_number + 1
     increment_build_number(
       build_number: build_number,
       xcodeproj: "RNLlamaExample.xcodeproj"
