@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { AudioContext } from 'react-native-audio-api'
+import Icon from '@react-native-vector-icons/material-design-icons'
 import { useTheme } from '../contexts/ThemeContext'
 
 export const AudioPlayer = ({
@@ -57,14 +58,17 @@ export const AudioPlayer = ({
       shadowRadius: 4,
       elevation: 4,
     },
+    stopButton: {
+      backgroundColor: theme.colors.error,
+      shadowColor: theme.colors.error,
+    },
     playButtonPressed: {
-      backgroundColor: theme.colors.primary,
       transform: [{ scale: 0.95 }],
       opacity: 0.8,
     },
-    buttonText: {
-      fontSize: 20,
-      color: theme.colors.white,
+    playIcon: {
+      // The triangular glyph needs a slight optical adjustment to look centered.
+      transform: [{ translateX: 1 }],
     },
     timeContainer: {
       flex: 1,
@@ -133,13 +137,25 @@ export const AudioPlayer = ({
     <View style={styles.container}>
       <View style={styles.playerRow}>
         <TouchableOpacity
-          style={[styles.playButton, isPressed && styles.playButtonPressed]}
+          style={[
+            styles.playButton,
+            isPlaying && styles.stopButton,
+            isPressed && styles.playButtonPressed,
+          ]}
           onPress={() => setIsPlaying((v) => !v)}
           onPressIn={() => setIsPressed(true)}
           onPressOut={() => setIsPressed(false)}
           activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={isPlaying ? 'Stop audio' : 'Play audio'}
+          hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
         >
-          <Text style={styles.buttonText}>{isPlaying ? '⏹' : '▶'}</Text>
+          <Icon
+            name={isPlaying ? 'stop' : 'play'}
+            size={26}
+            color={theme.colors.white}
+            style={!isPlaying ? styles.playIcon : undefined}
+          />
         </TouchableOpacity>
         <View style={styles.timeContainer}>
           <Text style={styles.timeText}>
