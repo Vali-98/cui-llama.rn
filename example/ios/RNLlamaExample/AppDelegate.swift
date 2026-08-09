@@ -5,6 +5,10 @@ import ReactAppDependencyProvider
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
+  // Some UIKit integrations still query UIApplicationDelegate.window even when
+  // the app uses the scene lifecycle.
+  var window: UIWindow?
+
   var reactNativeDelegate: ReactNativeDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
   private var launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -68,6 +72,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     let window = UIWindow(windowScene: windowScene)
     self.window = window
+    appDelegate.window = window
     appDelegate.startReactNative(in: window)
   }
 }
