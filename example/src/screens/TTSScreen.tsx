@@ -1,4 +1,4 @@
-import React, { useState, useLayoutEffect } from 'react'
+import React, { useState, useLayoutEffect, useEffect, useRef } from 'react'
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Animated,
+  Easing,
 } from 'react-native'
 import { saveDocuments } from '@react-native-documents/picker'
 import ReactNativeBlobUtil from 'react-native-blob-util'
@@ -18,6 +20,7 @@ import ContextParamsModal from '../components/ContextParamsModal'
 import CompletionParamsModal from '../components/CompletionParamsModal'
 import TTSParamsModal from '../components/TTSParamsModal'
 import { AudioPlayer } from '../components/AudioPlayer'
+import { Waveform } from '../components/Waveform'
 import { createThemedStyles } from '../styles/commonStyles'
 import { useTheme } from '../contexts/ThemeContext'
 import { MODELS } from '../utils/constants'
@@ -52,6 +55,70 @@ const models: (typeof MODELS.OUTE_TTS_0_3)[] = [
   MODELS.CHATTERBOX_MULTILINGUAL,
   MODELS.BLUEMAGPIE_TTS,
 ]
+
+interface GenerationStats {
+  generationSec: number
+  tokenCount: number
+  tokenLabel: string
+  audioSec: number | null
+}
+
+const EQ_BAR_COUNT = 5
+
+// Looping equalizer animation shown while tokens are being generated, so the
+// screen visibly "works" even for model families that don't stream tokens.
+function EqualizerBars({ color }: { color: string }) {
+  const anims = useRef(
+    Array.from({ length: EQ_BAR_COUNT }, () => new Animated.Value(0.3)),
+  ).current
+
+  useEffect(() => {
+    const loops = anims.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(v, {
+            toValue: 1,
+            duration: 240 + i * 80,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(v, {
+            toValue: 0.25,
+            duration: 240 + (EQ_BAR_COUNT - i) * 70,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+      ),
+    )
+    loops.forEach((l) => l.start())
+    return () => loops.forEach((l) => l.stop())
+  }, [anims])
+
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        height: 24,
+      }}
+    >
+      {anims.map((v, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            width: 4,
+            height: 22,
+            borderRadius: 2,
+            backgroundColor: color,
+            transform: [{ scaleY: v }],
+          }}
+        />
+      ))}
+    </View>
+  )
+}
 
 export default function TTSScreen({ navigation }: { navigation: any }) {
   const { theme } = useTheme()
@@ -155,9 +222,46 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
     audioSection: {
       marginBottom: 24,
     },
+    generatingHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 12,
+    },
+    generatingTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    statsRow: {
+      flexDirection: 'row',
+      marginTop: 8,
+      marginBottom: 4,
+    },
+    statCell: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    statValue: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: theme.colors.text,
+      fontVariant: ['tabular-nums'],
+    },
+    statLabel: {
+      fontSize: 11,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
   })
   const [inputText, setInputText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [liveTokenCount, setLiveTokenCount] = useState(0)
+  const [liveElapsedMs, setLiveElapsedMs] = useState(0)
+  const [genStats, setGenStats] = useState<GenerationStats | null>(null)
   const [context, setContext] = useState<LlamaContext | null>(null)
   const [isModelReady, setIsModelReady] = useState(false)
   const [isVocoderReady, setIsVocoderReady] = useState(false)
@@ -252,6 +356,17 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
       )
     }
   }
+
+  // Tick the elapsed-time readout while speech is being generated
+  useEffect(() => {
+    if (!isGenerating) return undefined
+    const startedAt = Date.now()
+    setLiveElapsedMs(0)
+    const interval = setInterval(() => {
+      setLiveElapsedMs(Date.now() - startedAt)
+    }, 100)
+    return () => clearInterval(interval)
+  }, [isGenerating])
 
   // Load TTS parameters on mount
   useLayoutEffect(() => {
@@ -365,14 +480,18 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
   }
 
   const generateSpeech = async () => {
-    if (!inputText.trim() || !context || isLoading) return
+    if (!inputText.trim() || !context || isGenerating) return
 
     // Create a LlamaSpeaker from the bundled ref audio when speakerConfig is a
     // non-null object (voice-clone family). String values are passed as-is
     // (built-in voice name). null / undefined → no speaker.
     let spk: LlamaSpeaker | undefined
     try {
-      setIsLoading(true)
+      setIsGenerating(true)
+      setLiveTokenCount(0)
+      setGenStats(null)
+      setGeneratedAudio(null)
+      setAudioData(null)
 
       // Each synthesis request starts at position 0. Embedding-driven TTS
       // prefills cannot safely reuse the previous generation's KV entries.
@@ -432,6 +551,7 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
       // the codec_lm step machine per `llama_decode` and appends codes to
       // `result.audio_tokens`; continuous-latent models return `result.embeddings`.
       const collectedTokens: number[] = []
+      const genStartTime = Date.now()
 
       const result = await context.completion(
         {
@@ -445,6 +565,10 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
           stop: params.stop || ['<|im_end|>', '<|SPEECH_GENERATION_END|>'],
         },
         (data) => {
+          // Token-flow families (e.g. OuteTTS) stream one callback per audio
+          // token; continuous-latent families (e.g. BlueMagpie) don't stream,
+          // so the live counter stays hidden for them.
+          setLiveTokenCount((c) => c + 1)
           // Collect tokens for potential audio processing
           if (data.token && typeof data.token === 'number') {
             collectedTokens.push(data.token)
@@ -454,17 +578,30 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
 
       const audioSampleRate = await context.getAudioSampleRate()
 
+      // Total time-to-audio (token generation + vocoder decode), captured
+      // after decoding below so the RTF stat reflects real wall time.
+      const finishStats = (tokenCount: number, tokenLabel: string) =>
+        (audioFloat32: Float32Array | null) => {
+          setGenStats({
+            generationSec: (Date.now() - genStartTime) / 1000,
+            tokenCount,
+            tokenLabel,
+            audioSec: audioFloat32
+              ? audioFloat32.length / audioSampleRate
+              : null,
+          })
+        }
+
       if (
         result.embeddings &&
         result.embedding_dim &&
         result.embeddings.length > 0
       ) {
-        setGeneratedAudio(
-          `Generated ${
-            result.embeddings.length / result.embedding_dim
-          } audio embedding frames for: "${inputText.trim()}"`,
-        )
+        const frameCount = result.embeddings.length / result.embedding_dim
+        const setStats = finishStats(frameCount, 'frames')
+        setGeneratedAudio(`“${inputText.trim()}”`)
 
+        let audioFloat32: Float32Array | null = null
         if (isVocoderReady && context.decodeAudioEmbeddings) {
           try {
             const decodedAudio = await context.decodeAudioEmbeddings(
@@ -473,39 +610,21 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
             )
             console.log('Generated audio data length:', decodedAudio.length)
 
-            const audioFloat32 = new Float32Array(decodedAudio)
+            audioFloat32 = new Float32Array(decodedAudio)
             setAudioData(audioFloat32)
             setSampleRate(audioSampleRate)
             void dumpTtsWavToDisk(audioFloat32, audioSampleRate)
-
-            setGeneratedAudio(
-              `Generated audio data (${
-                audioFloat32.length
-              } samples) for: "${inputText.trim()}"`,
-            )
           } catch (decodeError) {
             console.log('Audio embedding decoding error:', decodeError)
           }
         }
-
-        Alert.alert(
-          'Speech Generated',
-          `Successfully generated ${
-            result.embeddings.length / result.embedding_dim
-          } audio embedding frames! ${
-            isVocoderReady
-              ? 'Audio data is ready for playback.'
-              : 'Note: Audio playback requires vocoder setup.'
-          }`,
-        )
+        setStats(audioFloat32)
       } else if (result.audio_tokens && result.audio_tokens.length > 0) {
-        setGeneratedAudio(
-          `Generated ${
-            result.audio_tokens.length
-          } audio tokens for: "${inputText.trim()}"`,
-        )
+        const setStats = finishStats(result.audio_tokens.length, 'tokens')
+        setGeneratedAudio(`“${inputText.trim()}”`)
 
         // If vocoder is available, decode audio tokens
+        let audioFloat32: Float32Array | null = null
         if (isVocoderReady && context.decodeAudioTokens) {
           try {
             const decodedAudio = await context.decodeAudioTokens(
@@ -514,29 +633,15 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
             console.log('Generated audio data length:', decodedAudio.length)
 
             // Convert ArrayBuffer to Float32Array for AudioPlayer
-            const audioFloat32 = new Float32Array(decodedAudio)
+            audioFloat32 = new Float32Array(decodedAudio)
             setAudioData(audioFloat32)
             setSampleRate(audioSampleRate)
             void dumpTtsWavToDisk(audioFloat32, audioSampleRate)
-
-            setGeneratedAudio(
-              `Generated audio data (${
-                audioFloat32.length
-              } samples) for: "${inputText.trim()}"`,
-            )
           } catch (decodeError) {
             console.log('Audio decoding error:', decodeError)
           }
         }
-
-        Alert.alert(
-          'Speech Generated',
-          `Successfully generated ${result.audio_tokens.length} audio tokens! ${
-            isVocoderReady
-              ? 'Audio data is ready for playback.'
-              : 'Note: Audio playback requires vocoder setup.'
-          }`,
-        )
+        setStats(audioFloat32)
       } else {
         setGeneratedAudio(
           `Text processed: "${inputText.trim()}" (No audio tokens generated)`,
@@ -550,7 +655,7 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
       Alert.alert('Error', `Failed to generate speech: ${error.message}`)
     } finally {
       if (spk) await spk.release()
-      setIsLoading(false)
+      setIsGenerating(false)
     }
   }
 
@@ -631,12 +736,13 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
           <TouchableOpacity
             style={[
               styles.generateButton,
-              (!inputText.trim() || isLoading) && styles.generateButtonDisabled,
+              (!inputText.trim() || isGenerating) &&
+                styles.generateButtonDisabled,
             ]}
             onPress={generateSpeech}
-            disabled={!inputText.trim() || isLoading}
+            disabled={!inputText.trim() || isGenerating}
           >
-            {isLoading ? (
+            {isGenerating ? (
               <ActivityIndicator size="small" color="white" />
             ) : (
               <Text style={styles.generateButtonText}>Generate Speech</Text>
@@ -644,11 +750,85 @@ export default function TTSScreen({ navigation }: { navigation: any }) {
           </TouchableOpacity>
         </View>
 
+        {isGenerating && (
+          <View style={styles.audioSection}>
+            <View style={styles.audioCard}>
+              <View style={styles.generatingHeader}>
+                <EqualizerBars color={theme.colors.primary} />
+                <Text style={styles.generatingTitle}>
+                  Generating on device…
+                </Text>
+              </View>
+              <View style={styles.statsRow}>
+                <View style={styles.statCell}>
+                  <Text style={styles.statValue}>
+                    {`${(liveElapsedMs / 1000).toFixed(1)}s`}
+                  </Text>
+                  <Text style={styles.statLabel}>elapsed</Text>
+                </View>
+                {liveTokenCount > 0 && (
+                  <>
+                    <View style={styles.statCell}>
+                      <Text style={styles.statValue}>{liveTokenCount}</Text>
+                      <Text style={styles.statLabel}>audio tokens</Text>
+                    </View>
+                    <View style={styles.statCell}>
+                      <Text style={styles.statValue}>
+                        {liveElapsedMs > 0
+                          ? (liveTokenCount / (liveElapsedMs / 1000)).toFixed(0)
+                          : '—'}
+                      </Text>
+                      <Text style={styles.statLabel}>tok/s</Text>
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+
         {generatedAudio && (
           <View style={styles.audioSection}>
             <Text style={styles.sectionTitle}>Generated Audio</Text>
             <View style={styles.audioCard}>
               <Text style={styles.audioDescription}>{generatedAudio}</Text>
+
+              {audioData && audioData.length > 0 && (
+                <Waveform audio={audioData} color={theme.colors.primary} />
+              )}
+
+              {genStats && (
+                <View style={styles.statsRow}>
+                  <View style={styles.statCell}>
+                    <Text style={styles.statValue}>
+                      {`${genStats.generationSec.toFixed(2)}s`}
+                    </Text>
+                    <Text style={styles.statLabel}>generation</Text>
+                  </View>
+                  {genStats.audioSec != null && (
+                    <>
+                      <View style={styles.statCell}>
+                        <Text style={styles.statValue}>
+                          {`${genStats.audioSec.toFixed(2)}s`}
+                        </Text>
+                        <Text style={styles.statLabel}>audio</Text>
+                      </View>
+                      <View style={styles.statCell}>
+                        <Text style={styles.statValue}>
+                          {`${(
+                            genStats.generationSec / genStats.audioSec
+                          ).toFixed(2)}×`}
+                        </Text>
+                        <Text style={styles.statLabel}>RTF</Text>
+                      </View>
+                    </>
+                  )}
+                  <View style={styles.statCell}>
+                    <Text style={styles.statValue}>{genStats.tokenCount}</Text>
+                    <Text style={styles.statLabel}>{genStats.tokenLabel}</Text>
+                  </View>
+                </View>
+              )}
 
               {audioData && audioData.length > 0 ? (
                 <>
