@@ -33,6 +33,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+// rnllama additions
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 struct clip_logger_state g_logger_state = {clip_log_callback_default, NULL};
 
 //#define CLIP_DEBUG_FUNCTIONS

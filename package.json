@@ -50,6 +50,7 @@
     "build:ios": "cd example && yarn build:ios",
     "build:android-libs": "./scripts/build-hexagon-htp.sh && ./scripts/build-opencl.sh && ./scripts/build-android.sh",
     "build:android": "cd example && yarn build:android",
+    "package:cui": "node chatterui/release/build.js",
     "clean": "del-cli example/ios/build"
   },
   "keywords": [
