@@ -7,6 +7,12 @@ const { spawnSync } = require('child_process')
 const ROOT = path.resolve(__dirname, '../..')
 const ARTIFACTS_DIR = path.join(__dirname, 'artifacts')
 
+const ANDROID_ARCHIVE = 'llama-rn-android-jni-libs.tar.gz'
+const IOS_ARCHIVE = 'llama-rn-ios-xcframework.tar.gz'
+
+const ANDROID_ARCHIVE_PATH = path.join(ROOT, ANDROID_ARCHIVE)
+const IOS_ARCHIVE_PATH = path.join(ROOT, IOS_ARCHIVE)
+
 function run(command, args, options = {}) {
     console.log('')
     console.log(`> ${command} ${args.join(' ')}`)
@@ -29,13 +35,19 @@ function run(command, args, options = {}) {
     }
 }
 
+function removeFile(filePath) {
+    fs.rmSync(filePath, {
+        force: true,
+    })
+}
+
 function main() {
     console.log('========================================')
     console.log(' ChatterUI Native Release Build')
     console.log('========================================')
 
     // --------------------------------------------------------
-    // Clean artifacts
+    // Clean release artifacts
     // --------------------------------------------------------
 
     console.log('')
@@ -49,6 +61,10 @@ function main() {
     fs.mkdirSync(ARTIFACTS_DIR, {
         recursive: true,
     })
+
+    // Remove temporary root-level archives from a previous build.
+    removeFile(ANDROID_ARCHIVE_PATH)
+    removeFile(IOS_ARCHIVE_PATH)
 
     // --------------------------------------------------------
     // Apply ChatterUI patches
@@ -76,11 +92,6 @@ function main() {
         ['run', 'build:android-libs']
     )
 
-    const androidArchive = path.join(
-        ARTIFACTS_DIR,
-        'llama-rn-android-jni-libs.tar.gz'
-    )
-
     console.log('')
     console.log('Packaging Android JNI libraries...')
 
@@ -88,7 +99,7 @@ function main() {
         'tar',
         [
             '-czf',
-            androidArchive,
+            ANDROID_ARCHIVE,
             'android/src/main/jniLibs',
         ]
     )
@@ -105,11 +116,6 @@ function main() {
         ['run', 'build:ios-frameworks']
     )
 
-    const iosArchive = path.join(
-        ARTIFACTS_DIR,
-        'llama-rn-ios-xcframework.tar.gz'
-    )
-
     console.log('')
     console.log('Packaging iOS XCFramework...')
 
@@ -117,7 +123,7 @@ function main() {
         'tar',
         [
             '-czf',
-            iosArchive,
+            IOS_ARCHIVE,
             'ios/rnllama.xcframework',
         ],
         {
@@ -129,7 +135,12 @@ function main() {
     )
 
     // --------------------------------------------------------
-    // Native artifact manifest
+    // Generate native artifact manifest
+    // --------------------------------------------------------
+    //
+    // write-native-artifacts-manifest.js expects the archives
+    // to exist at the package root, so deliberately leave them
+    // there until this step has completed.
     // --------------------------------------------------------
 
     console.log('')
@@ -141,9 +152,26 @@ function main() {
             path.join(
                 ROOT,
                 'install',
-                'write-native-artifacts-manifest.js'
+                'write-native-artifacts-manifest.js',
             ),
         ]
+    )
+
+    // --------------------------------------------------------
+    // Move artifacts into chatterui/release/artifacts
+    // --------------------------------------------------------
+
+    console.log('')
+    console.log('Moving release artifacts...')
+
+    fs.renameSync(
+        ANDROID_ARCHIVE_PATH,
+        path.join(ARTIFACTS_DIR, ANDROID_ARCHIVE),
+    )
+
+    fs.renameSync(
+        IOS_ARCHIVE_PATH,
+        path.join(ARTIFACTS_DIR, IOS_ARCHIVE),
     )
 
     // --------------------------------------------------------
@@ -180,6 +208,8 @@ try {
     console.error('========================================')
     console.error('')
     console.error(error.message)
+    console.error('')
+    console.error('Release artifacts may be incomplete.')
     console.error('')
 
     process.exitCode = 1
