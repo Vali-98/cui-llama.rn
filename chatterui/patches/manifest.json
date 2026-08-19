@@ -1,0 +1,24 @@
+{
+  "patches": [
+    {
+      "type": "function",
+      "file": "cpp/ggml.c",
+      "function": "lm_ggml_fopen",
+      "old": "lm_ggml_fopen.old",
+      "new": "lm_ggml_fopen.new"
+    },
+    {
+      "type": "function",
+      "file": "cpp/tools/mtmd/clip.cpp",
+      "function": "load_tensors",
+      "old": "load_tensors.old",
+      "new": "load_tensors.new"
+    },
+    {
+      "type": "text",
+      "file": "cpp/tools/mtmd/clip.cpp",
+      "old": "clip_include.old",
+      "new": "clip_include.new"
+    }
+  ]
+}

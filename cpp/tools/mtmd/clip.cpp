@@ -27,6 +27,12 @@
 #include <functional>
 #include <float.h>
 
+// rnllama additions
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 struct clip_logger_state g_logger_state = {clip_log_callback_default, NULL};
 
 //#define CLIP_DEBUG_FUNCTIONS
@@ -2012,9 +2018,25 @@ struct clip_model_loader {
         std::map<std::string, size_t> tensor_offset;
         std::vector<lm_ggml_tensor *> tensors_to_load;
 
-        auto fin = open_ifstream_binary(fname);
-        if (!fin) {
-            throw std::runtime_error(string_format("%s: failed to open %s\n", __func__, fname.c_str()));
+        bool is_fd =
+            !fname.empty() &&
+            fname.find('/') == std::string::npos &&
+            std::all_of(fname.begin(), fname.end(), ::isdigit);
+
+        int fd = -1;
+
+        std::ifstream fin;
+        if (is_fd) {
+            fd = std::stoi(fname);
+
+            if (fd < 0) {
+                throw std::runtime_error(string_format("%s: invalid fd %s\n", __func__, fname.c_str()));
+            }
+        } else {
+            fin = open_ifstream_binary(fname);
+            if (!fin) {
+                throw std::runtime_error(string_format("%s: failed to open %s\n",  __func__, fname.c_str()));
+            }
         }
 
         // TODO @ngxson : support both audio and video in the future
@@ -2089,6 +2111,7 @@ struct clip_model_loader {
 
         auto get_vector = [&](const std::string & name) {
             std::vector<float> result;
+
             auto it = tensor_offset.find(name);
             if (it == tensor_offset.end()) {
                 return result;
@@ -2096,37 +2119,113 @@ struct clip_model_loader {
 
             const int64_t idx = lm_gguf_find_tensor(ctx_gguf.get(), name.c_str());
             if (idx < 0) {
-                throw std::runtime_error(string_format("%s: failed to find tensor %s\n", __func__, name.c_str()));
+                throw std::runtime_error(string_format(
+                    "%s: failed to find tensor %s\n",
+                    __func__, name.c_str()));
             }
 
-            if (const auto type = lm_gguf_get_tensor_type(ctx_gguf.get(), idx); type != LM_GGML_TYPE_F32) {
-                throw std::runtime_error(string_format("%s: %s must be %s, was %s\n", __func__,
-                            name.c_str(), lm_ggml_type_name(LM_GGML_TYPE_F32), lm_ggml_type_name(type)));
+            if (const auto type = lm_gguf_get_tensor_type(ctx_gguf.get(), idx);
+                type != LM_GGML_TYPE_F32) {
+                throw std::runtime_error(string_format(
+                    "%s: %s must be %s, was %s\n",
+                    __func__,
+                    name.c_str(),
+                    lm_ggml_type_name(LM_GGML_TYPE_F32),
+                    lm_ggml_type_name(type)));
             }
 
             const size_t n_bytes = lm_gguf_get_tensor_size(ctx_gguf.get(), idx);
             if (n_bytes == 0) {
-                throw std::runtime_error(string_format("%s: tensor %s is empty\n", __func__, name.c_str()));
+                throw std::runtime_error(string_format(
+                    "%s: tensor %s is empty\n",
+                    __func__, name.c_str()));
             }
 
             const size_t n_elems = n_bytes / sizeof(float);
             result.resize(n_elems);
-            fin.seekg(it->second, std::ios::beg);
-            fin.read(reinterpret_cast<char*>(result.data()), n_bytes);
+
+            const size_t offset = it->second;
+
+            if (is_fd) {
+                ssize_t n = pread(
+                    fd,
+                    result.data(),
+                    n_bytes,
+                    static_cast<off_t>(offset));
+
+                if (n != static_cast<ssize_t>(n_bytes)) {
+                    throw std::runtime_error(string_format(
+                        "%s: failed to read tensor %s from fd\n",
+                        __func__, name.c_str()));
+                }
+            } else {
+                fin.seekg(offset, std::ios::beg);
+
+                if (!fin) {
+                    throw std::runtime_error(string_format(
+                        "%s: failed to seek tensor %s\n",
+                        __func__, name.c_str()));
+                }
+
+                fin.read(
+                    reinterpret_cast<char *>(result.data()),
+                    n_bytes);
+
+                if (!fin) {
+                    throw std::runtime_error(string_format(
+                        "%s: failed to read tensor %s\n",
+                        __func__, name.c_str()));
+                }
+            }
+
             return result;
         };
 
         auto get_scalar = [&](const std::string & name, float default_val) {
-            auto v = get_vector(name);
-            if (v.empty()) {
+            auto it = tensor_offset.find(name);
+            if (it == tensor_offset.end()) {
                 return default_val;
             }
-            if (v.size() != 1) {
-                throw std::runtime_error(string_format("%s: expected scalar tensor '%s' but got %d elements\n",
-                            __func__, name.c_str(), (int) v.size()));
+            size_t offset = it->second;
+            float value;
+            if (is_fd) {
+                ssize_t n =
+                    pread(fd,
+                        &value,
+                        sizeof(float),
+                        static_cast<off_t>(offset));
+
+                if (n != (ssize_t)sizeof(float)) {
+                    throw std::runtime_error(
+                        string_format(
+                            "%s: failed to read scalar %s from fd\n",
+                            __func__,
+                            name.c_str()));
+                }
+            } else {
+                fin.seekg(offset, std::ios::beg);
+
+                if (!fin) {
+                    throw std::runtime_error(
+                        string_format(
+                            "%s: failed to seek scalar %s\n",
+                            __func__,
+                            name.c_str()));
+                }
+
+                fin.read(reinterpret_cast<char *>(&value),
+                        sizeof(float));
+
+                if (!fin) {
+                    throw std::runtime_error(
+                        string_format(
+                            "%s: failed to read scalar %s\n",
+                            __func__,
+                            name.c_str()));
+                }
             }
 
-            return v[0];
+            return value;
         };
 
         model.class_embedding = get_tensor(TN_CLASS_EMBD, false);
@@ -3457,60 +3556,124 @@ struct clip_model_loader {
         {
             std::vector<uint8_t> read_buf;
 
-            // start loading event
-            if (progress_callback){
+            if (progress_callback) {
                 progress_callback(0.0, progress_callback_user_data);
             }
 
-            // compute total tensor data size for progress reporting
+            bool is_fd = (fname.find('/') == std::string::npos);
+
+            int fd = -1;
+            if (is_fd) {
+                try {
+                    fd = std::stoi(fname);
+                } catch (...) {
+                    throw std::runtime_error(string_format(
+                        "%s: invalid FD: %s\n", __func__, fname.c_str()));
+                }
+            }
+
+            std::ifstream fin;
+            if (!is_fd) {
+                fin.open(fname, std::ios::binary);
+                if (!fin) {
+                    throw std::runtime_error(string_format(
+                        "%s: failed to open file %s\n", __func__, fname.c_str()));
+                }
+            }
+
             size_t total_data_size = 0;
-            for (auto & t : tensors_to_load) {
+            for (auto &t : tensors_to_load) {
                 total_data_size += lm_ggml_nbytes(t);
             }
 
-            // alloc memory and offload data
-            lm_ggml_backend_buffer_type_t buft = lm_ggml_backend_get_default_buffer_type(ctx_clip.backend);
-            ctx_clip.buf.reset(lm_ggml_backend_alloc_ctx_tensors_from_buft(ctx_clip.ctx_data.get(), buft));
-            lm_ggml_backend_buffer_set_usage(ctx_clip.buf.get(), LM_GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
-            // read the weight from file
-            if (!ctx_clip.no_alloc) {
-                size_t data_loaded = 0;
-                for (auto & t : tensors_to_load) {
-                    lm_ggml_tensor * cur = lm_ggml_get_tensor(ctx_clip.ctx_data.get(), t->name);
-                    LM_GGML_ASSERT(cur && "tensor not found in ctx_data");
-                    auto it_off = tensor_offset.find(t->name);
-                    LM_GGML_ASSERT(it_off != tensor_offset.end() && "no offset for tensor");
-                    const size_t offset = it_off->second;
+            lm_ggml_backend_buffer_type_t buft =
+                lm_ggml_backend_get_default_buffer_type(ctx_clip.backend);
+
+            ctx_clip.buf.reset(
+                lm_ggml_backend_alloc_ctx_tensors_from_buft(
+                    ctx_clip.ctx_data.get(), buft));
+
+            lm_ggml_backend_buffer_set_usage(
+                ctx_clip.buf.get(),
+                LM_GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+
+            size_t data_loaded = 0;
+
+            auto read_at = [&](void *dst, size_t offset, size_t n) -> bool {
+                if (is_fd) {
+                    ssize_t r = pread(fd, dst, n, (off_t)offset);
+                    return r == (ssize_t)n;
+                } else {
                     fin.seekg(offset, std::ios::beg);
-                    if (!fin) {
-                        throw std::runtime_error(string_format("%s: failed to seek for tensor %s\n", __func__, t->name));
-                    }
-                    size_t num_bytes = lm_ggml_nbytes(cur);
+                    if (!fin) return false;
+                    fin.read(reinterpret_cast<char *>(dst), n);
+                    return fin.good();
+                }
+            };
+
+            if (!ctx_clip.no_alloc) {
+                for (auto &t : tensors_to_load) {
+
+                    lm_ggml_tensor *cur =
+                        lm_ggml_get_tensor(ctx_clip.ctx_data.get(), t->name);
+
+                    LM_GGML_ASSERT(cur && "tensor not found in ctx_data");
+
+                    auto it_off = tensor_offset.find(t->name);
+                    LM_GGML_ASSERT(it_off != tensor_offset.end());
+
+                    const size_t offset = it_off->second;
+                    const size_t num_bytes = lm_ggml_nbytes(cur);
+
                     if (lm_ggml_backend_buft_is_host(buft)) {
-                        // for the CPU and Metal backend, we can read directly into the tensor
-                        fin.read(reinterpret_cast<char *>(cur->data), num_bytes);
+                        if (!read_at(cur->data, offset, num_bytes)) {
+                            throw std::runtime_error(string_format(
+                                "%s: failed to read tensor %s\n",
+                                __func__, t->name));
+                        }
                     } else {
-                        // read into a temporary buffer first, then copy to device memory
                         read_buf.resize(num_bytes);
-                        fin.read(reinterpret_cast<char *>(read_buf.data()), num_bytes);
-                        lm_ggml_backend_tensor_set(cur, read_buf.data(), 0, num_bytes);
+
+                        if (!read_at(read_buf.data(), offset, num_bytes)) {
+                            throw std::runtime_error(string_format(
+                                "%s: failed to read tensor %s\n",
+                                __func__, t->name));
+                        }
+
+                        lm_ggml_backend_tensor_set(cur,
+                                                read_buf.data(),
+                                                0,
+                                                num_bytes);
                     }
+
                     data_loaded += num_bytes;
+
                     if (progress_callback && total_data_size > 0) {
-                        const float progress = (float)data_loaded / (float)total_data_size;
-                        if (!progress_callback(progress, progress_callback_user_data)) {
-                            throw std::runtime_error(string_format("%s: model loading cancelled by progress_callback\n", __func__));
+                        float progress =
+                            (float)data_loaded / (float)total_data_size;
+
+                        if (!progress_callback(progress,
+                                            progress_callback_user_data)) {
+                            throw std::runtime_error(string_format(
+                                "%s: loading cancelled\n", __func__));
                         }
                     }
                 }
-                LOG_DBG("%s: loaded %zu tensors from %s\n", __func__, tensors_to_load.size(), fname.c_str());
-            } else {
-                LOG_DBG("%s: no_alloc is set, skipping tensor data loading (%zu tensors)\n", __func__, tensors_to_load.size());
+
+                LOG_DBG("%s: loaded %zu tensors from %s %s\n",
+                        __func__,
+                        tensors_to_load.size(),
+                        fname.c_str(),
+                        is_fd ? "(fd)" : "(file)");
             }
-            fin.close();
+
+            if (!is_fd) {
+                fin.close();
+            }
         }
 
     }
+
 
     struct support_info_op {
         lm_ggml_tensor * op;

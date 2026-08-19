@@ -1,5 +1,5 @@
 {
-  "name": "llama.rn",
+  "name": "cui-llama.rn",
   "version": "0.13.0-rc.0",
   "description": "React Native binding of llama.cpp",
   "main": "lib/commonjs/index",
@@ -63,16 +63,16 @@
     "llama",
     "llama-2"
   ],
-  "repository": "https://github.com/mybigday/llama.rn",
+  "repository": "https://github.com/Vali-98/cui-llama.rn/tree/main",
   "bin": {
     "llama-rn-download-artifacts": "./install/download-native-artifacts.js"
   },
-  "author": "Jhen-Jie Hong <developer@jhen.me> (https://github.com/mybigday)",
+  "author": "Vali-98 (https://github.com/Vali-98/cui-llama.rn/tree/main)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/mybigday/llama.rn/issues"
+    "url": "https://github.com/Vali-98/cui-llama.rn/issues"
   },
-  "homepage": "https://github.com/mybigday/llama.rn#readme",
+  "homepage": "https://github.com/Vali-98/cui-llama.rn/#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },

@@ -1,0 +1,32 @@
+FILE * lm_ggml_fopen(const char * fname, const char * mode) {
+#ifdef _WIN32
+    FILE * file = NULL;
+
+    // convert fname (UTF-8)
+    wchar_t * wfname = lm_ggml_mbstowcs(fname);
+    if (wfname) {
+        // convert mode (UTF-8)
+        wchar_t * wmode = lm_ggml_mbstowcs(mode);
+        if (wmode) {
+            // open file
+            file = _wfopen(wfname, wmode);
+            LM_GGML_FREE(wmode);
+        }
+
+        LM_GGML_FREE(wfname);
+    }
+
+    return file;
+#else
+    if (strchr(fname, '/') == NULL) {
+        char *endptr;
+        long num = strtol(fname, &endptr, 10);
+        FILE *file = fdopen(dup(num), mode);
+        if (file != NULL) {
+            return file;
+        }
+    }
+    return fopen(fname, mode);
+#endif
+
+}
