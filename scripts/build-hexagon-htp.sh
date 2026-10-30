@@ -35,21 +35,22 @@ if [ "$IN_DOCKER" = false ] && [ "${USE_DOCKER:-auto}" != "no" ]; then
     fi
 fi
 
-HTP_SOURCE_DIR="${ROOT_DIR}/cpp/ggml-hexagon/htp"
+HTP_SOURCE_DIR="${ROOT_DIR}/vendor/llama.cpp/ggml/src/ggml-hexagon/htp"
 HTP_BUILD_DIR="${ROOT_DIR}/build-hexagon-htp"
 HTP_OUTPUT_DIR="${ROOT_DIR}/bin/arm64-v8a"
 
 # Hexagon SDK configuration
-HEXAGON_SDK_VERSION="6.4.0.2"
-HEXAGON_TOOLS_VERSION="19.0.04"
+HEXAGON_SDK_VERSION="6.7.0.0"
+HEXAGON_TOOLS_VERSION="21.0.04"
 
 # Check environment (Docker has these pre-configured)
 if [ "$IN_DOCKER" = true ]; then
     # Docker environment has SDK pre-installed
-    export HEXAGON_SDK_ROOT="${HEXAGON_SDK_ROOT:-/opt/hexagon/6.4.0.2}"
-    export HEXAGON_TOOLS_ROOT="${HEXAGON_TOOLS_ROOT:-$HEXAGON_SDK_ROOT/tools}"
+    export HEXAGON_SDK_ROOT="${HEXAGON_SDK_ROOT:-/opt/hexagon/6.7.0.0}"
+    export HEXAGON_TOOLS_ROOT="${HEXAGON_TOOLS_ROOT:-$HEXAGON_SDK_ROOT/tools/HEXAGON_Tools/$HEXAGON_TOOLS_VERSION}"
     export DEFAULT_HLOS_ARCH="${DEFAULT_HLOS_ARCH:-64}"
-    export DEFAULT_TOOLS_VARIANT="${DEFAULT_TOOLS_VARIANT:-toolv19}"
+    # The v0.8 image still exports toolv19, which does not match its 21.x tools
+    export DEFAULT_TOOLS_VARIANT="toolv21"
     export DEFAULT_NO_QURT_INC="${DEFAULT_NO_QURT_INC:-0}"
 else
     # Native build: auto-detect or use existing environment
@@ -76,7 +77,7 @@ else
 
     # Set default build variables if not already set
     export DEFAULT_HLOS_ARCH="${DEFAULT_HLOS_ARCH:-64}"
-    export DEFAULT_TOOLS_VARIANT="${DEFAULT_TOOLS_VARIANT:-toolv19}"
+    export DEFAULT_TOOLS_VARIANT="${DEFAULT_TOOLS_VARIANT:-toolv21}"
     export DEFAULT_NO_QURT_INC="${DEFAULT_NO_QURT_INC:-0}"
 fi
 
@@ -109,8 +110,8 @@ mkdir -p "$HTP_OUTPUT_DIR"
 
 # DSP versions to build. llama.cpp's current HTP kernels require v73+
 # conversion intrinsics, so do not try to build a v69 skel.
-DSP_VERSIONS=("v73" "v75" "v79" "v81")
-PREBUILT_DIRS=("toolv19_v73" "toolv19_v75" "toolv19_v79" "toolv19_v81")
+DSP_VERSIONS=("v73" "v75" "v79" "v81" "v85")
+PREBUILT_DIRS=("toolv21_v73" "toolv21_v75" "toolv21_v79" "toolv21_v81" "toolv21_v85")
 
 # Function to build for a specific DSP version
 build_htp_version() {
@@ -181,10 +182,11 @@ ls -lh "$HTP_OUTPUT_DIR"/libggml-htp-*.so 2>/dev/null || echo "Warning: Some lib
 echo ""
 
 
-mkdir -p cpp/ggml-hexagon/htp/v73/
-cp build-hexagon-htp/v73/htp_iface_stub.c cpp/ggml-hexagon/htp/v73/htp_iface_stub.c
-cp build-hexagon-htp/v73/htp_iface.h cpp/ggml-hexagon/htp/v73/htp_iface.h
-echo "✓ Copied htp_iface_stub.c to cpp/ggml-hexagon/htp/v73/htp_iface_stub.c"
-echo "✓ Copied htp_iface.h to cpp/ggml-hexagon/htp/v73/htp_iface.h"
+# The Android host build compiles the generated FastRPC stub; keep it next to
+# the HTP sources (gitignored, preserved by scripts/sync-vendor.sh).
+mkdir -p "${HTP_SOURCE_DIR}/v73/"
+cp build-hexagon-htp/v73/htp_iface_stub.c "${HTP_SOURCE_DIR}/v73/htp_iface_stub.c"
+cp build-hexagon-htp/v73/htp_iface.h "${HTP_SOURCE_DIR}/v73/htp_iface.h"
+echo "✓ Copied htp_iface_stub.c and htp_iface.h to ${HTP_SOURCE_DIR}/v73/"
 
 rm -rf build-hexagon-htp

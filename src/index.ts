@@ -14,6 +14,23 @@ import type {
   NativeEmbeddingParams,
   NativeRerankParams,
   NativeRerankResult,
+  DecisionModelType,
+  DecisionReadout,
+  DecisionValue,
+  DecisionContent,
+  DecisionChoiceQuestion,
+  DecisionScoreQuestion,
+  DecisionNoulQuestion,
+  DecisionQuestion,
+  DecisionQuestions,
+  DecisionRequest,
+  DecisionChoiceAnswer,
+  DecisionScoreAnswer,
+  DecisionNoulAnswer,
+  DecisionAnswer,
+  DecisionAnswerOf,
+  DecisionResult,
+  NativeDecisionResult,
   NativeCompletionTokenProbItem,
   NativeCompletionResultTimings,
   JinjaFormattedChatResult,
@@ -62,6 +79,23 @@ export type {
   NativeEmbeddingParams,
   NativeRerankParams,
   NativeRerankResult,
+  DecisionModelType,
+  DecisionReadout,
+  DecisionValue,
+  DecisionContent,
+  DecisionChoiceQuestion,
+  DecisionScoreQuestion,
+  DecisionNoulQuestion,
+  DecisionQuestion,
+  DecisionQuestions,
+  DecisionRequest,
+  DecisionChoiceAnswer,
+  DecisionScoreAnswer,
+  DecisionNoulAnswer,
+  DecisionAnswer,
+  DecisionAnswerOf,
+  DecisionResult,
+  NativeDecisionResult,
   NativeCompletionTokenProbItem,
   NativeCompletionResultTimings,
   FormattedChatResult,
@@ -108,6 +142,7 @@ const jsiBindingKeys = [
   'llamaGetFormattedChat',
   'llamaEmbedding',
   'llamaRerank',
+  'llamaDecide',
   'llamaBench',
   'llamaToggleNativeLog',
   'llamaSetContextLimit',
@@ -138,6 +173,7 @@ const jsiBindingKeys = [
   'llamaCancelRequest',
   'llamaQueueEmbedding',
   'llamaQueueRerank',
+  'llamaQueueDecide',
   'llamaGetParallelStatus',
   'llamaSubscribeParallelStatus',
   'llamaUnsubscribeParallelStatus',
@@ -279,7 +315,7 @@ export type CompletionBaseParams = {
   chat_template?: string
   jinja?: boolean
   tools?: object
-  parallel_tool_calls?: object
+  parallel_tool_calls?: boolean
   tool_choice?: string
   response_format?: CompletionResponseFormat
   media_paths?: string | string[]
@@ -573,7 +609,7 @@ export class LlamaContext {
             text,
             params || {},
             (embedding) => {
-              resolveResult({ embedding })
+              resolveResult({ embedding: Array.from(embedding) })
             },
           )
 
@@ -622,6 +658,46 @@ export class LlamaContext {
                 }))
                 .sort((a: RerankResult, b: RerankResult) => b.score - a.score)
               resolveResult(sortedResults)
+            },
+          )
+
+          resolveOuter({
+            requestId,
+            promise: resultPromise,
+          })
+        } catch (e) {
+          rejectOuter(e)
+        }
+      }),
+
+    /**
+     * Queue a decision request for parallel processing (non-blocking)
+     * @param request The state and the typed questions, see `decide()`
+     * @returns Promise resolving to object with requestId and promise (resolves to the answers)
+     */
+    decide: async <const Q extends DecisionQuestions>(
+      request: DecisionRequest<Q>,
+    ): Promise<{
+      requestId: number
+      promise: Promise<DecisionResult<Q>>
+    }> =>
+      new Promise(async (resolveOuter, rejectOuter) => {
+        const { llamaQueueDecide } = getJsi()
+        try {
+          let resolveResult: (value: DecisionResult<Q>) => void
+          let rejectResult: (reason: Error) => void
+          const resultPromise = new Promise<DecisionResult<Q>>((res, rej) => {
+            resolveResult = res
+            rejectResult = rej
+          })
+
+          // a request can fail after it was queued (e.g. a prompt longer than n_ubatch)
+          const { requestId } = await llamaQueueDecide(
+            this.id,
+            request,
+            (result) => {
+              if ('error' in result) rejectResult(new Error(result.error))
+              else resolveResult(result as DecisionResult<Q>)
             },
           )
 
@@ -705,7 +781,9 @@ export class LlamaContext {
     options?: { tokenSize: number },
   ): Promise<number> {
     const { llamaSaveSession } = getJsi()
-    return llamaSaveSession(this.id, filepath, options?.tokenSize || -1)
+    let path = filepath
+    if (path.startsWith('file://')) path = path.slice(7)
+    return llamaSaveSession(this.id, path, options?.tokenSize || -1)
   }
 
   isLlamaChatSupported(): boolean {
@@ -724,7 +802,7 @@ export class LlamaContext {
       jinja?: boolean
       response_format?: CompletionResponseFormat
       tools?: object
-      parallel_tool_calls?: object
+      parallel_tool_calls?: boolean
       tool_choice?: string
       enable_thinking?: boolean
       reasoning_format?: 'none' | 'auto' | 'deepseek'
@@ -759,6 +837,9 @@ export class LlamaContext {
               mediaPaths.push(path)
             } else if (audio.data) {
               mediaPaths.push(audio.data)
+            } else {
+              // A marker with no path is paired with the next file.
+              throw new Error('input_audio url or data is required')
             }
             return {
               type: 'text',
@@ -790,6 +871,9 @@ export class LlamaContext {
     const jsonSchema = getJsonSchema(params?.response_format)
 
     const { llamaGetFormattedChat } = getJsi()
+    // messages / tools / json_schema stay JSON strings: llama.cpp's
+    // common_json is only constructible via parse(), so native would have
+    // to re-serialize an object anyway. Everything else crosses as-is.
     const result = await llamaGetFormattedChat(
       this.id,
       JSON.stringify(chat),
@@ -798,26 +882,13 @@ export class LlamaContext {
         jinja: useJinja,
         json_schema: jsonSchema ? JSON.stringify(jsonSchema) : undefined,
         tools: params?.tools ? JSON.stringify(params.tools) : undefined,
-        parallel_tool_calls: params?.parallel_tool_calls
-          ? JSON.stringify(params.parallel_tool_calls)
-          : undefined,
+        parallel_tool_calls: params?.parallel_tool_calls === true,
         tool_choice: params?.tool_choice,
         enable_thinking: params?.enable_thinking ?? true,
         reasoning_format: params?.reasoning_format ?? 'none',
         add_generation_prompt: params?.add_generation_prompt,
-        now:
-          typeof params?.now === 'number' ? params.now.toString() : params?.now,
-        chat_template_kwargs: params?.chat_template_kwargs
-          ? JSON.stringify(
-              Object.entries(params.chat_template_kwargs).reduce(
-                (acc, [key, value]) => {
-                  acc[key] = JSON.stringify(value)
-                  return acc
-                },
-                {} as Record<string, any>,
-              ),
-            )
-          : undefined,
+        now: params?.now,
+        chat_template_kwargs: params?.chat_template_kwargs,
         force_pure_content: forcePureContent,
       },
     )
@@ -953,12 +1024,15 @@ export class LlamaContext {
     return llamaDetokenize(this.id, tokens)
   }
 
-  embedding(
+  async embedding(
     text: string,
     params?: EmbeddingParams,
   ): Promise<NativeEmbeddingResult> {
     const { llamaEmbedding } = getJsi()
-    return llamaEmbedding(this.id, text, params || {})
+    // Native hands the vector over as a Float32Array (one ArrayBuffer instead
+    // of one JSI call per element); the public type stays number[].
+    const { embedding } = await llamaEmbedding(this.id, text, params || {})
+    return { embedding: Array.from(embedding) }
   }
 
   async rerank(
@@ -977,6 +1051,24 @@ export class LlamaContext {
       .sort((a, b) => b.score - a.score)
   }
 
+  /**
+   * Answer typed questions about a state with a decision model
+   * (see `model.decision`), in the shape of the TypeSafe `/v1/systemone` API.
+   * Each answer is read from one forward pass, no token is generated.
+   * It runs on the sequence of `completion()`, whose cached prompt is
+   * dropped: the next completion evaluates its prompt from the start.
+   *
+   * Rejects if the request is invalid, if the model is not a decision
+   * model of a supported type, or if parallel mode is enabled (use
+   * `parallel.decide()` then).
+   */
+  async decide<const Q extends DecisionQuestions>(
+    request: DecisionRequest<Q>,
+  ): Promise<DecisionResult<Q>> {
+    const { llamaDecide } = getJsi()
+    return (await llamaDecide(this.id, request)) as DecisionResult<Q>
+  }
+
   async bench(
     pp: number,
     tg: number,
@@ -984,8 +1076,7 @@ export class LlamaContext {
     nr: number,
   ): Promise<BenchResult> {
     const { llamaBench } = getJsi()
-    const result = await llamaBench(this.id, pp, tg, pl, nr)
-    const parsed = JSON.parse(result)
+    const parsed = await llamaBench(this.id, pp, tg, pl, nr)
     return {
       nKvMax: parsed.n_kv_max,
       nBatch: parsed.n_batch,
@@ -1159,20 +1250,20 @@ export class LlamaContext {
 
     const { llamaGetFormattedAudioCompletion } = getJsi()
 
-    // 2. LlamaSpeaker handle path: pass empty speakerStr + the speaker id so
-    //    native arms pending_speaker_id from the registry. Downstream
+    // 2. LlamaSpeaker handle path: pass a null speaker payload + the speaker
+    //    id so native arms pending_speaker_id from the registry. Downstream
     //    completion / generateAudioCodes calls inject the speaker automatically.
     if (options.speaker instanceof LlamaSpeaker) {
       return llamaGetFormattedAudioCompletion(
         this.id,
-        '',
+        null,
         inputText,
         options.speaker.id,
       )
     }
 
     // 3. Otherwise resolve to a pre-baked speaker payload (an OuteTTSSpeaker /
-    //    NeuTTSSpeaker config) and forward it to native as speaker JSON. A
+    //    NeuTTSSpeaker config) and forward it to native as an object. A
     //    structured object is used directly; a string name — or `undefined`,
     //    which means 'default' — resolves against the built-in voice table,
     //    whose entries are themselves pre-baked payloads. Native never sees a
@@ -1216,13 +1307,20 @@ export class LlamaContext {
       )
     }
 
-    const speakerStr = payload ? JSON.stringify(payload) : ''
-    return llamaGetFormattedAudioCompletion(this.id, speakerStr, inputText)
+    return llamaGetFormattedAudioCompletion(this.id, payload, inputText)
   }
 
-  async decodeAudioTokens(tokens: number[]): Promise<Array<number>> {
+  async decodeAudioTokens(
+    tokens: number[] | Int32Array,
+  ): Promise<Array<number>> {
     const { llamaDecodeAudioTokens } = getJsi()
-    return await llamaDecodeAudioTokens(this.id, tokens)
+    // Typed arrays cross JSI as one ArrayBuffer copy each way; converting
+    // here keeps the per-element work inside the JS engine.
+    const pcm = await llamaDecodeAudioTokens(
+      this.id,
+      tokens instanceof Int32Array ? tokens : Int32Array.from(tokens),
+    )
+    return Array.from(pcm)
   }
 
   /**
@@ -1262,8 +1360,7 @@ export class LlamaContext {
   }> {
     const { llamaGenerateAudioCodes } = getJsi()
     const { onFrame, ...rest } = options
-    const optsJson = JSON.stringify(rest)
-    return await llamaGenerateAudioCodes(this.id, optsJson, onFrame)
+    return await llamaGenerateAudioCodes(this.id, rest, onFrame)
   }
 
   async createSpeaker(config: {
@@ -1274,27 +1371,29 @@ export class LlamaContext {
     bake?: boolean
   }): Promise<LlamaSpeaker> {
     const { llamaCreateSpeaker } = getJsi()
-    const pcm =
-      config.refAudio instanceof Float32Array
-        ? Array.from(config.refAudio)
-        : config.refAudio
-    const optsJson = JSON.stringify({
-      pcm,
+    // Float32Array is read straight from its ArrayBuffer on the native side.
+    const h = await llamaCreateSpeaker(this.id, config.refAudio, {
       inputSampleRate: config.refAudioSampleRate,
       refText: config.refText ?? '',
       bake: config.bake ?? false,
       ...(config.emotion !== undefined ? { emotion: config.emotion } : {}),
     })
-    const h = await llamaCreateSpeaker(this.id, optsJson)
     return new LlamaSpeaker(this.id, h)
   }
 
   async decodeAudioEmbeddings(
-    embeddings: number[],
+    embeddings: number[] | Float32Array,
     embeddingDim: number,
   ): Promise<Array<number>> {
     const { llamaDecodeAudioEmbeddings } = getJsi()
-    return await llamaDecodeAudioEmbeddings(this.id, embeddings, embeddingDim)
+    const pcm = await llamaDecodeAudioEmbeddings(
+      this.id,
+      embeddings instanceof Float32Array
+        ? embeddings
+        : Float32Array.from(embeddings),
+      embeddingDim,
+    )
+    return Array.from(pcm)
   }
 
   async getAudioSampleRate(): Promise<number> {
@@ -1459,11 +1558,10 @@ export async function getBackendDevicesInfo(): Promise<
   await installJsi()
   const { llamaGetBackendDevicesInfo } = getJsi()
   try {
-    const jsonString = await llamaGetBackendDevicesInfo()
-    return JSON.parse(jsonString as string)
+    return await llamaGetBackendDevicesInfo()
   } catch (e) {
     console.warn(
-      '[RNLlama] Failed to parse backend devices info, falling back to empty list',
+      '[RNLlama] Failed to read backend devices info, falling back to empty list',
       e,
     )
     return []

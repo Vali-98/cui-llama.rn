@@ -2,8 +2,8 @@
 #import <jsi/jsi.h>
 
 #if RNLLAMA_BUILD_FROM_SOURCE
-#import "../cpp/llama-impl.h"
-#import "../cpp/llama.h"
+#import "llama-impl.h"
+#import "llama.h"
 #else
 #import <rnllama/llama-impl.h>
 #import <rnllama/llama.h>
@@ -45,7 +45,7 @@ MetalAvailability getMetalAvailability(bool skipGpuDevices) {
         return availability;
     }
 
-#if defined(LM_GGML_USE_METAL)
+#if defined(GGML_USE_METAL)
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     bool supportsMetal = false;
 
@@ -73,6 +73,11 @@ MetalAvailability getMetalAvailability(bool skipGpuDevices) {
 }
 } // namespace rnllama_jsi
 
+@protocol RNLlamaBridgeRuntimeAccess <NSObject>
+@property (nonatomic, readonly) void *runtime;
+@property (nonatomic, readonly) std::shared_ptr<facebook::react::CallInvoker> jsCallInvoker;
+@end
+
 @implementation RNLlama {
     __unsafe_unretained RCTBridge *_bridge;
 }
@@ -96,11 +101,11 @@ RCT_EXPORT_METHOD(install:(RCTPromiseResolveBlock)resolve
         return;
     }
 
-    RCTCxxBridge *cxxBridge = (RCTCxxBridge *)bridge.batchedBridge;
+    id<RNLlamaBridgeRuntimeAccess> cxxBridge = (id<RNLlamaBridgeRuntimeAccess>)bridge.batchedBridge;
     if (!cxxBridge) {
-        cxxBridge = (RCTCxxBridge *)bridge;
+        cxxBridge = (id<RNLlamaBridgeRuntimeAccess>)bridge;
     }
-    auto callInvoker = cxxBridge.jsCallInvoker ?: bridge.jsCallInvoker;
+    auto callInvoker = cxxBridge.jsCallInvoker;
     if (!cxxBridge.runtime) {
         resolve(@false);
         return;

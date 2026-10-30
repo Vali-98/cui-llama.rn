@@ -137,6 +137,7 @@ void llama_rn_slot::reset() {
     rerank_prompt_tokens.clear();
     rerank_scores.clear();
     rerank_current_index = 0;
+    decision_job.reset();
 
     // Reset state management
     if (!load_state_path.empty() || !save_state_path.empty() || !save_prompt_state_path.empty()) {
@@ -335,8 +336,12 @@ bool llama_rn_slot::should_use_mtp() const {
         return false;
     }
 
+    // Classic standalone draft models (draft-simple) run through the same
+    // draft/process/accept cycle as MTP; the gate only knew MTP before, which silently
+    // disabled speculation for draft-simple in queued completions.
     const auto & types = params->speculative.types;
-    return std::find(types.begin(), types.end(), COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != types.end();
+    return std::find(types.begin(), types.end(), COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != types.end() ||
+           std::find(types.begin(), types.end(), COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE) != types.end();
 }
 
 void llama_rn_slot::reset_speculative() {
@@ -353,11 +358,7 @@ void llama_rn_slot::reset_speculative() {
         spec_ctx = nullptr;
     }
     spec_is_shared = false;
-    if (spec_batch_initialized) {
-        llama_batch_free(spec_batch);
-        spec_batch = {};
-        spec_batch_initialized = false;
-    }
+    spec_batch = {};
     spec_prompt.clear();
     spec_id_last = LLAMA_TOKEN_NULL;
     spec_n_past = 0;
@@ -370,27 +371,44 @@ void llama_rn_slot::init_mtp() {
         return;
     }
     if (parent_ctx == nullptr || parent_ctx->ctx == nullptr || parent_ctx->model == nullptr) {
-        throw std::runtime_error("MTP speculative decoding requires an initialized context");
+        throw std::runtime_error("speculative decoding requires an initialized context");
     }
     if (llama_model_has_encoder(parent_ctx->model)) {
-        throw std::runtime_error("MTP speculative decoding is only supported for decoder-only models");
+        throw std::runtime_error("speculative decoding is only supported for decoder-only models");
     }
     if (!media_paths.empty()) {
-        throw std::runtime_error("MTP speculative decoding currently supports text-only queued completions");
+        throw std::runtime_error("speculative decoding currently supports text-only queued completions");
     }
     if (prompt_tokens.empty()) {
-        throw std::runtime_error("MTP speculative decoding requires a non-empty prompt");
+        throw std::runtime_error("speculative decoding requires a non-empty prompt");
     }
     if (!load_state_path.empty() || !save_prompt_state_path.empty()) {
-        throw std::runtime_error("MTP speculative decoding for queued completions does not support prompt state load/save");
+        throw std::runtime_error("speculative decoding for queued completions does not support prompt state load/save");
     }
 
     const auto n_mtp = params->speculative.draft.n_max;
-    if ((llama_model_is_recurrent(parent_ctx->model) || llama_model_is_hybrid(parent_ctx->model)) &&
+    // Rollback (rs) sequences are only allocated for MTP-style drafts (see
+    // common_params_speculative::need_n_rs_seq), not for draft-simple.
+    const bool is_mtp = std::find(
+        params->speculative.types.begin(), params->speculative.types.end(),
+        COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != params->speculative.types.end();
+    if (is_mtp &&
+        (llama_model_is_recurrent(parent_ctx->model) || llama_model_is_hybrid(parent_ctx->model)) &&
         llama_n_rs_seq(parent_ctx->ctx) < (uint32_t) n_mtp) {
         throw std::runtime_error(
             "MTP for recurrent or hybrid models must be enabled when loading the model "
             "with speculative.type='draft-mtp' and speculative.n_max/spec_draft_n_max set");
+    }
+
+    // Rejected drafts are removed with seq_rm on the target and the draft context, which
+    // recurrent/hybrid memory can only do through rs sequences, so such a draft-simple
+    // pair would abort on the first rejection.
+    if (!is_mtp) {
+        const llama_model * model_dft = parent_ctx->getMTPDraftModel();
+        if (llama_model_is_recurrent(parent_ctx->model) || llama_model_is_hybrid(parent_ctx->model) ||
+            llama_model_is_recurrent(model_dft) || llama_model_is_hybrid(model_dft)) {
+            throw std::runtime_error("draft-simple does not support recurrent or hybrid models yet");
+        }
     }
 
     reset_speculative();
@@ -402,7 +420,7 @@ void llama_rn_slot::init_mtp() {
     } else {
         spec_ctx = parent_ctx->createMTPDraftContext(*params);
         if (spec_ctx == nullptr) {
-            throw std::runtime_error("failed to create MTP draft context");
+            throw std::runtime_error("failed to create draft context");
         }
 
         params->speculative.draft.ctx_tgt = parent_ctx->ctx;
@@ -413,12 +431,11 @@ void llama_rn_slot::init_mtp() {
             (uint32_t) id + 1);
         spec = common_speculative_init(params->speculative, n_seq);
         if (spec == nullptr) {
-            throw std::runtime_error("failed to initialize MTP speculative decoding");
+            throw std::runtime_error("failed to initialize speculative decoding");
         }
     }
 
-    spec_batch = llama_batch_init(llama_n_batch(parent_ctx->ctx), 0, 1);
-    spec_batch_initialized = true;
+    spec_batch = common_batch(parent_ctx->ctx);
 
     common_memory memory;
     memory.init(parent_ctx->ctx, spec_ctx);
@@ -427,7 +444,7 @@ void llama_rn_slot::init_mtp() {
 
     eval_mtp_prompt();
 
-    const int64_t t_now = lm_ggml_time_us();
+    const int64_t t_now = ggml_time_us();
     t_start_generation = t_now;
     t_prompt_processing = (t_start_generation - t_start_process) / 1e6;
     prompt_processing_finished = false;
@@ -451,21 +468,21 @@ void llama_rn_slot::eval_mtp_prompt() {
     size_t offset = 0;
 
     while (offset < spec_prompt.size()) {
-        common_batch_clear(spec_batch);
+        spec_batch.clear();
 
         const size_t n_eval = std::min<size_t>(n_batch, spec_prompt.size() - offset);
         for (size_t i = 0; i < n_eval; ++i) {
             const bool needs_logits = i + 1 == n_eval;
-            common_batch_add(spec_batch, spec_prompt[offset + i],
-                             (llama_pos) (offset + i), { seq_id }, needs_logits);
+            spec_batch.add(spec_prompt[offset + i],
+                           (llama_pos) (offset + i), seq_id, needs_logits);
         }
 
-        const int ret = llama_decode(parent_ctx->ctx, spec_batch);
+        const int ret = llama_process(parent_ctx->ctx, LLAMA_PROCESS_TYPE_DECODE, spec_batch.get());
         if (ret != 0) {
-            throw std::runtime_error("failed to evaluate MTP prompt batch, ret=" + std::to_string(ret));
+            throw std::runtime_error("failed to evaluate speculative prompt batch, ret=" + std::to_string(ret));
         }
         if (!common_speculative_process(spec, spec_batch)) {
-            throw std::runtime_error("failed to process MTP prompt batch");
+            throw std::runtime_error("failed to process speculative prompt batch");
         }
 
         offset += n_eval;
@@ -530,19 +547,19 @@ bool llama_rn_slot::refill_mtp_tokens() {
     const size_t n_draft = spec_draft.size();
     num_draft_tokens += n_draft;
 
-    common_batch_clear(spec_batch);
-    common_batch_add(spec_batch, spec_id_last, spec_n_past, { seq_id }, true);
+    spec_batch.clear();
+    spec_batch.add(spec_id_last, spec_n_past, seq_id, true);
     for (size_t i = 0; i < n_draft; ++i) {
-        common_batch_add(spec_batch, spec_draft[i],
-                         spec_n_past + (llama_pos) i + 1, { seq_id }, true);
+        spec_batch.add(spec_draft[i],
+                       spec_n_past + (llama_pos) i + 1, seq_id, true);
     }
 
-    const int ret = llama_decode(parent_ctx->ctx, spec_batch);
+    const int ret = llama_process(parent_ctx->ctx, LLAMA_PROCESS_TYPE_DECODE, spec_batch.get());
     if (ret != 0) {
-        throw std::runtime_error("failed to evaluate MTP target batch, ret=" + std::to_string(ret));
+        throw std::runtime_error("failed to evaluate speculative target batch, ret=" + std::to_string(ret));
     }
     if (!common_speculative_process(spec, spec_batch)) {
-        throw std::runtime_error("failed to process MTP target batch");
+        throw std::runtime_error("failed to process speculative target batch");
     }
 
     auto accepted = common_sampler_sample_and_accept_n(ctx_sampling, parent_ctx->ctx, spec_draft);
@@ -616,9 +633,7 @@ completion_token_output llama_rn_slot::next_token_mtp() {
 completion_chat_output llama_rn_slot::parseChatOutput(bool is_partial) {
     common_chat_parser_params syntax;
     syntax.format = static_cast<common_chat_format>(current_chat_format);
-    syntax.reasoning_format = current_reasoning_format;
-    syntax.generation_prompt = current_generation_prompt;
-    syntax.parse_tool_calls = true;
+    syntax.generation_prompt = common_chat_input(current_generation_prompt);
 
     // Load the PEG parser if available (required for COMMON_CHAT_FORMAT_PEG_* formats)
     if (!current_chat_parser.empty()) {
@@ -627,7 +642,7 @@ completion_chat_output llama_rn_slot::parseChatOutput(bool is_partial) {
 
     std::string full_text = prefill_text + generated_text;
 
-    common_chat_msg parsed_msg = common_chat_parse(full_text, is_partial, syntax);
+    common_chat_msg parsed_msg = common_chat_parse(common_chat_input(full_text), is_partial, syntax);
 
     completion_chat_output result;
     result.content = parsed_msg.content;
@@ -750,7 +765,7 @@ bool llama_rn_slot::load_state() {
         return false;
     }
 
-#ifdef LM_GGML_USE_OPENCL
+#ifdef GGML_USE_OPENCL
     const auto &model_devices = parent_ctx->llama_init->model()->devices;
     auto has_opencl = false;
     for (const auto &dev_info : model_devices) {
@@ -758,7 +773,7 @@ bool llama_rn_slot::load_state() {
         if (dev == nullptr) {
             continue;
         }
-        const char *dev_name = lm_ggml_backend_dev_name(dev);
+        const char *dev_name = ggml_backend_dev_name(dev);
         if (strncmp(dev_name, "GPUOpenCL", 9) == 0) {
             has_opencl = true;
         }
@@ -782,7 +797,7 @@ bool llama_rn_slot::load_state() {
     LOG_INFO("Slot %d: Loading state from: %s", id, load_state_path.c_str());
 
     // Start timing
-    const int64_t t_load_start = lm_ggml_time_us();
+    const int64_t t_load_start = ggml_time_us();
 
     const llama_model * model = llama_get_model(parent_ctx->ctx);
     const bool is_recurrent_or_hybrid = llama_model_is_recurrent(model) || llama_model_is_hybrid(model);
@@ -846,7 +861,7 @@ bool llama_rn_slot::load_state() {
     cache_tokens = std::move(state_tokens);
 
     // Calculate elapsed time
-    const int64_t t_load_end = lm_ggml_time_us();
+    const int64_t t_load_end = ggml_time_us();
     const double t_load_ms = (t_load_end - t_load_start) / 1000.0;
 
     LOG_INFO("Slot %d: Loaded %zu tokens (%.2f ms, %.2f KB)",
@@ -862,7 +877,7 @@ bool llama_rn_slot::save_prompt_state_checkpoint() {
         return false;
     }
 
-#ifdef LM_GGML_USE_OPENCL
+#ifdef GGML_USE_OPENCL
     const auto &model_devices = parent_ctx->llama_init->model()->devices;
     auto has_opencl = false;
     for (const auto &dev_info : model_devices) {
@@ -870,7 +885,7 @@ bool llama_rn_slot::save_prompt_state_checkpoint() {
         if (dev == nullptr) {
             continue;
         }
-        const char *dev_name = lm_ggml_backend_dev_name(dev);
+        const char *dev_name = ggml_backend_dev_name(dev);
         if (strncmp(dev_name, "GPUOpenCL", 9) == 0) {
             has_opencl = true;
         }
@@ -920,8 +935,8 @@ bool llama_rn_slot::save_prompt_state_checkpoint() {
         return false;
     }
 
-    const char * cache_k = lm_ggml_type_name(parent_ctx->params.cache_type_k);
-    const char * cache_v = lm_ggml_type_name(parent_ctx->params.cache_type_v);
+    const char * cache_k = ggml_type_name(parent_ctx->params.cache_type_k);
+    const char * cache_v = ggml_type_name(parent_ctx->params.cache_type_v);
     llama_pos pos_min = -1;
     llama_pos pos_max = -1;
     if (parent_ctx && parent_ctx->ctx) {
@@ -985,7 +1000,7 @@ bool llama_rn_slot::save_state() {
     }
 
 
-#ifdef LM_GGML_USE_OPENCL
+#ifdef GGML_USE_OPENCL
     const auto &model_devices = parent_ctx->llama_init->model()->devices;
     auto has_opencl = false;
     for (const auto &dev_info : model_devices) {
@@ -993,7 +1008,7 @@ bool llama_rn_slot::save_state() {
         if (dev == nullptr) {
             continue;
         }
-        const char *dev_name = lm_ggml_backend_dev_name(dev);
+        const char *dev_name = ggml_backend_dev_name(dev);
         if (strncmp(dev_name, "GPUOpenCL", 9) == 0) {
             has_opencl = true;
         }
@@ -1017,7 +1032,7 @@ bool llama_rn_slot::save_state() {
     LOG_INFO("Slot %d: Saving state to: %s", id, save_state_path.c_str());
 
     // Start timing
-    const int64_t t_save_start = lm_ggml_time_us();
+    const int64_t t_save_start = ggml_time_us();
 
     // Check if model is recurrent/hybrid for save behavior
     const llama_model * model = llama_get_model(parent_ctx->ctx);
@@ -1093,8 +1108,8 @@ bool llama_rn_slot::save_state() {
         actual_save_size
     );
 
-    const char * cache_k = lm_ggml_type_name(parent_ctx->params.cache_type_k);
-    const char * cache_v = lm_ggml_type_name(parent_ctx->params.cache_type_v);
+    const char * cache_k = ggml_type_name(parent_ctx->params.cache_type_k);
+    const char * cache_v = ggml_type_name(parent_ctx->params.cache_type_v);
     llama_pos pos_min = -1;
     llama_pos pos_max = -1;
     if (parent_ctx && parent_ctx->ctx) {
@@ -1134,7 +1149,7 @@ bool llama_rn_slot::save_state() {
                      media_retained ? bitmap_past_hashes : std::vector<std::string>{});
 
     // Calculate elapsed time
-    const int64_t t_save_end = lm_ggml_time_us();
+    const int64_t t_save_end = ggml_time_us();
     const double t_save_ms = (t_save_end - t_save_start) / 1000.0;
 
     LOG_INFO("Slot %d: Saved %zu tokens (%.2f ms, %.2f KB)",

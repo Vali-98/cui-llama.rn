@@ -6,6 +6,11 @@ export type NativeSpeculativeType =
   | 'none'
   | 'draft-mtp'
   /**
+   * Classic standalone draft model (a separate, vocab-compatible GGUF).
+   * Requires a draft model path; recurrent/hybrid models are not supported yet.
+   */
+  | 'draft-simple'
+  /**
    * Alias for draft-mtp.
    */
   | 'mtp'
@@ -22,6 +27,7 @@ export type NativeSpeculativeParams = {
     /**
      * Optional separate draft model path for MTP/speculative decoding.
      * When omitted, MTP uses the loaded target model's embedded draft layers.
+     * Required for draft-simple.
      */
     model?: string
     path?: string
@@ -93,7 +99,9 @@ export type NativeContextParams = {
   n_gpu_layers?: number
 
   /**
-   * Backend devices choice to use. Default equals to result of `getBackendDevicesInfo.
+   * Backend devices to use. If omitted, llama.rn uses the platform default selection.
+   * On Android, Hexagon is opt-in: use `['HTP0']` for one session, select multiple
+   * HTP devices explicitly, or use `['HTP*']` for every available HTP session.
    */
   devices?: Array<string>
 
@@ -281,11 +289,26 @@ export type NativeCompletionParams = {
    */
   n_predict?: number
   /**
-   * If greater than 0, the response also contains the probabilities of top N tokens for each generated token given the sampling settings.
-   * Note that for temperature < 0 the tokens are sampled greedily but token probabilities are still being calculated via a simple softmax of the logits without considering any other sampler settings.
+   * Number of tokens from the start of the prompt to keep when the context is full:
+   * an over-long prompt is truncated after them, and with `ctx_shift` on, a context shift
+   * during generation discards tokens after them. Use it to keep a system prompt.
+   * Capped at `n_ctx - 4`. Default: `0`
+   */
+  n_keep?: number
+  /**
+   * If greater than 0, the response also contains the probabilities of top N tokens for each generated token.
+   * By default these are the sampler chain's candidate probabilities, i.e. after `top_k` / `top_p` / `min_p` / `temperature` / `grammar` / ... have been applied and renormalised.
+   * Set `post_sampling_probs: false` to get a plain softmax of the raw logits instead.
    * Default: `0`
    */
   n_probs?: number
+  /**
+   * Controls what `n_probs` reports.
+   * `true`: probabilities from the sampler chain's candidates (post-sampling).
+   * `false`: softmax of the raw logits, ignoring every sampler setting. Use this for calibrated readouts / thresholds.
+   * Default: `true`
+   */
+  post_sampling_probs?: boolean
   /**
    * Per-completion speculative decoding override. For MTP on recurrent/hybrid
    * models, load the model with matching MTP options first.
@@ -452,6 +475,7 @@ export type NativeParallelCompletionParams = NativeCompletionParams & {
 }
 
 export type NativeCompletionTokenProbItem = {
+  tok_id: number
   tok_str: string
   prob: number
 }
@@ -544,6 +568,198 @@ export type NativeEmbeddingResult = {
   embedding: Array<number>
 }
 
+/*
+ * Typed decision models (System One).
+ *
+ * The request and the response follow the TypeSafe `/v1/systemone` API, the
+ * same contract llama-server serves: a model answers typed questions about a
+ * state in one forward pass, no token is generated.
+ */
+
+/**
+ * The readout a decision model declares in `<arch>.decision.type`.
+ * `system_one`: an older model that declares no type but carries a `system_one`
+ * template; its readout is derived from the model, see `readout`.
+ * `unknown`: the model is a decision model this build cannot serve, see `error`.
+ */
+export type DecisionModelType =
+  | 'openjev'
+  | 'lev'
+  | 'kev'
+  | 'nimble'
+  | 'laya'
+  | 'clef'
+  | 'pplx-decider'
+  | 'vllm-decision2'
+  | 'vllm-d3'
+  | 'lfm2-d1'
+  | 'lfm2-d1-omni'
+  | 'granite-switch'
+  | 'h2o-lightning'
+  | 'openbmb-minicpm-ocr-jev'
+  | 'lfm3-d1'
+  | 'lfm3-d1-omni'
+  | 'system_one'
+  | 'unknown'
+
+/**
+ * How a `system_one` model is read:
+ * `letter_slot`: a causal model, every question answered from one prompt.
+ * `rank_head`: a classification head scoring one prompt per option. The context
+ * must be initialized with `pooling_type: 'rank'` and `embedding: true`.
+ */
+export type DecisionReadout = 'letter_slot' | 'rank_head'
+
+/** Any JSON value */
+export type DecisionValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly DecisionValue[]
+  | { [key: string]: DecisionValue }
+
+/** A string, an object or an array. A value that is not a string is given to the model as JSON text. */
+export type DecisionContent =
+  | string
+  | readonly DecisionValue[]
+  | { [key: string]: DecisionValue }
+
+export type DecisionChoiceQuestion<K extends string = string> = {
+  type: 'choice'
+  instructions: DecisionContent
+  /**
+   * Maps each option to its description, in the order the options are shown.
+   * That is the order JavaScript enumerates the keys in: keys that are whole
+   * numbers (`'1'`, `'10'`) come first, in ascending order, wherever they were
+   * written. Give such options a prefix (`'n1'`) to keep them where they are.
+   */
+  criteria: { [key in K]: string | null }
+}
+
+export type DecisionScoreQuestion = {
+  type: 'score'
+  instructions: DecisionContent
+  /**
+   * 2 to 10 level descriptions, lowest level first.
+   * `h2o-lightning` takes 1 level up to its number of labels.
+   */
+  criteria: readonly string[]
+}
+
+export type DecisionNoulQuestion = {
+  type: 'noul'
+  instructions: DecisionContent
+  /** `lfm2-d1-omni` and `h2o-lightning` also take the descriptions under `yes` and `no` */
+  criteria?: {
+    true?: string | null
+    false?: string | null
+    yes?: string | null
+    no?: string | null
+  }
+}
+
+export type DecisionQuestion =
+  | DecisionChoiceQuestion
+  | DecisionScoreQuestion
+  | DecisionNoulQuestion
+
+/**
+ * `h2o-lightning` accepts a question with no `instructions` and no `type`
+ * (its template has defaults). `openbmb-minicpm-ocr-jev` answers exactly one
+ * question and takes no `instructions`: the task is part of its prompt.
+ */
+export type DecisionQuestions = Record<string, DecisionQuestion>
+
+export type DecisionRequest<Q extends DecisionQuestions = DecisionQuestions> = {
+  /**
+   * The content to evaluate. A state made of chat messages (an array of
+   * messages, or an object with a `messages` array) may carry `image_url`
+   * and `input_audio` parts, they are taken as media and removed from the state.
+   * `video_url` parts are not supported yet (`lfm3-d1` and `lfm3-d1-omni`
+   * reject them).
+   * For a `system_one` model the state may also be a list of content parts
+   * (`{ type: 'text', text }`, `{ type: 'image_url', image_url: { url } }`):
+   * the text is joined and each image stays where it is.
+   * `lfm2-d1`, `lfm2-d1-omni`, `lfm3-d1`, `lfm3-d1-omni` and `vllm-d3` take
+   * `null`, to ask about the media only. For `openbmb-minicpm-ocr-jev` the
+   * state is the OCR text and `files` must be exactly 2 images.
+   */
+  state: DecisionContent | null
+  questions: Q
+  /**
+   * Images, or audio clips for a model with `audioInput`, as file paths or
+   * data URLs. Needs `initMultimodal()`. All media go before the state, these
+   * first. `lfm2-d1-omni` takes images or one audio clip, not both.
+   */
+  files?: string[]
+  /** Alias of `files` */
+  images?: string[]
+}
+
+export type DecisionChoiceAnswer<K extends string = string> = {
+  type: 'choice'
+  /** The option with the highest probability. */
+  choice: K
+  /**
+   * Option to its probability, they sum to 1.
+   * Look an option up by its key: the key order is not guaranteed.
+   */
+  probabilities: { [key in K]: number }
+  /** 0 when all options are equally likely, 1 when one option has all the mass. */
+  confidence: number
+}
+
+export type DecisionScoreAnswer = {
+  type: 'score'
+  /**
+   * The expected level index, weighted by probability. Can be between two levels.
+   * `lfm3-d1` and `lfm3-d1-omni` answer the median level, a whole number.
+   */
+  score: number
+  /** Level index to its description. */
+  legend: Record<string, string>
+  /** Level index to its probability, they sum to 1. */
+  probabilities: Record<string, number>
+  confidence: number
+}
+
+export type DecisionNoulAnswer = {
+  type: 'noul'
+  /** The probability that the answer is true. */
+  noul: number
+}
+
+export type DecisionAnswer =
+  | DecisionChoiceAnswer
+  | DecisionScoreAnswer
+  | DecisionNoulAnswer
+
+/** The answer type of a question type, choice keys included. */
+export type DecisionAnswerOf<Q extends DecisionQuestion> =
+  Q extends DecisionChoiceQuestion<infer K>
+    ? DecisionChoiceAnswer<K>
+    : Q extends DecisionScoreQuestion
+    ? DecisionScoreAnswer
+    : DecisionNoulAnswer
+
+export type DecisionResult<Q extends DecisionQuestions = DecisionQuestions> = {
+  /** `general.name` of the model, or its file name if it has none */
+  model: string
+  answers: { [id in keyof Q]: DecisionAnswerOf<Q[id]> }
+  usage: {
+    /** Prompt tokens of all the questions */
+    input_tokens: number
+    /** Always 0 */
+    output_tokens: number
+  }
+}
+
+export type NativeDecisionResult = DecisionResult
+
+/** What the native side hands to the `llamaQueueDecide` callback */
+export type NativeQueuedDecisionResult = NativeDecisionResult | { error: string }
+
 export type NativeLlamaContext = {
   contextId: number
   model: {
@@ -575,6 +791,28 @@ export type NativeLlamaContext = {
     }
     metadata: Object
     isChatTemplateSupported: boolean // Deprecated
+    /**
+     * Set if the model is a typed decision model, see `LlamaContext.decide()`
+     */
+    decision?: {
+      type: DecisionModelType
+      /** Most options a `choice` question can have */
+      nOptionsMax: number
+      /**
+       * The prompt has a place for images (multimodal still has to be initialized).
+       * For a model read from its label logits (openjev, lev, nimble, ...) this
+       * follows from its template: a template that writes `images` takes them.
+       */
+      imageInput: boolean
+      /** The prompt has a place for an audio clip (multimodal still has to be initialized) */
+      audioInput: boolean
+      /** If false, `completion()` rejects: the model only answers decisions (clef, for one) */
+      textGeneration: boolean
+      /** Only for `system_one` models */
+      readout?: DecisionReadout
+      /** Why the model cannot be used, when `type` is `unknown` */
+      error?: string
+    }
   }
   /**
    * Loaded library name for Android
@@ -648,6 +886,29 @@ export type NativeRerankResult = {
   index: number
 }
 
+// Raw bench result as produced by the native side (snake_case); the
+// LlamaContext.bench wrapper maps it to BenchResult.
+export type NativeBenchResult = {
+  n_kv_max: number
+  n_batch: number
+  n_ubatch: number
+  flash_attn: number
+  is_pp_shared: number
+  n_gpu_layers: number
+  n_threads: number
+  n_threads_batch: number
+  pp: number
+  tg: number
+  pl: number
+  n_kv: number
+  t_pp: number
+  speed_pp: number
+  t_tg: number
+  speed_tg: number
+  t: number
+  speed: number
+}
+
 export type NativeBackendDeviceInfo = {
   backend: string
   type: string
@@ -658,7 +919,7 @@ export type NativeBackendDeviceInfo = {
 
 export type ParallelRequestStatus = {
   request_id: number
-  type: 'completion' | 'embedding' | 'rerank'
+  type: 'completion' | 'embedding' | 'rerank' | 'decision'
   state: 'queued' | 'processing_prompt' | 'generating' | 'done'
   prompt_length: number
   tokens_generated: number

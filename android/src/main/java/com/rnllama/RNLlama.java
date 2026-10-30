@@ -27,7 +27,8 @@ public class RNLlama {
     "libggml-htp-v73.so",
     "libggml-htp-v75.so",
     "libggml-htp-v79.so",
-    "libggml-htp-v81.so"
+    "libggml-htp-v81.so",
+    "libggml-htp-v85.so"
   };
   private static final Pattern QUALCOMM_HINT_PATTERN =
     Pattern.compile("(adreno|qcom|qualcomm|snapdragon)", Pattern.CASE_INSENSITIVE);
@@ -163,7 +164,7 @@ public class RNLlama {
     try {
       String htpLibPath = htpDir.getAbsolutePath();
       android.system.Os.setenv("ADSP_LIBRARY_PATH", htpLibPath, true);
-      android.system.Os.setenv("LM_GGML_HEXAGON_NDEV", "16", true);
+      android.system.Os.setenv("GGML_HEXAGON_DEVICES", "16", true);
       Log.d(NAME, "Set ADSP_LIBRARY_PATH=" + htpLibPath);
     } catch (Exception e) {
       Log.w(NAME, "Failed to set ADSP_LIBRARY_PATH", e);

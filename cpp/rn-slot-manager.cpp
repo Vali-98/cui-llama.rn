@@ -74,7 +74,7 @@ bool llama_rn_slot_manager::init(int32_t n_parallel_, int32_t n_batch_, int32_t 
 
 common_speculative* llama_rn_slot_manager::ensure_mtp_speculative(common_params& params) {
     if (parent_ctx == nullptr || parent_ctx->ctx == nullptr) {
-        throw std::runtime_error("MTP speculative decoding requires an initialized context");
+        throw std::runtime_error("speculative decoding requires an initialized context");
     }
 
     const auto& draft = params.speculative.draft;
@@ -98,7 +98,7 @@ common_speculative* llama_rn_slot_manager::ensure_mtp_speculative(common_params&
     if (mtp_spec != nullptr || mtp_spec_ctx != nullptr) {
         for (const auto& slot : slots) {
             if (slot.spec_is_shared && slot.state == SLOT_STATE_GENERATING) {
-                throw std::runtime_error("cannot change MTP speculative parameters while queued MTP slots are active");
+                throw std::runtime_error("cannot change speculative parameters while queued speculative slots are active");
             }
         }
         reset_mtp_speculative();
@@ -106,7 +106,7 @@ common_speculative* llama_rn_slot_manager::ensure_mtp_speculative(common_params&
 
     mtp_spec_ctx = parent_ctx->createMTPDraftContext(params);
     if (mtp_spec_ctx == nullptr) {
-        throw std::runtime_error("failed to create MTP draft context");
+        throw std::runtime_error("failed to create draft context");
     }
 
     params.speculative.draft.ctx_tgt = parent_ctx->ctx;
@@ -117,7 +117,7 @@ common_speculative* llama_rn_slot_manager::ensure_mtp_speculative(common_params&
     if (mtp_spec == nullptr) {
         llama_free(mtp_spec_ctx);
         mtp_spec_ctx = nullptr;
-        throw std::runtime_error("failed to initialize MTP speculative decoding");
+        throw std::runtime_error("failed to initialize speculative decoding");
     }
 
     mtp_spec_n_max = draft.n_max;
@@ -128,7 +128,7 @@ common_speculative* llama_rn_slot_manager::ensure_mtp_speculative(common_params&
     mtp_spec_cache_type_k = draft.cache_type_k;
     mtp_spec_cache_type_v = draft.cache_type_v;
 
-    LOG_INFO("Initialized shared MTP speculative state for %d queued slots", n_parallel);
+    LOG_INFO("Initialized shared speculative state for %d queued slots", n_parallel);
     return mtp_spec;
 }
 
@@ -164,8 +164,8 @@ void llama_rn_slot_manager::reset_mtp_speculative() {
     mtp_spec_p_min = 0.0f;
     mtp_spec_backend_sampling = true;
     mtp_spec_n_gpu_layers = -1;
-    mtp_spec_cache_type_k = LM_GGML_TYPE_F16;
-    mtp_spec_cache_type_v = LM_GGML_TYPE_F16;
+    mtp_spec_cache_type_k = GGML_TYPE_F16;
+    mtp_spec_cache_type_v = GGML_TYPE_F16;
 }
 
 int32_t llama_rn_slot_manager::reserve_request_id() {
@@ -209,6 +209,7 @@ int32_t llama_rn_slot_manager::queue_request(
     request.request_id = request_id;
     request.task_type = SLOT_TASK_TYPE_COMPLETION;
     request.params = params;
+    request.post_sampling_probs = parent_ctx->post_sampling_probs;
     request.prompt_tokens = prompt;
     request.media_paths = media_paths;
     request.prompt_text = prompt_text;
@@ -266,7 +267,7 @@ int32_t llama_rn_slot_manager::queue_embedding_request(
     if (!parent_ctx->params.embedding) {
         LOG_WARNING("Embedding disabled in model parameters; returning zero vector");
         if (on_result) {
-            const int n_embd = llama_model_n_embd(parent_ctx->model);
+            const int n_embd = llama_model_n_embd_out(parent_ctx->model);
             std::vector<float> empty_embedding(n_embd, 0.0f);
             on_result(request_id, empty_embedding);
         }
@@ -415,6 +416,136 @@ int32_t llama_rn_slot_manager::queue_rerank_request(
     return request_id;
 }
 
+// Queue a decision request; it is validated here so that a bad request is rejected right away
+int32_t llama_rn_slot_manager::queue_decision_request(
+    const json& body,
+    std::function<void(int32_t, const json&)> on_result,
+    int32_t request_id
+) {
+    if (parent_ctx == nullptr || parent_ctx->model == nullptr || parent_ctx->ctx == nullptr) {
+        throw std::runtime_error("Cannot queue decision: context not initialized");
+    }
+    const auto & decision = parent_ctx->decision;
+    if (!decision.is_decision_model()) {
+        throw std::runtime_error("This model is not a decision model");
+    }
+
+    // validated here, so that a bad request rejects right away; the prompts are built on the
+    // processing thread, which is the only one that uses the multimodal context
+    auto job = std::make_shared<llama_rn_decision_job>();
+    decision.check_context(parent_ctx->ctx);
+    job->request   = decision.parse_request(to_common_json(body));
+    job->on_result = [on_result = std::move(on_result)](int32_t id, const common_json & result) {
+        if (on_result) {
+            on_result(id, from_common_json(result));
+        }
+    };
+
+    if (request_id == -1) {
+        request_id = reserve_request_id();
+    }
+
+    llama_rn_queued_request request;
+    request.request_id = request_id;
+    request.task_type = SLOT_TASK_TYPE_DECISION;
+    request.decision_job = std::move(job);
+
+    {
+        std::lock_guard<std::mutex> lock(slots_mutex);
+        queue_requests.emplace_back(std::move(request));
+    }
+
+    slots_cv.notify_one();
+
+    bool has_subscribers = false;
+    {
+        std::lock_guard<std::mutex> lock(subscribers_mutex);
+        has_subscribers = !status_subscribers.empty();
+    }
+    if (has_subscribers) {
+        notify_status_change();
+    }
+
+    return request_id;
+}
+
+// A decision evaluates its own prompts on the slot's sequence (see llama_rn_decision_eval): each one is
+// read from a single forward pass, so it does not take part in the shared batch. One prompt per update,
+// so that the other slots keep decoding in between and a cancellation takes effect at the next one.
+void llama_rn_slot_manager::process_decision_slots() {
+    std::vector<llama_rn_slot*> pending;
+    {
+        std::lock_guard<std::mutex> lock(slots_mutex);
+        for (auto& slot : slots) {
+            if (slot.task_type == SLOT_TASK_TYPE_DECISION && slot.state == SLOT_STATE_PROCESSING_PROMPT &&
+                slot.decision_job && !slot.is_interrupted) {
+                pending.push_back(&slot);
+            }
+        }
+    }
+
+    bool finished_any = false;
+    for (llama_rn_slot* slot : pending) {
+        const auto job = slot->decision_job;
+        mtmd_context * mctx = parent_ctx->decisionMtmdContext();
+
+        bool done = false;
+        common_json result;
+        try {
+            if (!job->prompts_built) {
+                job->prompts = parent_ctx->decision.fill_prompts(job->request, mctx);
+                job->prompts_built = true;
+                size_t n_tokens = 0;
+                for (const auto & prompt : job->prompts) {
+                    n_tokens += prompt.n_tokens(); // text, images and state pieces
+                }
+                std::lock_guard<std::mutex> lock(slots_mutex);
+                slot->num_prompt_tokens = n_tokens;
+            }
+            const auto & prompt = job->prompts[job->next_prompt++];
+            job->scores.push_back(llama_rn_decision_eval(parent_ctx->ctx, slot->id, prompt, job->cache, mctx));
+            if (job->next_prompt == job->prompts.size()) {
+                result = parent_ctx->decision.format_result(job->request, job->prompts, job->scores, parent_ctx->modelName());
+                done = true;
+            }
+        } catch (const std::exception & e) {
+            LOG_ERROR("Slot %d: decision failed: %s", slot->id, e.what());
+            result = common_json{{"error", e.what()}};
+            done = true;
+        }
+        if (!done) {
+            continue;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(slots_mutex);
+            reset_decision_sequence(*slot);
+            slot->t_prompt_processing = (ggml_time_us() - slot->t_start_process) / 1e6;
+            complete_slot(*slot);
+        }
+        if (job->on_result) {
+            job->on_result(slot->request_id, result);
+        }
+        finished_any = true;
+    }
+
+    if (finished_any) {
+        std::lock_guard<std::mutex> lock(slots_mutex);
+        release_completed_slots();
+    }
+}
+
+// The sequence holds the decision prompts, not what the slot cached before
+void llama_rn_slot_manager::reset_decision_sequence(llama_rn_slot & slot) {
+    llama_memory_t mem = llama_get_memory(parent_ctx->ctx);
+    if (mem != nullptr) {
+        llama_memory_seq_rm(mem, slot.id, -1, -1);
+    }
+    slot.cache_tokens.clear();
+    slot.bitmap_past_hashes.clear();
+    slot.n_past = 0;
+}
+
 // Get available slot (LRU strategy for now, similarity matching in Phase 3)
 llama_rn_slot* llama_rn_slot_manager::get_available_slot(const std::vector<llama_token>& prompt) {
     llama_rn_slot* best_slot = nullptr;
@@ -453,7 +584,7 @@ void llama_rn_slot_manager::release_slot(llama_rn_slot* slot) {
     LOG_VERBOSE("Releasing slot %d", slot->id);
 
     // Update last used timestamp for LRU tracking
-    slot->t_last_used = lm_ggml_time_us();
+    slot->t_last_used = ggml_time_us();
 
     // Reset slot (cache_tokens is preserved by reset() for potential reuse)
     slot->reset();
@@ -464,6 +595,7 @@ llama_rn_cancel_result llama_rn_slot_manager::cancel_request(int32_t request_id)
     LOG_INFO("Cancelling request %d", request_id);
 
     llama_rn_cancel_result result = llama_rn_cancel_result::NOT_FOUND;
+    std::shared_ptr<llama_rn_decision_job> cancelled_decision;
     {
         std::lock_guard<std::mutex> lock(slots_mutex);
 
@@ -488,6 +620,7 @@ llama_rn_cancel_result llama_rn_slot_manager::cancel_request(int32_t request_id)
                 }
             );
             if (queued_it != queue_requests.end()) {
+                cancelled_decision = queued_it->decision_job;
                 queue_requests.erase(queued_it);
                 LOG_INFO("Request %d cancelled (was in pending queue)", request_id);
                 result = llama_rn_cancel_result::QUEUED;
@@ -498,6 +631,11 @@ llama_rn_cancel_result llama_rn_slot_manager::cancel_request(int32_t request_id)
     if (result == llama_rn_cancel_result::NOT_FOUND) {
         LOG_WARNING("Request %d not found for cancellation", request_id);
         return result;
+    }
+
+    // its promise must still settle
+    if (cancelled_decision && cancelled_decision->on_result) {
+        cancelled_decision->on_result(request_id, common_json{{"error", "the decision was cancelled"}});
     }
 
     // Wake the processing thread after releasing slots_mutex. Active requests
@@ -593,6 +731,7 @@ void llama_rn_slot_manager::process_pending_queue() {
             case SLOT_TASK_TYPE_COMPLETION: {
                 slot->params_storage = request.params;
                 slot->params = &slot->params_storage;
+                slot->post_sampling_probs = request.post_sampling_probs;
                 slot->ctx_sampling = common_sampler_init(parent_ctx->model, slot->params->sampling);
 
                 // Assign state parameters
@@ -620,7 +759,7 @@ void llama_rn_slot_manager::process_pending_queue() {
                 }
 
                 // Start timing AFTER state loading completes
-                slot->t_start_process = lm_ggml_time_us();
+                slot->t_start_process = ggml_time_us();
 
                 // Always load prompt - it will detect and preserve state if appropriate
                 bool has_media = !request.media_paths.empty();
@@ -655,7 +794,7 @@ void llama_rn_slot_manager::process_pending_queue() {
                 slot->params_storage = request.params;
                 slot->params = &slot->params_storage;
                 // Start timing (no state loading for embeddings)
-                slot->t_start_process = lm_ggml_time_us();
+                slot->t_start_process = ggml_time_us();
 
                 slot->media_paths.clear();
                 slot->prompt_text.clear();
@@ -672,7 +811,7 @@ void llama_rn_slot_manager::process_pending_queue() {
             case SLOT_TASK_TYPE_RERANK: {
                 slot->params = nullptr;
                 // Start timing (memory clear is part of the task, not overhead)
-                slot->t_start_process = lm_ggml_time_us();
+                slot->t_start_process = ggml_time_us();
 
                 if (parent_ctx && parent_ctx->ctx) {
                     // Only this slot's sequence - a global clear would corrupt
@@ -699,6 +838,37 @@ void llama_rn_slot_manager::process_pending_queue() {
                 slot->n_remaining = -1;
                 slot->stop_words.clear();
                 slot->load_prompt(slot->rerank_prompt_tokens[0]);
+                slot->i_batch = -1;
+                break;
+            }
+
+            case SLOT_TASK_TYPE_DECISION: {
+                slot->t_start_process = ggml_time_us();
+                slot->media_paths.clear();
+                slot->prompt_text.clear();
+                slot->media_processed = true;
+                slot->n_remaining = -1;
+                slot->stop_words.clear();
+                slot->decision_job = std::move(request.decision_job);
+                // the decision takes over the sequence: what the slot cached must not outlive it,
+                // however the decision ends
+                reset_decision_sequence(*slot);
+                // a decision can end without its answers, cancelled between two prompts or taken down
+                // with a failed shared batch: its promise must still settle, and the sequence must not
+                // keep what it evaluated so far
+                slot->on_complete_callback = [this, job = slot->decision_job](llama_rn_slot * s) {
+                    if (!s->is_interrupted && !s->incomplete) {
+                        return;
+                    }
+                    reset_decision_sequence(*s);
+                    if (job->on_result) {
+                        job->on_result(s->request_id, common_json{{"error", s->is_interrupted
+                            ? "the decision was cancelled"
+                            : "the decision was dropped, a batch of the other requests failed"}});
+                    }
+                };
+                slot->num_prompt_tokens = 0; // set once the prompts are built
+                slot->state = SLOT_STATE_PROCESSING_PROMPT;
                 slot->i_batch = -1;
                 break;
             }
@@ -748,19 +918,19 @@ void llama_rn_slot_manager::build_batch() {
 
     // Second pass: Add prompt tokens from PROCESSING_PROMPT slots
     for (auto& slot : slots) {
-        if (slot.state == SLOT_STATE_PROCESSING_PROMPT) {
+        if (slot.state == SLOT_STATE_PROCESSING_PROMPT && slot.task_type != SLOT_TASK_TYPE_DECISION) {
             if (slot.task_type == SLOT_TASK_TYPE_COMPLETION && slot.should_use_mtp()) {
                 if (!slot.media_paths.empty()) {
-                    LOG_ERROR("Slot %d: MTP speculative decoding does not support media inputs", slot.id);
+                    LOG_ERROR("Slot %d: speculative decoding does not support media inputs", slot.id);
                     slot.incomplete = true;
-                    slot.error_message = "MTP speculative decoding currently supports text-only queued completions";
+                    slot.error_message = "speculative decoding currently supports text-only queued completions";
                     complete_slot(slot);
                     continue;
                 }
 
                 slot.state = SLOT_STATE_GENERATING;
                 slot.i_batch = -1;
-                LOG_INFO("Slot %d: Transitioned to GENERATING state with MTP speculative decoding", slot.id);
+                LOG_INFO("Slot %d: Transitioned to GENERATING state with speculative decoding", slot.id);
                 continue;
             }
 
@@ -1055,7 +1225,8 @@ void llama_rn_slot_manager::sample_and_callback() {
     }
 
     const llama_vocab* vocab = llama_model_get_vocab(parent_ctx->model);
-    const int n_embd = llama_model_n_embd(parent_ctx->model);
+    // Output width can differ from the hidden size (e.g. EmbeddingGemma 2)
+    const int n_embd = llama_model_n_embd_out(parent_ctx->model);
 
     auto get_embedding_ptr = [&](llama_rn_slot& slot) -> const float* {
         const float* data = llama_get_embeddings_seq(parent_ctx->ctx, slot.id);
@@ -1111,7 +1282,7 @@ void llama_rn_slot_manager::sample_and_callback() {
                         token_output.text = slot.utf8_gate.feed(token_output.text);
                         slot.generated_text += token_output.text;
 
-                        const int64_t t_current = lm_ggml_time_us();
+                        const int64_t t_current = ggml_time_us();
                         slot.t_token_generation = (t_current - slot.t_start_generation) / 1e6;
 
                         slot.generated_tokens.push_back(token_output.tok);
@@ -1180,11 +1351,11 @@ void llama_rn_slot_manager::sample_and_callback() {
                             finish_slot();
                         } else if (!emitted) {
                             slot.incomplete = true;
-                            slot.error_message = "MTP speculative decoding did not produce a token";
+                            slot.error_message = "speculative decoding did not produce a token";
                             finish_slot();
                         }
                     } catch (const std::exception& e) {
-                        LOG_ERROR("Slot %d: MTP speculative decoding failed: %s", slot.id, e.what());
+                        LOG_ERROR("Slot %d: speculative decoding failed: %s", slot.id, e.what());
                         slot.incomplete = true;
                         slot.error_message = e.what();
                         finish_slot();
@@ -1229,7 +1400,7 @@ void llama_rn_slot_manager::sample_and_callback() {
                 slot.generated_text += token_text;
 
                 // Update token generation timing
-                const int64_t t_current = lm_ggml_time_us();
+                const int64_t t_current = ggml_time_us();
                 slot.t_token_generation = (t_current - slot.t_start_generation) / 1e6;
 
                 completion_token_output token_output;
@@ -1237,14 +1408,14 @@ void llama_rn_slot_manager::sample_and_callback() {
                 token_output.text = token_text;
                 token_output.request_id = slot.request_id;
 
-                const int32_t n_probs = slot.params->sampling.n_probs;
-                if (n_probs > 0) {
-                  llama_token_data_array cur_p = *common_sampler_get_candidates(slot.ctx_sampling, true);
-                  for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
-                  {
-                      token_output.probs.push_back({cur_p.data[i].id, cur_p.data[i].p});
-                  }
-                }
+                // A media-pending token was sampled while the context logits still
+                // belonged to this slot; those logits are gone now, so only the
+                // sampler's own candidates are available for it
+                const bool raw_logits_available = slot.i_batch != -1;
+                token_output.probs = get_token_probabilities(
+                    parent_ctx->ctx, slot.ctx_sampling, slot.i_batch,
+                    slot.params->sampling.n_probs,
+                    slot.post_sampling_probs || !raw_logits_available);
 
                 slot.generated_tokens.push_back(new_token_id);
                 slot.n_decoded++;
@@ -1451,6 +1622,9 @@ void llama_rn_slot_manager::update_slots() {
         return;
     }
 
+    // Step 2.5: Decisions run their own forward passes, between two shared batches
+    process_decision_slots();
+
     // Step 3: Build batch from all active slots (with mutex)
     {
         std::lock_guard<std::mutex> lock(slots_mutex);
@@ -1478,7 +1652,7 @@ void llama_rn_slot_manager::update_slots() {
         // This must happen AFTER batch has been decoded
         {
             std::lock_guard<std::mutex> lock(slots_mutex);
-            const int64_t t_now = lm_ggml_time_us();
+            const int64_t t_now = ggml_time_us();
             for (auto& slot : slots) {
                 if (slot.prompt_processing_finished) {
                     slot.t_start_generation = t_now;
@@ -1647,6 +1821,7 @@ llama_rn_parallel_status llama_rn_slot_manager::get_status() {
                 case SLOT_TASK_TYPE_COMPLETION: req_status.type = "completion"; break;
                 case SLOT_TASK_TYPE_EMBEDDING: req_status.type = "embedding"; break;
                 case SLOT_TASK_TYPE_RERANK: req_status.type = "rerank"; break;
+                case SLOT_TASK_TYPE_DECISION: req_status.type = "decision"; break;
             }
 
             // Map state to string
@@ -1677,9 +1852,11 @@ llama_rn_parallel_status llama_rn_slot_manager::get_status() {
             case SLOT_TASK_TYPE_COMPLETION: req_status.type = "completion"; break;
             case SLOT_TASK_TYPE_EMBEDDING: req_status.type = "embedding"; break;
             case SLOT_TASK_TYPE_RERANK: req_status.type = "rerank"; break;
+            case SLOT_TASK_TYPE_DECISION: req_status.type = "decision"; break;
         }
 
         req_status.state = "queued";
+        // 0 for a decision, its prompts are built once it has a slot
         req_status.prompt_length = queued.prompt_tokens.size();
         req_status.tokens_generated = 0;
         req_status.prompt_ms = 0.0;

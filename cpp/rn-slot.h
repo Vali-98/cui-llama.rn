@@ -38,6 +38,7 @@ enum llama_rn_slot_task_type {
     SLOT_TASK_TYPE_COMPLETION = 0,
     SLOT_TASK_TYPE_EMBEDDING,
     SLOT_TASK_TYPE_RERANK,
+    SLOT_TASK_TYPE_DECISION,
 };
 
 // Slot states
@@ -112,14 +113,14 @@ struct llama_rn_slot {
     // Sampling context (per-slot)
     common_params params_storage;
     common_params* params;
+    bool post_sampling_probs = true;
     common_sampler* ctx_sampling;
 
-    // Speculative decoding context for MTP.
+    // Speculative decoding context (MTP or classic draft-simple).
     common_speculative *spec = nullptr;
     llama_context *spec_ctx = nullptr;
     bool spec_is_shared = false;
-    llama_batch spec_batch = {};
-    bool spec_batch_initialized = false;
+    common_batch spec_batch;
     llama_tokens spec_prompt;
     llama_token spec_id_last = LLAMA_TOKEN_NULL;
     llama_pos spec_n_past = 0;
@@ -160,6 +161,9 @@ struct llama_rn_slot {
     std::vector<std::vector<llama_token>> rerank_prompt_tokens;
     std::vector<float> rerank_scores;
     size_t rerank_current_index;
+
+    // Decision task state, evaluated by the slot manager outside of the shared batch
+    std::shared_ptr<llama_rn_decision_job> decision_job;
 
     // State management (per-slot)
     std::string load_state_path;      // Path to load state from before processing

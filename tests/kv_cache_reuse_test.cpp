@@ -180,7 +180,7 @@ struct ChatSim {
             /*parallel_tool_calls*/ false, /*tool_choice*/ "",
             enable_thinking, /*reasoning_format*/ "none",
             add_generation_prompt, /*now*/ "", /*kwargs*/ {}, /*force_pure_content*/ false);
-        return cp.prompt;
+        return cp.prompt.str();
     }
 
     // Run one assistant turn for whatever is currently in `history` (whose last
@@ -352,13 +352,22 @@ std::vector<Check> run_model(const std::string &key, const std::string &path,
         print_turn(tm);
         append_turns.push_back(tm);
     }
-    // From turn 2 on there is a large shared prefix; we expect to reuse most of it.
+    // From turn 2 on, checkpoint reuse must keep the reprocessed part of the
+    // shared prefix bounded. A percentage threshold is unstable here: output
+    // tokenization can change across llama.cpp builds while the checkpoint lag
+    // remains the same fixed-size tail.
+    const size_t max_shared_reprocess =
+        (size_t) sim.ctx.completion->state_ckpt_min_gap;
     for (size_t t = 1; t < append_turns.size(); t++) {
         const auto &tm = append_turns[t];
-        bool pass = tm.reusable > 0 && tm.reused >= (size_t) (0.5 * tm.reusable);
+        const size_t shared_reprocessed =
+            tm.reusable > tm.reused ? tm.reusable - tm.reused : 0;
+        bool pass = tm.reused > 0 && shared_reprocessed <= max_shared_reprocess;
         checks.push_back({key + ": append reuse " + tm.label, pass,
                           "reused " + std::to_string(tm.reused) + "/" +
-                          std::to_string(tm.reusable) + " reusable",
+                          std::to_string(tm.reusable) + " reusable (shared tail " +
+                          std::to_string(shared_reprocessed) + ", max " +
+                          std::to_string(max_shared_reprocess) + ")",
                           /*fix_target*/ true});
     }
 
@@ -651,12 +660,14 @@ std::vector<Check> run_model_mtp(const std::string &key, const std::string &path
         "Can you name a famous river?",
         "Thanks, that was helpful.",
     };
+    std::vector<TurnMetric> turns;
     std::vector<size_t> reprocessed;
     std::vector<double> accept_rate;
     try {
         for (int t = 0; t < 4; t++) {
             sim.user(user_msgs[t]);
             TurnMetric tm = sim.assistant_turn("turn" + std::to_string(t + 1), /*max_new*/ 24);
+            turns.push_back(tm);
             size_t rp = sim.ctx.completion->mtp_prompt_reprocessed;
             reprocessed.push_back(rp);
             // Draft acceptance per turn: a collapse on reused-prefix turns would
@@ -682,8 +693,11 @@ std::vector<Check> run_model_mtp(const std::string &key, const std::string &path
     // a full reprocess each turn to avoid a corrupt state. Assert that safe
     // fallback here; only non-mem-shared drafts (qwen35) get bounded reprocess.
     const bool mem_shared = sim.ctx.completion->mtp_draft_mem_shared;
+    const size_t max_shared_reprocess =
+        (size_t) sim.ctx.completion->state_ckpt_min_gap;
     for (size_t t = 1; t < reprocessed.size(); t++) {
-        const size_t np = sim.ctx.completion->num_prompt_tokens;
+        // evalMTPPrompt excludes the final prompt token, which seeds generation.
+        const size_t np = turns[t].prompt_tokens > 0 ? turns[t].prompt_tokens - 1 : 0;
         if (mem_shared) {
             // Full reprocess is correct here (the guard). Just require no crash /
             // non-degenerate: it reprocessed roughly the whole prompt.
@@ -692,10 +706,19 @@ std::vector<Check> run_model_mtp(const std::string &key, const std::string &path
                               "reprocessed " + std::to_string(reprocessed[t]) + "/" + std::to_string(np) +
                               " (reuse safely disabled)", /*fix_target*/ false});
         } else {
-            bool pass = reprocessed[t] * 2 < np;
+            const size_t reused = std::min(turns[t].reused, np);
+            const size_t shared_reprocessed =
+                turns[t].reusable > reused ? turns[t].reusable - reused : 0;
+            const bool mtp_honored_reuse = reprocessed[t] == np - reused;
+            bool pass = reused > 0 && mtp_honored_reuse &&
+                        shared_reprocessed <= max_shared_reprocess;
             checks.push_back({key + " [MTP]: bounded reprocess turn" + std::to_string(t + 1), pass,
                               "reprocessed " + std::to_string(reprocessed[t]) + "/" + std::to_string(np) +
-                              " prompt tokens", /*fix_target*/ true});
+                              ", reused " + std::to_string(reused) + "/" +
+                              std::to_string(turns[t].reusable) + " reusable (shared tail " +
+                              std::to_string(shared_reprocessed) + ", max " +
+                              std::to_string(max_shared_reprocess) + ")",
+                              /*fix_target*/ true});
         }
     }
     // Canary: on reused-prefix turns acceptance must not collapse vs the cold
@@ -1791,6 +1814,97 @@ std::vector<Check> run_swa_wrap_test(const std::string &key, const std::string &
     return checks;
 }
 
+// Deep edit on SWA: chat past the window, then edit a user message whose
+// prefix the SWA cache no longer holds. The live cells must not be reused as-is
+// (stale positions + leaked base cells otherwise): with the state cache the
+// turn-boundary snapshot is restored, without it the cache is cleared.
+std::vector<Check> run_swa_deep_edit_test(const std::string &key, const std::string &path,
+                                          bool use_cache) {
+    std::vector<Check> checks;
+    const std::string tag = use_cache ? " [swa-deep-edit]" : " [swa-deep-edit, no cache]";
+    std::cout << "\n===== " << key << tag << " =====\n";
+    ChatSim sim;
+    if (!use_cache) {
+        sim.state_cache_budget_mb = 0;
+    }
+    if (!sim.load(path, /*n_ctx*/ 4096)) {
+        checks.push_back({key + tag + ": model load", false, "loadModel failed", false});
+        return checks;
+    }
+    sim.system_prompt = "You are a helpful assistant.";
+    sim.enable_thinking = false;
+    auto *kv = llama_get_memory(sim.ctx.ctx);
+    auto *cmpl = sim.ctx.completion;
+    const size_t n_swa = (size_t) llama_model_n_swa(sim.ctx.model);
+
+    for (int t = 0; t < 12; t++) {
+        sim.user("Write a detailed paragraph about ocean animal number " +
+                 std::to_string(t + 1) + ": its habitat, diet, and one unusual fact.");
+        TurnMetric tm = sim.assistant_turn("deep-t" + std::to_string(t + 1), /*max_new*/ 112);
+        print_turn(tm);
+    }
+    const llama_pos pos_min = llama_memory_seq_pos_min(kv, 0);
+
+    // Keep 7 turns and replace the 8th user message.
+    sim.history.resize(14);
+    // A strongly peaked prompt: near-tied ones flip on FP noise alone.
+    sim.user("Repeat this sentence exactly, with nothing else: The quick brown fox jumps over the lazy dog.");
+    TurnMetric edited = sim.assistant_turn("deep-edit", /*max_new*/ 48);
+    print_turn(edited);
+    const llama_pos frontier = llama_memory_seq_pos_max(kv, 0) + 1;
+    const double size_per_token = (double) llama_state_seq_get_size(sim.ctx.ctx, 0) / cmpl->embd.size();
+    checks.push_back({key + tag + ": shared prefix ends below the SWA window",
+                      edited.reusable > 0 && pos_min > 0 &&
+                          (llama_pos) edited.reusable < pos_min + (llama_pos) n_swa,
+                      "reusable=" + std::to_string(edited.reusable) + " pos_min=" + std::to_string(pos_min),
+                      /*fix_target*/ false});
+    if (use_cache) {
+        checks.push_back({key + tag + ": snapshot restored", edited.reused > 0 && edited.reused <= edited.reusable,
+                          "reused=" + std::to_string(edited.reused) + " of " + std::to_string(edited.reusable),
+                          /*fix_target*/ true});
+    } else {
+        checks.push_back({key + tag + ": unusable prefix not reused", edited.reused == 0,
+                          "reused=" + std::to_string(edited.reused), /*fix_target*/ true});
+    }
+    checks.push_back({key + tag + ": memory frontier matches tokens",
+                      frontier == (llama_pos) cmpl->embd.size(),
+                      "frontier=" + std::to_string(frontier) + " embd=" + std::to_string(cmpl->embd.size()),
+                      /*fix_target*/ true});
+
+    // Same turn from a cleared cache: same reply and no extra cells. Compare the
+    // state size per token, since the reply length may differ.
+    sim.history.pop_back();
+    TurnMetric clean = sim.assistant_turn("deep-edit-clean", /*max_new*/ 48, /*force_clear*/ true);
+    print_turn(clean);
+    const double size_per_token_clean = (double) llama_state_seq_get_size(sim.ctx.ctx, 0) / cmpl->embd.size();
+    auto shared_prefix = [](const std::string &a, const std::string &b) {
+        size_t p = 0;
+        while (p < a.size() && p < b.size() && a[p] == b[p]) p++;
+        return p;
+    };
+    size_t p = shared_prefix(edited.reply, clean.reply);
+    std::string detail = "shared " + std::to_string(p) + " chars";
+    bool faithful = p >= 12 || edited.reply == clean.reply;
+    if (!faithful) {
+        // Near-tied prompts flip between two identical recomputes (see run_model);
+        // a divergence only counts if the clean run reproduces itself.
+        sim.history.pop_back();
+        TurnMetric clean2 = sim.assistant_turn("deep-edit-clean2", /*max_new*/ 48, /*force_clear*/ true);
+        const size_t p_noise = shared_prefix(clean.reply, clean2.reply);
+        detail += ", clean self-agreement " + std::to_string(p_noise);
+        faithful = p_noise < 12;
+    }
+    checks.push_back({key + tag + ": reply matches a clean run", faithful,
+                      detail + " | edited: '" + edited.reply + "' clean: '" + clean.reply + "'",
+                      /*fix_target*/ true});
+    checks.push_back({key + tag + ": no leaked cells",
+                      std::fabs(size_per_token - size_per_token_clean) < 0.01 * size_per_token_clean,
+                      "state bytes/token " + std::to_string(size_per_token) + " vs clean " +
+                          std::to_string(size_per_token_clean),
+                      /*fix_target*/ true});
+    return checks;
+}
+
 // Session save/load: checkpoints deliberately survive a session swap (restores
 // are token-verified, so stale ones are inert); prove no divergent-branch leak.
 std::vector<Check> run_session_saveload_test(const std::string &key, const std::string &path) {
@@ -2260,7 +2374,7 @@ std::vector<Check> run_slot_media_test(const std::string &key, const std::string
         /*enable_thinking*/ false, /*reasoning_format*/ "none",
         /*add_generation_prompt*/ true, /*now*/ "", /*kwargs*/ {},
         /*force_pure_content*/ false);
-    const std::string prompt = cp.prompt;
+    const std::string prompt = cp.prompt.str();
     std::vector<llama_token> prompt_tokens = common_tokenize(ctx.ctx, prompt, true, true);
 
     std::string reply;
@@ -2279,8 +2393,8 @@ std::vector<Check> run_slot_media_test(const std::string &key, const std::string
     }
 
     // Drive the slot manager to completion (update_slots does the work per call).
-    const int64_t t0 = lm_ggml_time_us();
-    while (!completed && (lm_ggml_time_us() - t0) < 180LL * 1000 * 1000) {
+    const int64_t t0 = ggml_time_us();
+    while (!completed && (ggml_time_us() - t0) < 180LL * 1000 * 1000) {
         ctx.slot_manager->update_slots();
     }
 
@@ -2328,8 +2442,8 @@ std::vector<Check> run_slot_state_file_test(const std::string &key, const std::s
     std::vector<llama_token> generated_ids;
 
     auto drive = [](llama_rn_context &ctx, bool &completed) {
-        const int64_t t0 = lm_ggml_time_us();
-        while (!completed && (lm_ggml_time_us() - t0) < 120LL * 1000 * 1000) {
+        const int64_t t0 = ggml_time_us();
+        while (!completed && (ggml_time_us() - t0) < 120LL * 1000 * 1000) {
             ctx.slot_manager->update_slots();
         }
     };
@@ -2453,18 +2567,18 @@ std::vector<Check> run_slot_media_concurrent_test(const std::string &key, const 
     common_chat_params cp = ctx.getFormattedChatWithJinja(
         msgs.dump(-1, ' ', false, json::error_handler_t::replace),
         "", "", "", false, "", false, "none", true, "", {}, false);
-    auto tk = ctx.tokenize(cp.prompt, {img});
+    auto tk = ctx.tokenize(cp.prompt.str(), {img});
     std::string media_reply;
     bool media_completed = false, media_incomplete = true;
     ctx.slot_manager->queue_request(
-        params, tk.tokens, {img}, cp.prompt, 0, COMMON_REASONING_FORMAT_NONE, "", "", "",
+        params, tk.tokens, {img}, cp.prompt.str(), 0, COMMON_REASONING_FORMAT_NONE, "", "", "",
         "", "", "", -1, -1,
         [&](const completion_token_output &out) { media_reply += out.text; },
         [&](llama_rn_slot *s) { media_completed = true; media_incomplete = s->incomplete; });
 
-    const int64_t t0 = lm_ggml_time_us();
+    const int64_t t0 = ggml_time_us();
     while ((!media_completed || !text_completed) &&
-           (lm_ggml_time_us() - t0) < 180LL * 1000 * 1000) {
+           (ggml_time_us() - t0) < 180LL * 1000 * 1000) {
         ctx.slot_manager->update_slots();
     }
 
@@ -2507,8 +2621,8 @@ std::vector<Check> run_slot_prompt_state_regen_test(const std::string &key, cons
     params.sampling.top_k = 1;
 
     auto drive = [](llama_rn_context &ctx, bool &completed) {
-        const int64_t t0 = lm_ggml_time_us();
-        while (!completed && (lm_ggml_time_us() - t0) < 120LL * 1000 * 1000) {
+        const int64_t t0 = ggml_time_us();
+        while (!completed && (ggml_time_us() - t0) < 120LL * 1000 * 1000) {
             ctx.slot_manager->update_slots();
         }
     };
@@ -2618,7 +2732,7 @@ std::vector<Check> run_slot_media_state_file_test(const std::string &key, const 
             /*enable_thinking*/ false, /*reasoning_format*/ "none",
             /*add_generation_prompt*/ true, /*now*/ "", /*kwargs*/ {},
             /*force_pure_content*/ false);
-        return cp.prompt;
+        return cp.prompt.str();
     };
 
     auto run_turn = [&](llama_rn_context &ctx, const std::string &load_path,
@@ -2637,8 +2751,8 @@ std::vector<Check> run_slot_media_state_file_test(const std::string &key, const 
                 incomplete = s->incomplete;
                 cache_n = s->n_prompt_tokens_cache;
             });
-        const int64_t t0 = lm_ggml_time_us();
-        while (!completed && (lm_ggml_time_us() - t0) < 180LL * 1000 * 1000) {
+        const int64_t t0 = ggml_time_us();
+        while (!completed && (ggml_time_us() - t0) < 180LL * 1000 * 1000) {
             ctx.slot_manager->update_slots();
         }
     };
@@ -2845,6 +2959,13 @@ int main(int argc, char **argv) {
             all.insert(all.end(), tr.begin(), tr.end());
             continue;
         }
+        if (std::getenv("SWA_EDIT_ONLY") != nullptr) {
+            for (const bool use_cache : {true, false}) {
+                auto de = run_swa_deep_edit_test(m.key, p.string(), use_cache);
+                all.insert(all.end(), de.begin(), de.end());
+            }
+            continue;
+        }
         if (std::getenv("COHERENCE_ONLY") != nullptr) {
             auto c = run_coherence_dump(m.key, p.string(),
                                         /*use_mtp*/ m.mtp && std::getenv("WITH_MTP") != nullptr);
@@ -2941,6 +3062,10 @@ int main(int argc, char **argv) {
             all.insert(all.end(), sd.begin(), sd.end());
             auto sw = run_swa_wrap_test(m.key, p.string());
             all.insert(all.end(), sw.begin(), sw.end());
+            for (const bool use_cache : {true, false}) {
+                auto de = run_swa_deep_edit_test(m.key, p.string(), use_cache);
+                all.insert(all.end(), de.begin(), de.end());
+            }
         }
     }
 

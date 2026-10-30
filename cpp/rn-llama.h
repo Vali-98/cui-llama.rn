@@ -1,6 +1,7 @@
 #ifndef RNLLAMA_H
 #define RNLLAMA_H
 
+#include <atomic>
 #include <sstream>
 #include <iostream>
 #include <thread>
@@ -16,6 +17,7 @@
 #include "sampling.h"
 #include "nlohmann/json.hpp"
 #include "rn-tts.h"
+#include "rn-decision.h"
 #if defined(__ANDROID__)
 #include <android/log.h>
 #endif
@@ -23,6 +25,10 @@
 using json = nlohmann::ordered_json;
 
 namespace rnllama {
+
+// rn-decision speaks upstream's common_json
+inline common_json to_common_json(const json & j) { return common_json::parse(j.dump()); }
+inline json from_common_json(const common_json & j) { return json::parse(j.dump()); }
 
 // Display form of a raw token piece: a lone high-bit byte is hex-escaped,
 // any other ill-formed piece is sanitized (JSI strings require well-formed UTF-8)
@@ -79,7 +85,7 @@ private:
     std::string pending;
 };
 
-lm_ggml_type kv_cache_type_from_str(const std::string & s);
+ggml_type kv_cache_type_from_str(const std::string & s);
 
 enum llama_flash_attn_type flash_attn_type_from_str(const std::string & s);
 
@@ -111,6 +117,9 @@ struct llama_rn_context {
     float loading_progress = 0;
     bool is_load_interrupted = false;
     common_params params;
+    // n_probs readout mode for the next completion (see get_token_probabilities);
+    // false = softmax of the raw logits, true = the sampler chain's candidates
+    bool post_sampling_probs = true;
     common_init_result_ptr llama_init;
     llama_context *ctx = nullptr;
     common_chat_templates_ptr templates;
@@ -128,8 +137,13 @@ struct llama_rn_context {
     llama_rn_slot_manager *slot_manager = nullptr;
     bool parallel_mode_enabled = false;
 
-    lm_ggml_threadpool *threadpool = nullptr;
-    lm_ggml_threadpool *threadpool_batch = nullptr;
+    // Held for the whole of a JSI op that touches the single-sequence state
+    // (completion, sampler, params, KV cache), so overlapping ops are rejected
+    // instead of racing on it. See ContextClaim in cpp/jsi/RNLlamaJSI.cpp.
+    std::atomic<bool> is_claimed{false};
+
+    ggml_threadpool *threadpool = nullptr;
+    ggml_threadpool *threadpool_batch = nullptr;
 
     ~llama_rn_context();
 
@@ -188,6 +202,17 @@ struct llama_rn_context {
     std::vector<std::string> getMediaHashes() const;
     void setMediaHashes(const std::vector<std::string> &hashes);
 
+    // Typed decision models, see rn-decision.h
+    llama_rn_decision_context decision;
+    // false if the model only answers decisions (it runs in embedding mode)
+    bool canGenerateText() const;
+    // TypeSafe /v1/systemone request in, response out; runs on the completion's sequence, which starts over
+    json decide(const json & body);
+    // general.name of the model, or its file name
+    std::string modelName() const;
+    // the multimodal context a decision with images is evaluated with, nullptr if not initialized
+    mtmd_context * decisionMtmdContext() const;
+
     // TTS fields and methods (delegated to TTS context)
     llama_rn_context_tts *tts_wrapper = nullptr;
     bool has_vocoder = false;
@@ -212,7 +237,37 @@ inline void llama_batch_add(llama_batch *batch, llama_token id, llama_pos pos, s
 }
 
 // Device info functions
-std::string get_backend_devices_info();
+json get_backend_devices_info();
+
+// Forward ggml abort messages to the platform log (process-wide, safe to call repeatedly)
+void install_ggml_abort_handler();
+
+// Backend device and GGUF accessors for the JSI glue.
+//
+// The glue is compiled into the host app and linked against this library as a
+// dynamic framework. When another ggml-based framework (e.g. whisper.rn) lives
+// in the same app, an app-level reference to a ggml symbol binds to whichever
+// framework the linker sees first. The glue therefore only calls these
+// rnllama-namespaced functions; using ggml *types* from the headers is fine,
+// referencing ggml *symbols* is not.
+size_t backend_dev_count();
+ggml_backend_dev_t backend_dev_get(size_t index);
+const char * backend_dev_name(ggml_backend_dev_t dev);
+enum ggml_backend_dev_type backend_dev_type(ggml_backend_dev_t dev);
+// Name of the backend registry owning the device ("Metal", "RPC", ...), or nullptr.
+const char * backend_dev_reg_name(ggml_backend_dev_t dev);
+// Vendor device id from the device props, or an empty string.
+std::string backend_dev_device_id(ggml_backend_dev_t dev);
+ggml_backend_buffer_type_t backend_cpu_buffer_type();
+
+struct gguf_file_info {
+    uint32_t version = 0;
+    size_t alignment = 0;
+    size_t data_offset = 0;
+    std::vector<std::pair<std::string, std::string>> kv;
+};
+// Reads GGUF header metadata (no tensor data). Returns false if the file cannot be parsed.
+bool read_gguf_file_info(const std::string & path, gguf_file_info & info);
 
 // Logging functions
 void log(const char *level, const char *function, int line, const char *format, ...);

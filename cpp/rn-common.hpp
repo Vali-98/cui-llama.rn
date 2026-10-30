@@ -13,7 +13,7 @@
 
 // Include backend device support
 #include "ggml-backend.h"
-#ifdef LM_GGML_USE_METAL
+#ifdef GGML_USE_METAL
 #include "ggml-metal/ggml-metal-device.h"
 #endif
 
@@ -25,39 +25,39 @@
 
 namespace rnllama {
 
-inline static std::string backend_devices_info() {
+inline static json backend_devices_info() {
     json devices_array = json::array();
 
-    const size_t dev_count = lm_ggml_backend_dev_count();
+    const size_t dev_count = ggml_backend_dev_count();
 
     for (size_t i = 0; i < dev_count; i++) {
-        lm_ggml_backend_dev_t dev = lm_ggml_backend_dev_get(i);
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
         if (dev == nullptr) continue;
 
         // Get basic device properties
-        lm_ggml_backend_dev_props props;
-        lm_ggml_backend_dev_get_props(dev, &props);
+        ggml_backend_dev_props props;
+        ggml_backend_dev_get_props(dev, &props);
 
         json device_info;
 
         // Get backend name from the device's backend registry
-        lm_ggml_backend_reg_t reg = lm_ggml_backend_dev_backend_reg(dev);
-        const char* backend_name = reg ? lm_ggml_backend_reg_name(reg) : "unknown";
+        ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+        const char* backend_name = reg ? ggml_backend_reg_name(reg) : "unknown";
         device_info["backend"] = backend_name ? backend_name : "unknown";
 
         // Convert device type to string
         std::string type_str;
         switch (props.type) {
-            case LM_GGML_BACKEND_DEVICE_TYPE_CPU:
+            case GGML_BACKEND_DEVICE_TYPE_CPU:
                 type_str = "cpu";
                 break;
-            case LM_GGML_BACKEND_DEVICE_TYPE_GPU:
+            case GGML_BACKEND_DEVICE_TYPE_GPU:
                 type_str = "gpu";
                 break;
-            case LM_GGML_BACKEND_DEVICE_TYPE_IGPU:
+            case GGML_BACKEND_DEVICE_TYPE_IGPU:
                 type_str = "igpu";
                 break;
-            case LM_GGML_BACKEND_DEVICE_TYPE_ACCEL:
+            case GGML_BACKEND_DEVICE_TYPE_ACCEL:
                 type_str = "accel";
                 break;
             default:
@@ -72,16 +72,17 @@ inline static std::string backend_devices_info() {
         size_t memory_total = props.memory_total;
 
         // For Metal devices, use recommendedMaxWorkingSetSize instead
-#ifdef LM_GGML_USE_METAL
+#ifdef GGML_USE_METAL
         if (std::string(backend_name) == "Metal" || std::string(backend_name) == "metal") {
             // Try to get Metal-specific device properties
-            lm_ggml_metal_device_t metal_dev = lm_ggml_metal_device_get(0);
+            ggml_metal_device_t metal_dev = ggml_metal_device_get(0, 1);
             if (metal_dev) {
-                const lm_ggml_metal_device_props* metal_props = lm_ggml_metal_device_get_props(metal_dev);
+                const ggml_metal_device_props* metal_props = ggml_metal_device_get_props(metal_dev);
                 if (metal_props) {
                     // Add Metal-specific metadata
                     json metadata;
-                    metadata["supportsMTLGPUFamilyApple7"] = metal_props->supports_gpu_family_apple7;
+                    // gpu_family is the highest MTLGPUFamilyAppleN the device supports
+                    metadata["supportsMTLGPUFamilyApple7"] = metal_props->gpu_family >= 7;
                     metadata["hasBFloat16"] = metal_props->has_bfloat;
                     metadata["hasSimdgroupReduction"] = metal_props->has_simdgroup_reduction;
                     metadata["hasSimdgroupMM"] = metal_props->has_simdgroup_mm;
@@ -130,7 +131,7 @@ inline static std::string backend_devices_info() {
         devices_array.push_back(device_info);
     }
 
-    return devices_array.dump();
+    return devices_array;
 }
 
 // Helper function to check if string ends with suffix

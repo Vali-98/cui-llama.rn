@@ -26,6 +26,7 @@
 - [clearCache](LlamaContext.md#clearcache)
 - [completion](LlamaContext.md#completion)
 - [createSpeaker](LlamaContext.md#createspeaker)
+- [decide](LlamaContext.md#decide)
 - [decodeAudioEmbeddings](LlamaContext.md#decodeaudioembeddings)
 - [decodeAudioTokens](LlamaContext.md#decodeaudiotokens)
 - [detokenize](LlamaContext.md#detokenize)
@@ -67,7 +68,7 @@
 
 #### Defined in
 
-[index.ts:678](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L678)
+[index.ts:754](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L754)
 
 ## Properties
 
@@ -77,7 +78,7 @@
 
 #### Defined in
 
-[index.ts:407](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L407)
+[index.ts:443](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L443)
 
 ___
 
@@ -87,7 +88,7 @@ ___
 
 #### Defined in
 
-[index.ts:403](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L403)
+[index.ts:439](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L439)
 
 ___
 
@@ -97,7 +98,7 @@ ___
 
 #### Defined in
 
-[index.ts:399](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L399)
+[index.ts:435](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L435)
 
 ___
 
@@ -107,7 +108,7 @@ ___
 
 #### Defined in
 
-[index.ts:397](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L397)
+[index.ts:433](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L433)
 
 ___
 
@@ -117,35 +118,43 @@ ___
 
 #### Type declaration
 
-| Name | Type |
-| :------ | :------ |
-| `chatTemplates` | { `jinja`: { `default`: `boolean` ; `defaultCaps`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } ; `toolUse`: `boolean` ; `toolUseCaps?`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  }  } ; `llamaChat`: `boolean`  } |
-| `chatTemplates.jinja` | { `default`: `boolean` ; `defaultCaps`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } ; `toolUse`: `boolean` ; `toolUseCaps?`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  }  } |
-| `chatTemplates.jinja.default` | `boolean` |
-| `chatTemplates.jinja.defaultCaps` | { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } |
-| `chatTemplates.jinja.defaultCaps.parallelToolCalls` | `boolean` |
-| `chatTemplates.jinja.defaultCaps.systemRole` | `boolean` |
-| `chatTemplates.jinja.defaultCaps.toolCalls` | `boolean` |
-| `chatTemplates.jinja.defaultCaps.tools` | `boolean` |
-| `chatTemplates.jinja.toolUse` | `boolean` |
-| `chatTemplates.jinja.toolUseCaps?` | { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } |
-| `chatTemplates.jinja.toolUseCaps.parallelToolCalls` | `boolean` |
-| `chatTemplates.jinja.toolUseCaps.systemRole` | `boolean` |
-| `chatTemplates.jinja.toolUseCaps.toolCalls` | `boolean` |
-| `chatTemplates.jinja.toolUseCaps.tools` | `boolean` |
-| `chatTemplates.llamaChat` | `boolean` |
-| `desc` | `string` |
-| `isChatTemplateSupported` | `boolean` |
-| `is_hybrid` | `boolean` |
-| `is_recurrent` | `boolean` |
-| `metadata` | `Object` |
-| `nEmbd` | `number` |
-| `nParams` | `number` |
-| `size` | `number` |
+| Name | Type | Description |
+| :------ | :------ | :------ |
+| `chatTemplates` | { `jinja`: { `default`: `boolean` ; `defaultCaps`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } ; `toolUse`: `boolean` ; `toolUseCaps?`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  }  } ; `llamaChat`: `boolean`  } | - |
+| `chatTemplates.jinja` | { `default`: `boolean` ; `defaultCaps`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } ; `toolUse`: `boolean` ; `toolUseCaps?`: { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  }  } | - |
+| `chatTemplates.jinja.default` | `boolean` | - |
+| `chatTemplates.jinja.defaultCaps` | { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } | - |
+| `chatTemplates.jinja.defaultCaps.parallelToolCalls` | `boolean` | - |
+| `chatTemplates.jinja.defaultCaps.systemRole` | `boolean` | - |
+| `chatTemplates.jinja.defaultCaps.toolCalls` | `boolean` | - |
+| `chatTemplates.jinja.defaultCaps.tools` | `boolean` | - |
+| `chatTemplates.jinja.toolUse` | `boolean` | - |
+| `chatTemplates.jinja.toolUseCaps?` | { `parallelToolCalls`: `boolean` ; `systemRole`: `boolean` ; `toolCalls`: `boolean` ; `tools`: `boolean`  } | - |
+| `chatTemplates.jinja.toolUseCaps.parallelToolCalls` | `boolean` | - |
+| `chatTemplates.jinja.toolUseCaps.systemRole` | `boolean` | - |
+| `chatTemplates.jinja.toolUseCaps.toolCalls` | `boolean` | - |
+| `chatTemplates.jinja.toolUseCaps.tools` | `boolean` | - |
+| `chatTemplates.llamaChat` | `boolean` | - |
+| `decision?` | { `audioInput`: `boolean` ; `error?`: `string` ; `imageInput`: `boolean` ; `nOptionsMax`: `number` ; `readout?`: [`DecisionReadout`](../README.md#decisionreadout) ; `textGeneration`: `boolean` ; `type`: [`DecisionModelType`](../README.md#decisionmodeltype)  } | Set if the model is a typed decision model, see `LlamaContext.decide()` |
+| `decision.audioInput` | `boolean` | The prompt has a place for an audio clip (multimodal still has to be initialized) |
+| `decision.error?` | `string` | Why the model cannot be used, when `type` is `unknown` |
+| `decision.imageInput` | `boolean` | The prompt has a place for images (multimodal still has to be initialized). For a model read from its label logits (openjev, lev, nimble, ...) this follows from its template: a template that writes `images` takes them. |
+| `decision.nOptionsMax` | `number` | Most options a `choice` question can have |
+| `decision.readout?` | [`DecisionReadout`](../README.md#decisionreadout) | Only for `system_one` models |
+| `decision.textGeneration` | `boolean` | If false, `completion()` rejects: the model only answers decisions (clef, for one) |
+| `decision.type` | [`DecisionModelType`](../README.md#decisionmodeltype) | - |
+| `desc` | `string` | - |
+| `isChatTemplateSupported` | `boolean` | - |
+| `is_hybrid` | `boolean` | - |
+| `is_recurrent` | `boolean` | - |
+| `metadata` | `Object` | - |
+| `nEmbd` | `number` | - |
+| `nParams` | `number` | - |
+| `size` | `number` | - |
 
 #### Defined in
 
-[index.ts:405](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L405)
+[index.ts:441](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L441)
 
 ___
 
@@ -161,6 +170,7 @@ Parallel processing namespace for non-blocking queue operations
 | :------ | :------ |
 | `completion` | (`params`: [`ParallelCompletionParams`](../README.md#parallelcompletionparams), `onToken?`: (`requestId`: `number`, `data`: [`TokenData`](../README.md#tokendata)) => `void`) => `Promise`<{ `promise`: `Promise`<[`NativeCompletionResult`](../README.md#nativecompletionresult)\> ; `requestId`: `number` ; `stop`: () => `Promise`<`void`\>  }\> |
 | `configure` | (`config`: { `n_batch?`: `number` ; `n_parallel?`: `number`  }) => `Promise`<`boolean`\> |
+| `decide` | <Q\>(`request`: [`DecisionRequest`](../README.md#decisionrequest)<`Q`\>) => `Promise`<{ `promise`: `Promise`<[`DecisionResult`](../README.md#decisionresult)<`Q`\>\> ; `requestId`: `number`  }\> |
 | `disable` | () => `Promise`<`boolean`\> |
 | `embedding` | (`text`: `string`, `params?`: [`NativeEmbeddingParams`](../README.md#nativeembeddingparams)) => `Promise`<{ `promise`: `Promise`<[`NativeEmbeddingResult`](../README.md#nativeembeddingresult)\> ; `requestId`: `number`  }\> |
 | `enable` | (`config?`: { `n_batch?`: `number` ; `n_parallel?`: `number`  }) => `Promise`<`boolean`\> |
@@ -170,7 +180,7 @@ Parallel processing namespace for non-blocking queue operations
 
 #### Defined in
 
-[index.ts:414](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L414)
+[index.ts:450](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L450)
 
 ___
 
@@ -180,7 +190,7 @@ ___
 
 #### Defined in
 
-[index.ts:401](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L401)
+[index.ts:437](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L437)
 
 ___
 
@@ -190,7 +200,7 @@ ___
 
 #### Defined in
 
-[index.ts:409](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L409)
+[index.ts:445](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L445)
 
 ## Methods
 
@@ -210,7 +220,7 @@ ___
 
 #### Defined in
 
-[index.ts:1011](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1011)
+[index.ts:1102](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1102)
 
 ___
 
@@ -233,7 +243,7 @@ ___
 
 #### Defined in
 
-[index.ts:980](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L980)
+[index.ts:1072](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1072)
 
 ___
 
@@ -264,7 +274,7 @@ use recurrent state that cannot be partially removed - only fully cleared.
 
 #### Defined in
 
-[index.ts:1315](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1315)
+[index.ts:1421](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1421)
 
 ___
 
@@ -285,7 +295,7 @@ ___
 
 #### Defined in
 
-[index.ts:839](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L839)
+[index.ts:910](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L910)
 
 ___
 
@@ -310,7 +320,43 @@ ___
 
 #### Defined in
 
-[index.ts:1262](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1262)
+[index.ts:1366](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1366)
+
+___
+
+### decide
+
+▸ **decide**<`Q`\>(`request`): `Promise`<[`DecisionResult`](../README.md#decisionresult)<`Q`\>\>
+
+Answer typed questions about a state with a decision model
+(see `model.decision`), in the shape of the TypeSafe `/v1/systemone` API.
+Each answer is read from one forward pass, no token is generated.
+It runs on the sequence of `completion()`, whose cached prompt is
+dropped: the next completion evaluates its prompt from the start.
+
+Rejects if the request is invalid, if the model is not a decision
+model of a supported type, or if parallel mode is enabled (use
+`parallel.decide()` then).
+
+#### Type parameters
+
+| Name | Type |
+| :------ | :------ |
+| `Q` | extends [`DecisionQuestions`](../README.md#decisionquestions) |
+
+#### Parameters
+
+| Name | Type |
+| :------ | :------ |
+| `request` | [`DecisionRequest`](../README.md#decisionrequest)<`Q`\> |
+
+#### Returns
+
+`Promise`<[`DecisionResult`](../README.md#decisionresult)<`Q`\>\>
+
+#### Defined in
+
+[index.ts:1065](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1065)
 
 ___
 
@@ -322,7 +368,7 @@ ___
 
 | Name | Type |
 | :------ | :------ |
-| `embeddings` | `number`[] |
+| `embeddings` | `number`[] \| `Float32Array` |
 | `embeddingDim` | `number` |
 
 #### Returns
@@ -331,7 +377,7 @@ ___
 
 #### Defined in
 
-[index.ts:1285](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1285)
+[index.ts:1384](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1384)
 
 ___
 
@@ -343,7 +389,7 @@ ___
 
 | Name | Type |
 | :------ | :------ |
-| `tokens` | `number`[] |
+| `tokens` | `number`[] \| `Int32Array` |
 
 #### Returns
 
@@ -351,7 +397,7 @@ ___
 
 #### Defined in
 
-[index.ts:1216](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1216)
+[index.ts:1313](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1313)
 
 ___
 
@@ -371,7 +417,7 @@ ___
 
 #### Defined in
 
-[index.ts:951](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L951)
+[index.ts:1022](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1022)
 
 ___
 
@@ -392,7 +438,7 @@ ___
 
 #### Defined in
 
-[index.ts:956](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L956)
+[index.ts:1027](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1027)
 
 ___
 
@@ -438,7 +484,7 @@ isn't read.
 
 #### Defined in
 
-[index.ts:1241](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1241)
+[index.ts:1346](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1346)
 
 ___
 
@@ -452,7 +498,7 @@ ___
 
 #### Defined in
 
-[index.ts:1293](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1293)
+[index.ts:1399](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1399)
 
 ___
 
@@ -491,7 +537,7 @@ positional signature has been removed.
 
 #### Defined in
 
-[index.ts:1134](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1134)
+[index.ts:1225](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1225)
 
 ___
 
@@ -512,7 +558,7 @@ ___
 | `params.force_pure_content?` | `boolean` |
 | `params.jinja?` | `boolean` |
 | `params.now?` | `string` \| `number` |
-| `params.parallel_tool_calls?` | `object` |
+| `params.parallel_tool_calls?` | `boolean` |
 | `params.reasoning_format?` | ``"none"`` \| ``"auto"`` \| ``"deepseek"`` |
 | `params.response_format?` | [`CompletionResponseFormat`](../README.md#completionresponseformat) |
 | `params.tool_choice?` | `string` |
@@ -524,7 +570,7 @@ ___
 
 #### Defined in
 
-[index.ts:720](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L720)
+[index.ts:798](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L798)
 
 ___
 
@@ -538,7 +584,7 @@ ___
 
 #### Defined in
 
-[index.ts:1024](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1024)
+[index.ts:1115](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1115)
 
 ___
 
@@ -552,7 +598,7 @@ ___
 
 #### Defined in
 
-[index.ts:1066](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1066)
+[index.ts:1157](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1157)
 
 ___
 
@@ -566,7 +612,7 @@ ___
 
 #### Defined in
 
-[index.ts:1113](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1113)
+[index.ts:1204](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1204)
 
 ___
 
@@ -592,7 +638,7 @@ Initialize multimodal support (vision/audio) with a projector model.
 
 #### Defined in
 
-[index.ts:1040](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1040)
+[index.ts:1131](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1131)
 
 ___
 
@@ -621,7 +667,7 @@ table in the README.
 
 #### Defined in
 
-[index.ts:1086](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1086)
+[index.ts:1177](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1177)
 
 ___
 
@@ -635,7 +681,7 @@ ___
 
 #### Defined in
 
-[index.ts:715](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L715)
+[index.ts:793](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L793)
 
 ___
 
@@ -649,7 +695,7 @@ ___
 
 #### Defined in
 
-[index.ts:711](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L711)
+[index.ts:789](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L789)
 
 ___
 
@@ -663,7 +709,7 @@ ___
 
 #### Defined in
 
-[index.ts:1061](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1061)
+[index.ts:1152](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1152)
 
 ___
 
@@ -677,7 +723,7 @@ ___
 
 #### Defined in
 
-[index.ts:1108](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1108)
+[index.ts:1199](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1199)
 
 ___
 
@@ -697,7 +743,7 @@ ___
 
 #### Defined in
 
-[index.ts:696](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L696)
+[index.ts:772](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L772)
 
 ___
 
@@ -711,7 +757,7 @@ ___
 
 #### Defined in
 
-[index.ts:1320](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1320)
+[index.ts:1426](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1426)
 
 ___
 
@@ -725,7 +771,7 @@ ___
 
 #### Defined in
 
-[index.ts:1074](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1074)
+[index.ts:1165](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1165)
 
 ___
 
@@ -739,7 +785,7 @@ ___
 
 #### Defined in
 
-[index.ts:1298](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1298)
+[index.ts:1404](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1404)
 
 ___
 
@@ -753,7 +799,7 @@ ___
 
 #### Defined in
 
-[index.ts:1019](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L1019)
+[index.ts:1110](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1110)
 
 ___
 
@@ -775,7 +821,7 @@ ___
 
 #### Defined in
 
-[index.ts:964](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L964)
+[index.ts:1038](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1038)
 
 ___
 
@@ -797,7 +843,7 @@ ___
 
 #### Defined in
 
-[index.ts:703](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L703)
+[index.ts:779](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L779)
 
 ___
 
@@ -811,7 +857,7 @@ ___
 
 #### Defined in
 
-[index.ts:934](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L934)
+[index.ts:1005](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1005)
 
 ___
 
@@ -833,4 +879,4 @@ ___
 
 #### Defined in
 
-[index.ts:939](https://github.com/mybigday/llama.rn/blob/b3bb9620/src/index.ts#L939)
+[index.ts:1010](https://github.com/mybigday/llama.rn/blob/ccfc8e22/src/index.ts#L1010)

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+/* eslint-disable no-plusplus, no-continue, no-cond-assign, no-constant-condition, no-restricted-syntax */
+
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
@@ -423,6 +425,28 @@ function findFunctionCandidates(source, functionName) {
 // Text patch
 // ============================================================
 
+function countOccurrences(source, value) {
+    if (!value) {
+        return 0
+    }
+
+    let count = 0
+    let position = 0
+
+    while (true) {
+        const index = source.indexOf(value, position)
+
+        if (index === -1) {
+            break
+        }
+
+        count++
+        position = index + value.length
+    }
+
+    return count
+}
+
 function prepareTextPatch(entry, source, oldText, newText, sourcePath) {
     const normalizedSource = normalize(source)
     const normalizedOld = normalize(oldText)
@@ -431,22 +455,23 @@ function prepareTextPatch(entry, source, oldText, newText, sourcePath) {
     // First check whether the patch has already been applied.
     //
     // This is useful when the new text itself is unique.
+    const oldCount = countOccurrences(normalizedSource, normalizedOld)
+    const newCount = countOccurrences(normalizedSource, normalizedNew)
+    const oldCountInNew = countOccurrences(normalizedNew, normalizedOld)
+
     if (
         normalizedOld !== normalizedNew &&
-        normalizedSource.includes(normalizedNew)
+        newCount > 0 &&
+        (oldCount === 0 || (
+            oldCountInNew > 0 &&
+            oldCount === newCount * oldCountInNew
+        ))
     ) {
-        const oldCount = countOccurrences(
-            normalizedSource,
-            normalizedOld
-        )
-
-        if (oldCount === 0) {
-            return {
-                ...entry,
-                sourcePath,
-                status: 'already-patched',
-                source,
-            }
+        return {
+            ...entry,
+            sourcePath,
+            status: 'already-patched',
+            source,
         }
     }
 
@@ -484,28 +509,6 @@ function prepareTextPatch(entry, source, oldText, newText, sourcePath) {
         oldText,
         newText,
     }
-}
-
-function countOccurrences(source, value) {
-    if (!value) {
-        return 0
-    }
-
-    let count = 0
-    let position = 0
-
-    while (true) {
-        const index = source.indexOf(value, position)
-
-        if (index === -1) {
-            break
-        }
-
-        count++
-        position = index + value.length
-    }
-
-    return count
 }
 
 function applyTextPatch(patch) {
@@ -576,6 +579,23 @@ function prepareFunctionPatch(entry, source, oldFunction, newFunction, sourcePat
 
     // Already patched.
     if (normalizedActual === normalizedNew) {
+        return {
+            ...entry,
+            sourcePath,
+            candidate,
+            status: 'already-patched',
+            source,
+        }
+    }
+
+    const alreadyMarkers = entry.already
+    if (
+        Array.isArray(alreadyMarkers) &&
+        alreadyMarkers.length > 0 &&
+        alreadyMarkers.every((marker) =>
+            normalizedActual.includes(normalize(marker))
+        )
+    ) {
         return {
             ...entry,
             sourcePath,
