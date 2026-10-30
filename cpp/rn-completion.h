@@ -57,6 +57,13 @@ struct completion_token_output
     int32_t request_id = -1;  // Request ID for parallel processing
 };
 
+// Top-n token probabilities for a decoded position, taken from the sampler
+// chain's candidates (post_sampling = true, i.e. after top_k / min_p / grammar
+// / ... have been applied and renormalised) or from a plain softmax over the
+// raw logits at batch index `idx` (post_sampling = false).
+std::vector<completion_token_output::token_prob> get_token_probabilities(
+    llama_context *ctx, common_sampler *sampler, int idx, int n_probs, bool post_sampling);
+
 struct completion_chat_output
 {
   std::string content;
@@ -131,11 +138,10 @@ struct llama_rn_context_completion {
     // Sampling context
     common_sampler *ctx_sampling = nullptr;
 
-    // Speculative decoding context for MTP.
+    // Speculative decoding context (MTP or classic draft-simple).
     common_speculative *spec = nullptr;
     llama_context_ptr spec_ctx;
-    llama_batch spec_batch = {};
-    bool spec_batch_initialized = false;
+    common_batch spec_batch;
     llama_tokens spec_prompt;
     llama_token spec_id_last = LLAMA_TOKEN_NULL;
     llama_pos spec_n_past = 0;
@@ -206,7 +212,7 @@ struct llama_rn_context_completion {
     std::vector<float> rerank(const std::string &query, const std::vector<std::string> &documents);
 
     // Benchmarking methods
-    std::string bench(int pp, int tg, int pl, int nr);
+    json bench(int pp, int tg, int pl, int nr);
 
     // Multimodal processing methods
     void processMedia(

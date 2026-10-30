@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cassert>
+#include <cmath>
 #include <filesystem>
 #include <vector>
 #include <string>
@@ -242,6 +243,208 @@ bool test_completion() {
     }
 }
 
+// Shared helper: run one classic (non-parallel) completion of up to `max_tokens`
+// tokens through the same rewind -> loadPrompt -> beginCompletion -> doCompletion
+// -> endCompletion sequence the JSI completion() binding uses.
+static int run_classic_completion(llama_rn_context& ctx, const std::string& prompt, int max_tokens) {
+    std::vector<std::string> empty_media;
+    ctx.completion->rewind();
+    if (!ctx.completion->initSampling()) {
+        return -1;
+    }
+    ctx.params.prompt = prompt;
+    ctx.completion->loadPrompt(empty_media);
+    ctx.completion->beginCompletion();
+
+    int generated = 0;
+    while (ctx.completion->has_next_token && generated < max_tokens) {
+        completion_token_output out = ctx.completion->doCompletion();
+        if (out.tok == -1) break;
+        generated++;
+    }
+    ctx.completion->is_interrupted = true;
+    ctx.completion->endCompletion();
+    return generated;
+}
+
+static bool setup_completion_context(llama_rn_context& ctx) {
+    common_params params;
+    params.model.path = "../tiny-random-llama.gguf";
+    params.n_ctx = 512;
+    params.n_batch = 128;
+    params.cpuparams.n_threads = 1;
+    params.n_gpu_layers = 0;
+    params.no_kv_offload = true;
+    params.n_predict = -1;
+    if (!ctx.loadModel(params)) {
+        std::cout << "Failed to load model" << std::endl;
+        return false;
+    }
+    if (ctx.completion == nullptr) {
+        ctx.completion = new llama_rn_context_completion(&ctx);
+    }
+    return true;
+}
+
+// Regression test for #401 (2): generated_token_probs must be reset by rewind(),
+// otherwise completion_probabilities accumulates across completion() calls.
+bool test_completion_probabilities_reset_between_completions() {
+    try {
+        llama_rn_context ctx;
+        if (!setup_completion_context(ctx)) return false;
+
+        ctx.params.sampling.n_probs = 3;
+
+        const int first = run_classic_completion(ctx, "Hello", 4);
+        if (first <= 0) {
+            std::cout << "First completion generated no tokens" << std::endl;
+            return false;
+        }
+        const size_t first_probs = ctx.completion->generated_token_probs.size();
+        if (first_probs != (size_t) first) {
+            std::cout << "First completion: expected " << first << " prob entries, got " << first_probs << std::endl;
+            return false;
+        }
+
+        const int second = run_classic_completion(ctx, "World", 4);
+        if (second <= 0) {
+            std::cout << "Second completion generated no tokens" << std::endl;
+            return false;
+        }
+        const size_t second_probs = ctx.completion->generated_token_probs.size();
+        if (second_probs != (size_t) second) {
+            std::cout << "Second completion: expected " << second << " prob entries, got " << second_probs
+                      << " (stale entries from the first completion leaked)" << std::endl;
+            return false;
+        }
+
+        for (const auto& entry : ctx.completion->generated_token_probs) {
+            if (entry.probs.empty() || entry.probs.size() > 3) {
+                std::cout << "Unexpected probs size " << entry.probs.size() << std::endl;
+                return false;
+            }
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cout << "Exception: " << e.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cout << "Unknown exception" << std::endl;
+        return false;
+    }
+}
+
+// #401 (3): post_sampling_probs=false must report a raw softmax over the logits
+// even when the sampler chain truncates candidates (top_k = 1 here), while the
+// default post-sampling mode reflects that truncation.
+bool test_n_probs_post_sampling_vs_raw() {
+    try {
+        llama_rn_context ctx;
+        if (!setup_completion_context(ctx)) return false;
+
+        ctx.params.sampling.n_probs = 4;
+        ctx.params.sampling.top_k = 1;
+        ctx.params.sampling.temp = 1.0f;
+
+        // Post-sampling: top_k = 1 leaves a single candidate with p == 1
+        ctx.post_sampling_probs = true;
+        if (run_classic_completion(ctx, "Hello", 2) <= 0) return false;
+        for (const auto& entry : ctx.completion->generated_token_probs) {
+            if (entry.probs.size() != 1 || std::fabs(entry.probs[0].prob - 1.0f) > 1e-4f) {
+                std::cout << "post-sampling: expected 1 candidate with p=1, got "
+                          << entry.probs.size() << " (p0=" << (entry.probs.empty() ? -1.f : entry.probs[0].prob) << ")" << std::endl;
+                return false;
+            }
+        }
+
+        // Raw: full top-4 softmax, sorted descending, sum < 1 over a large vocab
+        ctx.post_sampling_probs = false;
+        if (run_classic_completion(ctx, "Hello", 2) <= 0) return false;
+        for (const auto& entry : ctx.completion->generated_token_probs) {
+            if (entry.probs.size() != 4) {
+                std::cout << "raw: expected 4 entries, got " << entry.probs.size() << std::endl;
+                return false;
+            }
+            float sum = 0.0f;
+            for (size_t i = 0; i < entry.probs.size(); ++i) {
+                const float p = entry.probs[i].prob;
+                if (p <= 0.0f || p > 1.0f || (i > 0 && p > entry.probs[i - 1].prob)) {
+                    std::cout << "raw: bad ordering / range at " << i << std::endl;
+                    return false;
+                }
+                sum += p;
+            }
+            if (sum > 1.0f + 1e-4f) {
+                std::cout << "raw: top-4 probabilities sum to " << sum << std::endl;
+                return false;
+            }
+            // The greedy pick (top_k = 1) must be the raw argmax as well
+            if (entry.probs[0].tok != entry.tok) {
+                std::cout << "raw: argmax " << entry.probs[0].tok << " != sampled " << entry.tok << std::endl;
+                return false;
+            }
+        }
+        ctx.params.sampling.top_k = 40;
+        return true;
+    } catch (const std::exception& e) {
+        std::cout << "Exception: " << e.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cout << "Unknown exception" << std::endl;
+        return false;
+    }
+}
+
+// Regression test for #401 (1): logit_bias is a std::vector<llama_logit_bias> and
+// must be populated with push_back (indexing an empty vector is an OOB write).
+// A huge positive bias on one token must make the sampler pick it every time.
+bool test_logit_bias_forces_token() {
+    try {
+        llama_rn_context ctx;
+        if (!setup_completion_context(ctx)) return false;
+
+        const llama_vocab * vocab = llama_model_get_vocab(ctx.model);
+        const llama_token eos = llama_vocab_eos(vocab);
+        // Pick a regular token that is not EOS so generation keeps going.
+        llama_token forced = 5;
+        if (forced == eos) forced = 6;
+
+        ctx.params.sampling.logit_bias.clear();
+        ctx.params.sampling.logit_bias.push_back({ forced, 1000.0f });
+        ctx.params.sampling.logit_bias.push_back({ eos, -INFINITY });
+
+        std::vector<std::string> empty_media;
+        ctx.completion->rewind();
+        if (!ctx.completion->initSampling()) return false;
+        ctx.params.prompt = "Hello";
+        ctx.completion->loadPrompt(empty_media);
+        ctx.completion->beginCompletion();
+
+        int generated = 0;
+        while (ctx.completion->has_next_token && generated < 4) {
+            completion_token_output out = ctx.completion->doCompletion();
+            if (out.tok == -1) break;
+            if (out.tok != forced) {
+                std::cout << "Expected biased token " << forced << ", got " << out.tok << std::endl;
+                ctx.completion->is_interrupted = true;
+                ctx.completion->endCompletion();
+                return false;
+            }
+            generated++;
+        }
+        ctx.completion->is_interrupted = true;
+        ctx.completion->endCompletion();
+        ctx.params.sampling.logit_bias.clear();
+        return generated == 4;
+    } catch (const std::exception& e) {
+        std::cout << "Exception: " << e.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cout << "Unknown exception" << std::endl;
+        return false;
+    }
+}
+
 // Test that partial init failures return false instead of dereferencing a null context.
 bool test_context_init_failure_is_graceful() {
     try {
@@ -292,7 +495,7 @@ bool test_context_init_failure_is_graceful() {
 bool test_utilities() {
     try {
         // Test kv_cache_type_from_str function
-        lm_ggml_type cache_type = kv_cache_type_from_str("f16");
+        ggml_type cache_type = kv_cache_type_from_str("f16");
         // Just ensure it doesn't crash and returns some valid value
 
         // Test flash attention type parsing
@@ -314,7 +517,7 @@ bool test_completion_generation_timing() {
         llama_rn_context_completion completion(nullptr);
 
         completion.startGenerationTiming();
-        completion.t_start_generation = lm_ggml_time_us() - 1000;
+        completion.t_start_generation = ggml_time_us() - 1000;
         completion.num_tokens_predicted = 3;
         completion.updateGenerationTiming();
 
@@ -335,6 +538,73 @@ bool test_completion_generation_timing() {
     }
 }
 
+// draft-simple: a standalone draft model must actually be loaded and used by the
+// direct completion path (draft_tokens stayed 0 before it was wired up).
+static bool setup_draft_simple_context(llama_rn_context& ctx, const std::string& model_path) {
+    common_params params;
+    params.model.path = model_path;
+    params.n_ctx = 512;
+    params.n_batch = 128;
+    params.cpuparams.n_threads = 1;
+    params.n_gpu_layers = 0;
+    params.no_kv_offload = true;
+    params.n_predict = -1;
+    params.speculative.types = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
+    params.speculative.draft.mparams.path = model_path; // identical draft
+    params.speculative.draft.n_max = 3;
+    params.speculative.draft.n_gpu_layers = 0;
+    if (!ctx.loadModel(params)) {
+        std::cout << "Failed to load model" << std::endl;
+        return false;
+    }
+    if (ctx.completion == nullptr) {
+        ctx.completion = new llama_rn_context_completion(&ctx);
+    }
+    return true;
+}
+
+bool test_draft_simple_completion() {
+    try {
+        llama_rn_context ctx;
+        if (!setup_draft_simple_context(ctx, "../tiny-random-llama.gguf")) return false;
+        if (ctx.draft_model == nullptr) {
+            std::cout << "Draft model was not loaded" << std::endl;
+            return false;
+        }
+
+        // Greedy target + identical draft: every draft should be accepted.
+        ctx.params.sampling.temp = 0.0f;
+
+        const int generated = run_classic_completion(ctx, "Hello", 8);
+        std::cout << "[generated " << generated << ", drafted " << ctx.completion->num_draft_tokens
+                  << ", accepted " << ctx.completion->num_draft_tokens_accepted << "] ";
+        return generated > 0 && ctx.completion->num_draft_tokens > 0 &&
+               ctx.completion->num_draft_tokens_accepted > 0;
+    } catch (const std::exception& e) {
+        std::cout << "Exception: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// draft-simple cannot roll back recurrent/hybrid memory (no rs sequences), so it must
+// fail with an error instead of aborting in seq_rm on the first rejected draft.
+bool test_draft_simple_rejects_hybrid() {
+    const std::string hybrid_path = "../models/lfm2.gguf";
+    if (!std::filesystem::exists(hybrid_path)) {
+        std::cout << "[SKIP: run tests/models/download.sh for lfm2] ";
+        return true;
+    }
+    try {
+        llama_rn_context ctx;
+        if (!setup_draft_simple_context(ctx, hybrid_path)) return false;
+        run_classic_completion(ctx, "Hello", 4);
+        std::cout << "Expected an exception" << std::endl;
+        return false;
+    } catch (const std::exception& e) {
+        return std::string(e.what()).find("recurrent or hybrid") != std::string::npos;
+    }
+}
+
 int main() {
     std::cout << "Starting rnllama API tests..." << std::endl;
     std::cout << "Using test model: ../tiny-random-llama.gguf" << std::endl;
@@ -347,8 +617,13 @@ int main() {
     results.run_test("Tokenization", test_tokenization());
     results.run_test("Completion", test_completion());
     results.run_test("Completion Generation Timing", test_completion_generation_timing());
+    results.run_test("Completion Probabilities Reset Between Completions", test_completion_probabilities_reset_between_completions());
+    results.run_test("Logit Bias Forces Token", test_logit_bias_forces_token());
+    results.run_test("n_probs Post-Sampling vs Raw", test_n_probs_post_sampling_vs_raw());
     results.run_test("Graceful Context Init Failure", test_context_init_failure_is_graceful());
     results.run_test("Utility Functions", test_utilities());
+    results.run_test("draft-simple Completion", test_draft_simple_completion());
+    results.run_test("draft-simple Rejects Hybrid", test_draft_simple_rejects_hybrid());
 
     // Print summary
     results.print_summary();

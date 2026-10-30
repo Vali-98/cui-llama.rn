@@ -2,8 +2,9 @@ const { NativeModules } = require('react-native')
 
 if (!NativeModules.RNLlama) {
   const demoEmbedding = new Array(768).fill(0.01)
-  const benchJson =
-    '{"n_kv_max":2048,"n_batch":2048,"n_ubatch":512,"flash_attn":0,"is_pp_shared":0,"n_gpu_layers":99,"n_threads":8,"n_threads_batch":8,"pp":128,"tg":128,"pl":1,"n_kv":256,"t_pp":0.23381,"speed_pp":547.453064,"t_tg":3.503684,"speed_tg":36.532974,"t":3.737494,"speed":68.495094}'
+  const benchResult = JSON.parse(
+    '{"n_kv_max":2048,"n_batch":2048,"n_ubatch":512,"flash_attn":0,"is_pp_shared":0,"n_gpu_layers":99,"n_threads":8,"n_threads_batch":8,"pp":128,"tg":128,"pl":1,"n_kv":256,"t_pp":0.23381,"speed_pp":547.453064,"t_tg":3.503684,"speed_tg":36.532974,"t":3.737494,"speed":68.495094}',
+  )
 
   const contextMap = {}
   const vocoderMap = {}
@@ -22,41 +23,41 @@ if (!NativeModules.RNLlama) {
       {
         content: ' *',
         probs: [
-          { prob: 0.9658700227737427, tok_str: ' *' },
-          { prob: 0.021654844284057617, tok_str: ' Hi' },
-          { prob: 0.012475099414587021, tok_str: ' Hello' },
+          { prob: 0.9658700227737427, tok_id: 0, tok_str: ' *' },
+          { prob: 0.021654844284057617, tok_id: 0, tok_str: ' Hi' },
+          { prob: 0.012475099414587021, tok_id: 0, tok_str: ' Hello' },
         ],
       },
       {
         content: 'g',
         probs: [
-          { prob: 0.5133139491081238, tok_str: 'g' },
-          { prob: 0.3046242296695709, tok_str: 'ch' },
-          { prob: 0.18206188082695007, tok_str: 'bl' },
+          { prob: 0.5133139491081238, tok_id: 0, tok_str: 'g' },
+          { prob: 0.3046242296695709, tok_id: 0, tok_str: 'ch' },
+          { prob: 0.18206188082695007, tok_id: 0, tok_str: 'bl' },
         ],
       },
       {
         content: 'igg',
         probs: [
-          { prob: 0.9886618852615356, tok_str: 'igg' },
-          { prob: 0.008458126336336136, tok_str: 'ig' },
-          { prob: 0.002879939740523696, tok_str: 'reet' },
+          { prob: 0.9886618852615356, tok_id: 0, tok_str: 'igg' },
+          { prob: 0.008458126336336136, tok_id: 0, tok_str: 'ig' },
+          { prob: 0.002879939740523696, tok_id: 0, tok_str: 'reet' },
         ],
       },
       {
         content: 'les',
         probs: [
-          { prob: 1, tok_str: 'les' },
-          { prob: 1.8753286923356427e-8, tok_str: 'ling' },
-          { prob: 3.312444318837038e-9, tok_str: 'LES' },
+          { prob: 1, tok_id: 0, tok_str: 'les' },
+          { prob: 1.8753286923356427e-8, tok_id: 0, tok_str: 'ling' },
+          { prob: 3.312444318837038e-9, tok_id: 0, tok_str: 'LES' },
         ],
       },
       {
         content: '*',
         probs: [
-          { prob: 1, tok_str: '*' },
-          { prob: 4.459857905203535e-8, tok_str: '*.' },
-          { prob: 3.274198334679568e-8, tok_str: '**' },
+          { prob: 1, tok_id: 0, tok_str: '*' },
+          { prob: 4.459857905203535e-8, tok_id: 0, tok_str: '*.' },
+          { prob: 3.274198334679568e-8, tok_id: 0, tok_str: '**' },
         ],
       },
     ]
@@ -135,6 +136,41 @@ if (!NativeModules.RNLlama) {
       })
     }
 
+    // Uniform answers in the shape of the TypeSafe /v1/systemone response
+    const mockDecide = (request) => {
+      const answers = {}
+      Object.entries(request?.questions || {}).forEach(([id, q]) => {
+        if (q.type === 'noul') {
+          answers[id] = { type: 'noul', noul: 0.5 }
+          return
+        }
+        const keys =
+          q.type === 'score'
+            ? q.criteria.map((_, i) => String(i))
+            : Object.keys(q.criteria)
+        const probabilities = Object.fromEntries(
+          keys.map((k) => [k, 1 / keys.length]),
+        )
+        answers[id] =
+          q.type === 'score'
+            ? {
+                type: 'score',
+                score: (keys.length - 1) / 2,
+                legend: Object.fromEntries(
+                  q.criteria.map((desc, i) => [String(i), desc]),
+                ),
+                probabilities,
+                confidence: 0,
+              }
+            : { type: 'choice', choice: keys[0], probabilities, confidence: 0 }
+      })
+      return {
+        model: 'mock',
+        answers,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      }
+    }
+
     const mockInitContextResult = {
       gpu: false,
       reasonNoGPU: 'mock',
@@ -194,7 +230,7 @@ if (!NativeModules.RNLlama) {
     )
     setGlobal(
       'llamaGetBackendDevicesInfo',
-      jest.fn(async () => '[]'),
+      jest.fn(async () => []),
     )
     setGlobal(
       'llamaLoadSession',
@@ -229,7 +265,7 @@ if (!NativeModules.RNLlama) {
     )
     setGlobal(
       'llamaEmbedding',
-      jest.fn(async () => ({ embedding: demoEmbedding })),
+      jest.fn(async () => ({ embedding: Float32Array.from(demoEmbedding) })),
     )
     setGlobal(
       'llamaRerank',
@@ -240,8 +276,12 @@ if (!NativeModules.RNLlama) {
       ]),
     )
     setGlobal(
+      'llamaDecide',
+      jest.fn(async (_ctx, request) => mockDecide(request)),
+    )
+    setGlobal(
       'llamaBench',
-      jest.fn(async () => benchJson),
+      jest.fn(async () => benchResult),
     )
     setGlobal(
       'llamaCompletion',
@@ -321,7 +361,7 @@ if (!NativeModules.RNLlama) {
     )
     setGlobal(
       'llamaDecodeAudioTokens',
-      jest.fn(async () => []),
+      jest.fn(async () => new Float32Array([0.25, -0.5])),
     )
     setGlobal(
       'llamaGenerateAudioCodes',
@@ -347,7 +387,7 @@ if (!NativeModules.RNLlama) {
     )
     setGlobal(
       'llamaDecodeAudioEmbeddings',
-      jest.fn(async () => []),
+      jest.fn(async () => new Float32Array([0.125])),
     )
     setGlobal('llamaGetAudioSampleRate', jest.fn(async () => 24000))
     setGlobal(
@@ -391,7 +431,7 @@ if (!NativeModules.RNLlama) {
       'llamaQueueEmbedding',
       jest.fn(async (_ctx, _text, _params, onResult) => {
         const reqId = getNextRequestId()
-        if (typeof onResult === 'function') onResult([...demoEmbedding])
+        if (typeof onResult === 'function') onResult(Float32Array.from(demoEmbedding))
         return { requestId: reqId }
       }),
     )
@@ -404,6 +444,14 @@ if (!NativeModules.RNLlama) {
           score: 1 - index * 0.1,
         }))
         if (typeof onResult === 'function') onResult(results)
+        return { requestId: reqId }
+      }),
+    )
+    setGlobal(
+      'llamaQueueDecide',
+      jest.fn(async (_ctx, request, onResult) => {
+        const reqId = getNextRequestId()
+        if (typeof onResult === 'function') onResult(mockDecide(request))
         return { requestId: reqId }
       }),
     )

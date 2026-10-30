@@ -9,97 +9,9 @@ option(HEXAGON_TOOLS_ROOT "Hexagon SDK toolchain directory" OFF)
 
 find_package(Python3 REQUIRED)
 set(CMAKE_CXX_STANDARD 17)
-# Use CMAKE_CURRENT_SOURCE_DIR to work correctly both standalone and as subdirectory
-set(RNLLAMA_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../cpp)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake/rnllama-sources.cmake)
 
-include_directories(
-    ${RNLLAMA_LIB_DIR}
-    ${RNLLAMA_LIB_DIR}/common
-    ${RNLLAMA_LIB_DIR}/common/jinja
-    ${RNLLAMA_LIB_DIR}/ggml-cpu
-    ${RNLLAMA_LIB_DIR}/tools/mtmd
-    ${RNLLAMA_LIB_DIR}/codec/include
-    ${RNLLAMA_LIB_DIR}/codec/common
-)
-
-# Collect source files using glob patterns
-file(GLOB MODEL_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/models/*.cpp)
-file(GLOB GGML_CPU_C_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/ggml-cpu/*.c)
-file(GLOB GGML_CPU_CPP_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/ggml-cpu/*.cpp)
-file(GLOB GGML_CPU_AMX_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/ggml-cpu/amx/*.cpp)
-file(GLOB LLAMA_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/llama*.cpp)
-file(GLOB MTMD_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/tools/mtmd/*.cpp)
-file(GLOB MTMD_MODEL_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/tools/mtmd/models/*.cpp)
-file(GLOB COMMON_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/common/*.cpp)
-file(GLOB JINJA_FILES CONFIGURE_DEPENDS ${RNLLAMA_LIB_DIR}/common/jinja/*.cpp)
-file(GLOB CODEC_FILES CONFIGURE_DEPENDS
-    ${RNLLAMA_LIB_DIR}/codec/src/*.cpp
-    ${RNLLAMA_LIB_DIR}/codec/src/batch/*.cpp
-    ${RNLLAMA_LIB_DIR}/codec/src/models/*.cpp
-    ${RNLLAMA_LIB_DIR}/codec/src/ops/*.cpp
-    ${RNLLAMA_LIB_DIR}/codec/src/runtime/*.cpp
-    ${RNLLAMA_LIB_DIR}/codec/src/lm/*.cpp
-    ${RNLLAMA_LIB_DIR}/codec/common/*.cpp
-)
-# tts_runner{,_flow}.cpp are codec.cpp's reference host loop; they pull in
-# codec_example_* helpers from examples/utils (not shipped here) and un-prefixed
-# common_* symbols. rn-tts drives its own AR loop via codec_lm_*, so drop them —
-# matching tests/CMakeLists.txt (keeps only audio_lm.cpp from codec/common).
-list(REMOVE_ITEM CODEC_FILES
-    ${RNLLAMA_LIB_DIR}/codec/common/tts_runner.cpp
-    ${RNLLAMA_LIB_DIR}/codec/common/tts_runner_flow.cpp
-)
-
-# Source files for rnllama library (excluding jni.cpp and jni-utils)
-set(
-    RNLLAMA_SOURCE_FILES
-    # Core GGML files
-    ${RNLLAMA_LIB_DIR}/ggml.c
-    ${RNLLAMA_LIB_DIR}/ggml-alloc.c
-    ${RNLLAMA_LIB_DIR}/ggml-backend.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-backend-dl.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-backend-meta.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-backend-reg.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-opt.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-threading.cpp
-    ${RNLLAMA_LIB_DIR}/ggml-quants.c
-    ${RNLLAMA_LIB_DIR}/gguf.cpp
-
-    # GGML CPU files (globbed)
-    ${GGML_CPU_C_FILES}
-    ${GGML_CPU_CPP_FILES}
-    ${GGML_CPU_AMX_FILES}
-
-    # Llama files (globbed)
-    ${LLAMA_FILES}
-    ${RNLLAMA_LIB_DIR}/unicode-data.cpp
-    ${RNLLAMA_LIB_DIR}/unicode.cpp
-
-    # Common utilities
-    ${COMMON_FILES}
-
-    ${RNLLAMA_LIB_DIR}/anyascii.c
-
-    # Jinja template engine
-    ${JINJA_FILES}
-
-    # codec.cpp sources
-    ${CODEC_FILES}
-
-    # Multimodal support (globbed)
-    ${MTMD_MODEL_FILES}
-    ${MTMD_FILES}
-
-    # React Native llama APIs
-    ${RNLLAMA_LIB_DIR}/rn-llama.cpp
-    ${RNLLAMA_LIB_DIR}/rn-completion.cpp
-    ${RNLLAMA_LIB_DIR}/rn-tts.cpp
-    ${RNLLAMA_LIB_DIR}/rn-slot.cpp
-    ${RNLLAMA_LIB_DIR}/rn-slot-manager.cpp
-
-    # Model implementations (globbed)
-    ${MODEL_FILES}
-)
+include_directories(${RNLLAMA_INCLUDE_DIRS})
 
 find_library(LOG_LIB log)
 
@@ -131,8 +43,8 @@ function(build_rnllama_library target_name arch cpu_flags)
 
     if (NOT ${arch} STREQUAL "generic")
         set(SOURCE_FILES_ARCH
-            ${RNLLAMA_LIB_DIR}/ggml-cpu/arch/${arch}/quants.c
-            ${RNLLAMA_LIB_DIR}/ggml-cpu/arch/${arch}/repack.cpp
+            ${RNLLAMA_GGML_CPU_ARCH_DIR}/${arch}/quants.c
+            ${RNLLAMA_GGML_CPU_ARCH_DIR}/${arch}/repack.cpp
         )
     endif ()
 
@@ -140,20 +52,20 @@ function(build_rnllama_library target_name arch cpu_flags)
     add_library(
         ${target_name}
         SHARED
-        ${RNLLAMA_SOURCE_FILES}
+        ${RNLLAMA_CORE_SOURCES}
         ${SOURCE_FILES_ARCH}
     )
 
     target_link_libraries(${target_name} PRIVATE ${LOG_LIB} android)
 
     if (${arch} STREQUAL "generic")
-        target_compile_options(${target_name} PRIVATE -DLM_GGML_CPU_GENERIC)
+        target_compile_options(${target_name} PRIVATE -DGGML_CPU_GENERIC)
     endif ()
 
     # ThinLTO rather than monolithic LTO: linking is parallel and incremental, and
     # peak memory stays low enough that several variants can link concurrently
     # (full LTO here OOM-killed 16 GB CI runners).
-    target_compile_options(${target_name} PRIVATE -DLM_GGML_USE_CPU -DLM_GGML_USE_CPU_REPACK -pthread ${cpu_flags} -fvectorize -ffp-model=fast -fno-finite-math-only -flto=thin -D_GNU_SOURCE)
+    target_compile_options(${target_name} PRIVATE -DGGML_USE_CPU -DGGML_USE_CPU_REPACK -pthread ${cpu_flags} -fvectorize -ffp-model=fast -fno-finite-math-only -flto=thin -D_GNU_SOURCE)
 
     if (CMAKE_BUILD_TYPE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_options(${target_name} PRIVATE -DRNLLAMA_ANDROID_ENABLE_LOGGING)
@@ -183,14 +95,18 @@ function(build_rnllama_library target_name arch cpu_flags)
         if (HEXAGON_SDK_AVAILABLE)
             # Add host-side hexagon sources
             target_sources(${target_name} PRIVATE
-                ${RNLLAMA_LIB_DIR}/ggml-hexagon/ggml-hexagon.cpp
-                ${RNLLAMA_LIB_DIR}/ggml-hexagon/htp-drv.cpp
+                ${RNLLAMA_GGML_HEXAGON_DIR}/ggml-hexagon.cpp
+                ${RNLLAMA_GGML_HEXAGON_DIR}/htp-kparams.cpp
+                ${RNLLAMA_GGML_HEXAGON_DIR}/htp-opnode.cpp
+                ${RNLLAMA_GGML_HEXAGON_DIR}/htp-fusion.cpp
+                ${RNLLAMA_GGML_HEXAGON_DIR}/htp-drv.cpp
+                ${RNLLAMA_GGML_HEXAGON_DIR}/htp-repack.cpp
             )
 
             # The Android host build consumes generated QAIC artifacts copied by
             # scripts/build-hexagon-htp.sh. Keep the failure mode explicit when
             # they have not been generated yet.
-            set(HEXAGON_PREBUILT_HTP_DIR "${RNLLAMA_LIB_DIR}/ggml-hexagon/htp/v73/")
+            set(HEXAGON_PREBUILT_HTP_DIR "${RNLLAMA_GGML_HEXAGON_DIR}/htp/v73/")
             set(HEXAGON_HOST_STUB "${HEXAGON_PREBUILT_HTP_DIR}/htp_iface_stub.c")
             set(HEXAGON_HOST_HEADER "${HEXAGON_PREBUILT_HTP_DIR}/htp_iface.h")
 
@@ -209,8 +125,8 @@ function(build_rnllama_library target_name arch cpu_flags)
                 ${HEXAGON_SDK_ROOT}/incs/stddef
                 ${HEXAGON_SDK_ROOT}/ipc/fastrpc/rpcmem/inc
                 ${HEXAGON_SDK_ROOT}/utils/examples
-                ${RNLLAMA_LIB_DIR}/ggml-hexagon
-                ${RNLLAMA_LIB_DIR}/ggml-hexagon/htp
+                ${RNLLAMA_GGML_HEXAGON_DIR}
+                ${RNLLAMA_GGML_HEXAGON_DIR}/htp
                 ${HEXAGON_PREBUILT_HTP_DIR}
                 ${CMAKE_CURRENT_BINARY_DIR}
             )
@@ -223,7 +139,7 @@ function(build_rnllama_library target_name arch cpu_flags)
             message(STATUS "Linking Hexagon cdsprpc library: ${CDSPRPC_LIB}")
 
             target_compile_options(${target_name} PRIVATE
-                -DLM_GGML_USE_HEXAGON
+                -DGGML_USE_HEXAGON
             )
 
             message(STATUS "Hexagon backend enabled for ${target_name}")
@@ -242,197 +158,33 @@ function(build_rnllama_library target_name arch cpu_flags)
 
     # OpenCL only for the special target
     if (ENABLE_OPENCL)
-        include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/OpenCL-Headers)
+        include_directories(${RNLLAMA_OPENCL_HEADERS_DIR})
 
-        set(GGML_OPENCL_KERNELS
-            add
-            add_id
-            argsort
-            tri
-            fill
-            clamp
-            cpy
-            cvt
-            diag_mask_inf
-            diag
-            div
-            gelu
-            get_rows
-            glu
-            group_norm
-            solve_tri
-            im2col_f32
-            im2col_f16
-            mean
-            mul_mv_f16_f16
-            mul_mv_f16_f32_1row
-            mul_mv_f16_f32_l4
-            mul_mv_f16_f32
-            mul_mv_f32_f32
-            mul_mv_q4_0_f32
-            mul_mv_q4_0_f32_v
-            mul_mv_q4_0_f32_8x_flat
-            mul_mv_q4_0_f32_1d_8x_flat
-            mul_mv_q4_0_f32_1d_16x_flat
-            mul_mv_q4_1_f32
-            mul_mv_q4_1_f32_flat
-            mul_mv_q4_k_f32
-            mul_mv_q4_k_f32_flat
-            mul_mv_q5_0_f32
-            mul_mv_q5_0_f32_flat
-            mul_mv_q5_1_f32
-            mul_mv_q5_1_f32_flat
-            mul_mv_q5_k_f32
-            mul_mv_q5_k_f32_flat
-            mul_mv_q6_k_f32
-            mul_mv_q6_k_f32_flat
-            mul_mv_q8_0_f32
-            mul_mv_q8_0_f32_flat
-            mul_mv_q1_0_f32
-            mul_mv_q1_0_f32_flat
-            mul_mv_iq4_nl_f32
-            mul_mv_iq4_nl_f32_flat
-            mul_mv_mxfp4_f32
-            mul_mv_mxfp4_f32_flat
-            mul_mv_id_q4_0_f32_8x_flat
-            mul_mv_id_q8_0_f32
-            mul_mv_id_q8_0_f32_flat
-            mul_mv_id_mxfp4_f32
-            mul_mv_id_mxfp4_f32_flat
-            gemm_moe_q4_0_f32_ns
-            gemm_moe_q4_0_q8_1_dp4a
-            gemv_moe_q4_0_f32_ns
-            gemm_moe_q8_0_f32_ns
-            gemm_moe_q4_1_f32_ns
-            gemv_moe_q4_1_f32_ns
-            gemm_moe_q5_0_f32_ns
-            gemv_moe_q5_0_f32_ns
-            gemm_moe_q5_1_f32_ns
-            gemv_moe_q5_1_f32_ns
-            gemm_moe_q4_k_f32_ns
-            gemm_moe_q4_k_q8_1_dp4a
-            gemm_moe_q6_k_q8_1_dp4a
-            gemm_moe_q8_1_dp4a
-            moe_reorder_quant_a_q8_1
-            gemm_noshuffle_q4_k_q8_1_dp4a
-            gemm_noshuffle_q5_k_q8_1_dp4a
-            gemm_noshuffle_q6_k_q8_1_dp4a
-            gemm_noshuffle_q8_0_q8_1_dp4a
-            gemm_noshuffle_q5_0_q8_1_dp4a
-            gemm_noshuffle_iq4_nl_q8_1_dp4a
-            gemm_noshuffle_q4_0_q8_1_dp4a
-            quant_a_q8_1
-            gemv_moe_q4_k_f32_ns
-            gemm_moe_q5_k_f32_ns
-            gemv_moe_q5_k_f32_ns
-            gemm_moe_q6_k_f32_ns
-            gemv_moe_q6_k_f32_ns
-            gemm_moe_mxfp4_f32
-            gemv_moe_mxfp4_f32
-            gemm_moe_mxfp4_f32_ns
-            gemm_moe_mxfp4_q8_1_dp4a
-            gemv_moe_mxfp4_f32_ns
-            moe_reorder_b
-            moe_combine
-            moe_sort_by_expert
-            mul_mm_f32_f32_l4_lm
-            mul_mm_f16_f32_l4_lm
-            mul_mm_q4_0_f32_l4_lm
-            mul_mm_q4_1_f32_l4_lm
-            mul_mm_q5_0_f32_l4_lm
-            mul_mm_q5_1_f32_l4_lm
-            mul_mm_q8_0_f32_l4_lm
-            mul_mm_q1_0_f32_l4_lm
-            mul_mm_iq4_nl_f32_l4_lm
-            mul_mm_q4_k_f32_l4_lm
-            mul_mm_q5_k_f32_l4_lm
-            mul_mm_q6_k_f32_l4_lm
-            gemv_noshuffle_q4_0_f32
-            gemv_noshuffle_q4_0_f32_spec
-            gemm_noshuffle_q4_0_f32
-            gemv_noshuffle_q4_1_f32
-            gemm_noshuffle_q4_1_f32
-            gemv_noshuffle_iq4_nl_f32
-            gemm_noshuffle_iq4_nl_f32
-            gemv_noshuffle_q5_0_f32
-            gemm_noshuffle_q5_0_f32
-            gemv_noshuffle_q5_1_f32
-            gemm_noshuffle_q5_1_f32
-            gemv_noshuffle_q8_0_f32
-            gemm_noshuffle_q8_0_f32
-            gemv_noshuffle_q1_0_f32
-            gemm_noshuffle_q1_0_f32
-            gemv_noshuffle_q4_k_f32
-            gemm_noshuffle_q4_k_f32
-            gemv_noshuffle_q6_k_f32
-            gemm_noshuffle_q6_k_f32
-            gemv_noshuffle_q5_k_f32
-            gemm_noshuffle_q5_k_f32
-            mul
-            neg
-            norm
-            relu
-            l2_norm
-            rms_norm
-            rope
-            scale
-            set_rows
-            sigmoid
-            silu
-            softmax_4_f32
-            softmax_4_f16
-            softmax_f32
-            softmax_f16
-            sqr
-            sqrt
-            ssm_conv
-            gated_delta_net
-            sub
-            sum_rows
-            cumsum
-            transpose
-            concat
-            tsembd
-            upscale
-            tanh
-            exp
-            expm1
-            abs
-            softplus
-            pad
-            repeat
-            mul_mat_f16_f32
-            mul_mm_f16_f32_kq_kqv
-            conv2d
-            conv2d_f16_f32
-            flash_attn_f32_f16
-            flash_attn_f16
-            flash_attn_f32
-            flash_attn_pre_f16
-            flash_attn_f32_q8_0
-            flash_attn_f32_q4_0
-            gemm_xmem_f16_f32_os8
+        # Discover kernels from the vendor tree so upstream additions do not leave
+        # ggml-opencl.cpp including headers that our Android build never generates.
+        set(GGML_OPENCL_KERNEL_DIR ${RNLLAMA_GGML_OPENCL_DIR}/kernels)
+        file(GLOB GGML_OPENCL_KERNEL_SOURCES CONFIGURE_DEPENDS
+            "${GGML_OPENCL_KERNEL_DIR}/*.cl"
         )
-        set(GGML_OPENCL_KERNEL_DIR ${RNLLAMA_LIB_DIR}/ggml-opencl/kernels)
         set(GGML_OPENCL_KERNEL_HEADERS "")
 
-        foreach(kernel ${GGML_OPENCL_KERNELS})
-            set(input_file ${GGML_OPENCL_KERNEL_DIR}/${kernel}.cl)
+        foreach(input_file ${GGML_OPENCL_KERNEL_SOURCES})
+            get_filename_component(kernel ${input_file} NAME_WE)
             set(output_file ${CMAKE_CURRENT_BINARY_DIR}/${kernel}.cl.h)
             message(STATUS "opencl: embedding kernel ${kernel}")
             add_custom_command(
                 OUTPUT ${output_file}
                 COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/..
-                        ${Python3_EXECUTABLE} ${RNLLAMA_LIB_DIR}/ggml-opencl/kernels/embed_kernel.py
+                        ${Python3_EXECUTABLE} ${GGML_OPENCL_KERNEL_DIR}/embed_kernel.py
                         ${input_file} ${output_file}
-                DEPENDS ${input_file} ${RNLLAMA_LIB_DIR}/ggml-opencl/kernels/embed_kernel.py
+                DEPENDS ${input_file} ${GGML_OPENCL_KERNEL_DIR}/embed_kernel.py
                 COMMENT "Embedding OpenCL kernel: ${kernel}.cl"
             )
 
             list(APPEND GGML_OPENCL_KERNEL_HEADERS ${output_file})
         endforeach()
 
-        set(OPENCL_STUB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../bin/${ANDROID_ABI})
+        set(OPENCL_STUB_DIR ${RNLLAMA_ROOT_DIR}/bin/${ANDROID_ABI})
         set(OPENCL_STUB     ${OPENCL_STUB_DIR}/libOpenCL.so)
 
         if (EXISTS ${OPENCL_STUB})
@@ -446,16 +198,16 @@ function(build_rnllama_library target_name arch cpu_flags)
 
         target_include_directories(${target_name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
         target_sources(${target_name} PRIVATE
-            ${RNLLAMA_LIB_DIR}/ggml-opencl/ggml-opencl.cpp
-            ${RNLLAMA_LIB_DIR}/ggml-opencl/cl-program-cache.cpp
+            ${RNLLAMA_GGML_OPENCL_DIR}/ggml-opencl.cpp
+            ${RNLLAMA_GGML_OPENCL_DIR}/cl-program-cache.cpp
             ${GGML_OPENCL_KERNEL_HEADERS}
         )
         target_compile_options(${target_name} PRIVATE
-            -DLM_GGML_USE_OPENCL
-            -DLM_GGML_OPENCL_USE_ADRENO_KERNELS
-            -DLM_GGML_OPENCL_EMBED_KERNELS
-            -DLM_GGML_OPENCL_SOA_Q
-            -DLM_GGML_OPENCL_TARGET_VERSION=300
+            -DGGML_USE_OPENCL
+            -DGGML_OPENCL_USE_ADRENO_KERNELS
+            -DGGML_OPENCL_EMBED_KERNELS
+            -DGGML_OPENCL_SOA_Q
+            -DGGML_OPENCL_TARGET_VERSION=300
         )
     endif ()
 
@@ -464,6 +216,10 @@ function(build_rnllama_library target_name arch cpu_flags)
     target_compile_options(${target_name} PRIVATE -ffunction-sections -fdata-sections)
 
     target_link_options(${target_name} PRIVATE -Wl,--gc-sections)
+    # ggml/llama symbols keep upstream names. Bind this library's own references
+    # at link time so a second ggml copy in the process (e.g. whisper.rn) can
+    # never be picked up via the dynamic linker's global lookup.
+    target_link_options(${target_name} PRIVATE -Wl,-Bsymbolic)
     target_link_options(${target_name} PRIVATE -flto=thin)
 endfunction()
 

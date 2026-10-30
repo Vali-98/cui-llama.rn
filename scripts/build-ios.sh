@@ -20,31 +20,51 @@ trap cleanup EXIT
 
 copy_headers() {
   local framework_path="$1"
+  local headers="$framework_path/Headers"
+  local llama_cpp="$ROOT_DIR/vendor/llama.cpp"
 
-  mkdir -p "$framework_path/Headers"
-  cp "$ROOT_DIR"/cpp/*.h "$framework_path/Headers/"
+  # Flat layout: the JSI glue includes these as <rnllama/name.h>.
+  mkdir -p "$headers"
+  cp "$ROOT_DIR"/cpp/*.h "$headers/"
+  cp "$llama_cpp"/include/*.h "$headers/"
+  cp "$llama_cpp"/src/*.h "$headers/"
+  cp "$llama_cpp"/ggml/include/*.h "$headers/"
+  cp "$llama_cpp"/ggml/src/*.h "$headers/"
 
-  mkdir -p "$framework_path/Headers/jinja"
-  cp "$ROOT_DIR"/cpp/common/jinja/*.h "$framework_path/Headers/jinja/"
+  mkdir -p "$headers/jinja"
+  cp "$llama_cpp"/common/jinja/*.h "$headers/jinja/"
 
-  mkdir -p "$framework_path/Headers/nlohmann"
-  cp "$ROOT_DIR"/cpp/nlohmann/*.hpp "$framework_path/Headers/nlohmann/"
+  mkdir -p "$headers/nlohmann"
+  cp "$llama_cpp"/vendor/nlohmann/*.hpp "$headers/nlohmann/"
 
-  # Copy necessary common headers to Headers root (for includes without path prefix)
-  cp "$ROOT_DIR"/cpp/common/chat.h "$framework_path/Headers/"
-  cp "$ROOT_DIR"/cpp/common/common.h "$framework_path/Headers/"
-  cp "$ROOT_DIR"/cpp/common/sampling.h "$framework_path/Headers/"
-  cp "$ROOT_DIR"/cpp/common/speculative.h "$framework_path/Headers/"
-  cp "$ROOT_DIR"/cpp/common/json-schema-to-grammar.h "$framework_path/Headers/"
-  cp "$ROOT_DIR"/cpp/common/peg-parser.h "$framework_path/Headers/"
+  # common/ headers the glue needs, at the root (included without a path prefix)
+  local h
+  for h in chat.h common.h sampling.h speculative.h json.h json-schema-to-grammar.h json-schema.h peg-parser.h; do
+    cp "$llama_cpp/common/$h" "$headers/"
+  done
 }
 
 copy_framework_support_files() {
   local framework_path="$1"
 
   copy_headers "$framework_path"
-  # ggml-metal.metal is no longer shipped: its bytes are embedded into the framework
-  # binary via cpp/ggml-metal/ggml-metal-embed.s (LM_GGML_METAL_EMBED_LIBRARY).
+  # Metal sources are not shipped as framework resources: each split kernel is
+  # embedded via vendor/llama.cpp/ggml/src/ggml-metal/ggml-metal-embed-*.s.
+}
+
+# ggml/gguf keep upstream names; they must stay internal to this framework so a
+# second ggml-based framework in the same app never resolves through it (see
+# ios/unexported-symbols.txt).
+assert_no_ggml_exports() {
+  local binary="$1"
+  local leaked
+
+  leaked="$(nm -gU "$binary" | awk '{print $3}' | grep -E '^_(ggml|gguf|quantize|dequantize|iq2xs|iq3xs)_|^__Z[A-Z]*[0-9]+(ggml|gguf)_|^__Z[A-Z]*N4ggml' || true)"
+  if [[ -n "$leaked" ]]; then
+    echo "ggml symbols exported from $binary:" >&2
+    echo "$leaked" | head -20 >&2
+    exit 1
+  fi
 }
 
 assert_matching_dsym() {
@@ -112,6 +132,7 @@ build_framework_slice() {
   fi
 
   assert_matching_dsym "$framework_path" "$dsym_path"
+  assert_no_ggml_exports "$framework_path/rnllama"
 
   ditto "$framework_path" "$staged_dir/rnllama.framework"
   copy_framework_support_files "$staged_dir/rnllama.framework"

@@ -1,0 +1,15 @@
+Reduce flash-attention simdgroups to fit the device's threadgroup memory limit.
+Use upstream's fa_smem helper so the guard matches the allocation calculation.
+--- a/ggml/src/ggml-metal/ggml-metal-ops.cpp
++++ b/ggml/src/ggml-metal/ggml-metal-ops.cpp
+@@ -3506,6 +3506,10 @@
+ 
+         // simdgroups per threadgroup (a.k.a. warps)
+         int32_t nsg = ne00 >= 512 ? 8 : 4;
++
++        while (nsg > 1 && fa_smem(nsg) > props_dev->max_theadgroup_memory_size) {
++            nsg /= 2;
++        }
+ 
+         const size_t smem = fa_smem(nsg);
+ 

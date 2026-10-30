@@ -2,21 +2,27 @@
   "patches": [
     {
       "type": "function",
-      "file": "cpp/ggml.c",
-      "function": "lm_ggml_fopen",
-      "old": "lm_ggml_fopen.old",
-      "new": "lm_ggml_fopen.new"
+      "file": "vendor/llama.cpp/ggml/src/ggml.c",
+      "function": "ggml_fopen",
+      "old": "ggml_fopen.old",
+      "new": "ggml_fopen.new"
     },
     {
       "type": "function",
-      "file": "cpp/tools/mtmd/clip.cpp",
+      "file": "vendor/llama.cpp/tools/mtmd/clip.cpp",
       "function": "load_tensors",
+      "already": [
+        "std::all_of(fname.begin(), fname.end(), ::isdigit)",
+        "failed to read scalar %s from fd",
+        "auto read_at =",
+        "pread(fd, dst, n, (off_t)offset)"
+      ],
       "old": "load_tensors.old",
       "new": "load_tensors.new"
     },
     {
       "type": "text",
-      "file": "cpp/tools/mtmd/clip.cpp",
+      "file": "vendor/llama.cpp/tools/mtmd/clip.cpp",
       "old": "clip_include.old",
       "new": "clip_include.new"
     }

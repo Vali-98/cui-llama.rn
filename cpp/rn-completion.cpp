@@ -6,6 +6,7 @@
 #include "llama-ext.h"  // llama_get_ctx_other (mem-shared MTP draft detection)
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <cstdlib>
 #include <limits>
@@ -31,6 +32,53 @@ llama_rn_context_completion::~llama_rn_context_completion() {
     }
 }
 
+std::vector<completion_token_output::token_prob> get_token_probabilities(
+    llama_context *ctx, common_sampler *sampler, int idx, int n_probs, bool post_sampling)
+{
+    std::vector<completion_token_output::token_prob> out;
+    if (n_probs <= 0) {
+        return out;
+    }
+
+    if (post_sampling) {
+        const llama_token_data_array *cur_p = common_sampler_get_candidates(sampler, true);
+        const size_t n = std::min(cur_p->size, (size_t) n_probs);
+        out.reserve(n);
+        for (size_t i = 0; i < n; ++i) {
+            out.push_back({cur_p->data[i].id, cur_p->data[i].p});
+        }
+        return out;
+    }
+
+    // Raw softmax over the full vocabulary, ignoring every sampler setting
+    const float *logits = llama_get_logits_ith(ctx, idx);
+    if (logits == nullptr) {
+        return out;
+    }
+    const llama_vocab *vocab = llama_model_get_vocab(llama_get_model(ctx));
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+
+    std::vector<llama_token_data> cur(n_vocab);
+    float max_l = -INFINITY;
+    for (llama_token id = 0; id < n_vocab; ++id) {
+        cur[id] = {id, logits[id], 0.0f};
+        max_l = std::max(max_l, logits[id]);
+    }
+    float sum = 0.0f;
+    for (auto &c : cur) {
+        c.p = expf(c.logit - max_l);
+        sum += c.p;
+    }
+    const size_t n = std::min((size_t) n_vocab, (size_t) n_probs);
+    std::partial_sort(cur.begin(), cur.begin() + n, cur.end(),
+        [](const llama_token_data &a, const llama_token_data &b) { return a.p > b.p; });
+    out.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        out.push_back({cur[i].id, cur[i].p / sum});
+    }
+    return out;
+}
+
 void llama_rn_context_completion::rewind() {
     resetSpeculative();
     is_interrupted = false;
@@ -50,6 +98,7 @@ void llama_rn_context_completion::rewind() {
     generated_text.reserve(parent_ctx->params.n_ctx);
     embeddings.clear();
     embedding_dim = 0;
+    generated_token_probs.clear();
     utf8_gate.reset();
     truncated = false;
     context_full = false;
@@ -69,6 +118,7 @@ void llama_rn_context_completion::rewind() {
 bool llama_rn_context_completion::initSampling() {
     if (ctx_sampling != nullptr) {
         common_sampler_free(ctx_sampling);
+        ctx_sampling = nullptr;
     }
     ctx_sampling = common_sampler_init(parent_ctx->model, parent_ctx->params.sampling);
     return ctx_sampling != nullptr;
@@ -105,15 +155,17 @@ void llama_rn_context_completion::probeStateCache() {
         state_cache_enabled = false;
         return;
     }
-    // Recurrent/hybrid only. Pure-SWA never fails seq_rm in this fork, so a
-    // checkpoint could never be restored — capturing would be pure cost.
-    // TODO: SWA reuse past a slid window (deep edit in a chat longer than the
-    // window) is unguarded here; a fix would need a pos_min trigger, not seq_rm.
-    state_cache_enabled =
-        llama_model_is_recurrent(model) ||
-        llama_model_is_hybrid(model);
+    // Recurrent/hybrid can't roll back in place (seq_rm fails). Pure SWA can,
+    // but a rollback below the slid window leaves the tail without its attention
+    // prefix (see the guard in loadPrompt); a snapshot restores that window.
+    // With swa_full the SWA cache keeps every position, so nothing is lost.
+    const bool is_recurrent_or_hybrid =
+        llama_model_is_recurrent(model) || llama_model_is_hybrid(model);
+    const bool is_swa = llama_model_n_swa(model) > 0 && !parent_ctx->params.swa_full;
+    state_cache_enabled = is_recurrent_or_hybrid || is_swa;
     if (state_cache_enabled) {
-        LOG_INFO("prompt state cache enabled (recurrent/hybrid model)");
+        LOG_INFO("prompt state cache enabled (%s model)",
+            is_recurrent_or_hybrid ? "recurrent/hybrid" : "SWA");
     }
 }
 
@@ -200,7 +252,7 @@ void llama_rn_context_completion::captureStateCheckpoint(
 
     // A hybrid's SWA cells grow ~linearly until the window fills (unlike its
     // fixed-size recurrent cells). Extrapolate to saturation and disable if one
-    // snapshot would exceed half the budget. (Pure-SWA is gated off upstream.)
+    // snapshot would exceed half the budget. Pure SWA saturates the same way.
     if (parent_ctx->model != nullptr && llama_model_n_swa(parent_ctx->model) > 0) {
         const size_t n_swa = (size_t) llama_model_n_swa(parent_ctx->model);
         const size_t fill  = std::min(n, n_swa);
@@ -286,8 +338,8 @@ bool llama_rn_context_completion::recoverStateCheckpoint(
         return false;
     }
     const llama_pos k = (llama_pos) state_checkpoints[ckpt_idx].n_tokens();
-    // Recurrent part is back at k; truncating the live attention prefix to k
-    // succeeds since nothing remains past k.
+    // Recurrent part (or the SWA window) is back at k; truncating the live
+    // attention prefix to k succeeds since nothing remains past k.
     llama_memory_seq_rm(kv, 0, k, -1);
     n_past_out = k;
     return true;
@@ -426,7 +478,7 @@ void llama_rn_context_completion::loadPrompt(const std::vector<std::string> &med
             }
             truncatePrompt(text_tokens);
             num_prompt_tokens = text_tokens.size();
-            LM_GGML_ASSERT(num_prompt_tokens < (size_t)parent_ctx->n_ctx);
+            GGML_ASSERT(num_prompt_tokens < (size_t)parent_ctx->n_ctx);
         }
 
         // NOTE: Do NOT feed prompt tokens into the sampler.
@@ -463,6 +515,29 @@ void llama_rn_context_completion::loadPrompt(const std::vector<std::string> &med
             llama_memory_clear(kv, false);  // drop the polluted shared window
         }
         bool cache_remove_success = llama_memory_seq_rm(kv, 0, n_past, -1);
+
+        // A successful removal is not sufficient on SWA models: the rollback may
+        // land past the retained window (or empty the SWA cache outright, making
+        // seq_pos_max -1 so nextToken's auto-positioned batch restarts at 0 over
+        // live base cells). Same checks as the slot reconcile and mtmd paths;
+        // pos_min == 0 means nothing was pruned. Recurrent/hybrid models are
+        // exempt (their rollback safety is enforced by seq_rm itself).
+        if (cache_remove_success && n_past > 0) {
+            const llama_model * mdl = parent_ctx->model;
+            const bool is_recurrent_or_hybrid =
+                llama_model_is_recurrent(mdl) || llama_model_is_hybrid(mdl);
+            const int32_t n_swa = parent_ctx->params.swa_full ? 0 : llama_model_n_swa(mdl);
+            if (n_swa > 0 && !is_recurrent_or_hybrid) {
+                const llama_pos frontier = llama_memory_seq_pos_max(kv, 0) + 1;
+                const llama_pos pos_min = llama_memory_seq_pos_min(kv, 0);
+                const llama_pos pos_min_thold = std::max<llama_pos>(0, n_past - n_swa);
+                if (frontier != n_past || pos_min < 0 || (pos_min > 0 && pos_min >= pos_min_thold)) {
+                    LOG_WARNING("SWA cache lost positions below %lld (pos_min=%lld, frontier=%lld, n_past=%lld), restoring a checkpoint or clearing",
+                        (long long) pos_min_thold, (long long) pos_min, (long long) frontier, (long long) n_past);
+                    cache_remove_success = false;
+                }
+            }
+        }
 
         // Recurrent/hybrid/SWA: seq_rm fails beyond the rollback window; restore
         // the longest matching snapshot and reprocess only the diverged tail.
@@ -627,19 +702,23 @@ void llama_rn_context_completion::resetGenerationTimings() {
 
 void llama_rn_context_completion::startGenerationTiming() {
     if (t_start_generation == 0) {
-        t_start_generation = lm_ggml_time_us();
+        t_start_generation = ggml_time_us();
     }
 }
 
 void llama_rn_context_completion::updateGenerationTiming() {
     if (t_start_generation != 0 && num_tokens_predicted > 0) {
-        t_token_generation = (lm_ggml_time_us() - t_start_generation) / 1e6;
+        t_token_generation = (ggml_time_us() - t_start_generation) / 1e6;
     }
 }
 
 bool llama_rn_context_completion::shouldUseMTP() const {
+    // Draft-simple pairs run the same draft/process/accept cycle as MTP in the direct
+    // completion path; keeping this gate MTP-only silently disabled speculation for
+    // draft-simple in normal (non-queued) completions.
     const auto & types = parent_ctx->params.speculative.types;
-    return std::find(types.begin(), types.end(), COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != types.end() &&
+    return (std::find(types.begin(), types.end(), COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != types.end() ||
+            std::find(types.begin(), types.end(), COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE) != types.end()) &&
         parent_ctx->params.speculative.draft.n_max > 0;
 }
 
@@ -649,11 +728,7 @@ void llama_rn_context_completion::resetSpeculative() {
         spec = nullptr;
     }
     spec_ctx.reset();
-    if (spec_batch_initialized) {
-        llama_batch_free(spec_batch);
-        spec_batch = {};
-        spec_batch_initialized = false;
-    }
+    spec_batch = {};
     spec_prompt.clear();
     spec_id_last = LLAMA_TOKEN_NULL;
     spec_n_past = 0;
@@ -666,25 +741,43 @@ void llama_rn_context_completion::initMTP() {
         return;
     }
     if (llama_model_has_encoder(parent_ctx->model)) {
-        throw std::runtime_error("MTP speculative decoding is only supported for decoder-only models");
+        throw std::runtime_error("speculative decoding is only supported for decoder-only models");
     }
     if (embd.empty()) {
-        throw std::runtime_error("MTP speculative decoding requires a non-empty prompt");
+        throw std::runtime_error("speculative decoding requires a non-empty prompt");
     }
 
     const auto n_mtp = parent_ctx->params.speculative.draft.n_max;
-    if ((llama_model_is_recurrent(parent_ctx->model) || llama_model_is_hybrid(parent_ctx->model)) &&
+    // Rollback (rs) sequences are only allocated for MTP-style drafts (see
+    // common_params_speculative::need_n_rs_seq), not for draft-simple.
+    const bool is_mtp = std::find(
+        parent_ctx->params.speculative.types.begin(),
+        parent_ctx->params.speculative.types.end(),
+        COMMON_SPECULATIVE_TYPE_DRAFT_MTP) != parent_ctx->params.speculative.types.end();
+    if (is_mtp &&
+        (llama_model_is_recurrent(parent_ctx->model) || llama_model_is_hybrid(parent_ctx->model)) &&
         llama_n_rs_seq(parent_ctx->ctx) < (uint32_t) n_mtp) {
         throw std::runtime_error(
             "MTP for recurrent or hybrid models must be enabled when loading the model "
             "with speculative.type='draft-mtp' and speculative.n_max/spec_draft_n_max set");
     }
 
+    // Rejected drafts are removed with seq_rm on the target and the draft context, which
+    // recurrent/hybrid memory can only do through rs sequences, so such a draft-simple
+    // pair would abort on the first rejection.
+    if (!is_mtp) {
+        const llama_model * model_dft = parent_ctx->getMTPDraftModel();
+        if (llama_model_is_recurrent(parent_ctx->model) || llama_model_is_hybrid(parent_ctx->model) ||
+            llama_model_is_recurrent(model_dft) || llama_model_is_hybrid(model_dft)) {
+            throw std::runtime_error("draft-simple does not support recurrent or hybrid models yet");
+        }
+    }
+
     resetSpeculative();
 
     spec_ctx.reset(parent_ctx->createMTPDraftContext(parent_ctx->params));
     if (spec_ctx == nullptr) {
-        throw std::runtime_error("failed to create MTP draft context");
+        throw std::runtime_error("failed to create draft context");
     }
 
     parent_ctx->params.speculative.draft.ctx_tgt = parent_ctx->ctx;
@@ -692,11 +785,10 @@ void llama_rn_context_completion::initMTP() {
 
     spec = common_speculative_init(parent_ctx->params.speculative, 1);
     if (spec == nullptr) {
-        throw std::runtime_error("failed to initialize MTP speculative decoding");
+        throw std::runtime_error("failed to initialize speculative decoding");
     }
 
-    spec_batch = llama_batch_init(llama_n_batch(parent_ctx->ctx), 0, 1);
-    spec_batch_initialized = true;
+    spec_batch = common_batch(parent_ctx->ctx);
 
     // A mem-shared draft (e.g. gemma4/EAGLE3) shares the target's KV cells, where
     // upstream state save/restore is a no-op — restoring a checkpoint would leave
@@ -749,29 +841,29 @@ void llama_rn_context_completion::evalMTPPrompt() {
             }
         }
 
-        common_batch_clear(spec_batch);
+        spec_batch.clear();
 
         const size_t n_eval = std::min<size_t>(n_batch, decode_to - offset);
         for (size_t i = 0; i < n_eval; ++i) {
             // MTP consumes pre-norm embeddings from every target row, but prompt logits are unused.
             // Keep one output row per decode batch to preserve the usual llama.cpp graph shape.
             const bool needs_logits = i + 1 == n_eval;
-            common_batch_add(spec_batch, spec_prompt[offset + i],
-                             (llama_pos) (offset + i), { seq_id }, needs_logits);
+            spec_batch.add(spec_prompt[offset + i],
+                           (llama_pos) (offset + i), seq_id, needs_logits);
         }
 
-        const int ret = llama_decode(parent_ctx->ctx, spec_batch);
+        const int ret = llama_process(parent_ctx->ctx, LLAMA_PROCESS_TYPE_DECODE, spec_batch.get());
         if (ret != 0) {
             // Memory holds only [0, offset); trim embd so a later prefix match
             // can't claim never-decoded cells (mirrors nextToken).
             embd.resize(std::min(embd.size(), offset));
             n_past = (llama_pos) offset;
-            throw std::runtime_error("failed to evaluate MTP prompt batch, ret=" + std::to_string(ret));
+            throw std::runtime_error("failed to evaluate speculative prompt batch, ret=" + std::to_string(ret));
         }
         if (!common_speculative_process(spec, spec_batch)) {
             embd.resize(std::min(embd.size(), offset));
             n_past = (llama_pos) offset;
-            throw std::runtime_error("failed to process MTP prompt batch");
+            throw std::runtime_error("failed to process speculative prompt batch");
         }
 
         offset += n_eval;
@@ -847,19 +939,19 @@ bool llama_rn_context_completion::refillMTPTokens() {
     const size_t n_draft = spec_draft.size();
     num_draft_tokens += n_draft;
 
-    common_batch_clear(spec_batch);
-    common_batch_add(spec_batch, spec_id_last, spec_n_past, { seq_id }, true);
+    spec_batch.clear();
+    spec_batch.add(spec_id_last, spec_n_past, seq_id, true);
     for (size_t i = 0; i < n_draft; ++i) {
-        common_batch_add(spec_batch, spec_draft[i],
-                         spec_n_past + (llama_pos) i + 1, { seq_id }, true);
+        spec_batch.add(spec_draft[i],
+                       spec_n_past + (llama_pos) i + 1, seq_id, true);
     }
 
-    const int ret = llama_decode(parent_ctx->ctx, spec_batch);
+    const int ret = llama_process(parent_ctx->ctx, LLAMA_PROCESS_TYPE_DECODE, spec_batch.get());
     if (ret != 0) {
-        throw std::runtime_error("failed to evaluate MTP target batch, ret=" + std::to_string(ret));
+        throw std::runtime_error("failed to evaluate speculative target batch, ret=" + std::to_string(ret));
     }
     if (!common_speculative_process(spec, spec_batch)) {
-        throw std::runtime_error("failed to process MTP target batch");
+        throw std::runtime_error("failed to process speculative target batch");
     }
 
     auto accepted = common_sampler_sample_and_accept_n(ctx_sampling, parent_ctx->ctx, spec_draft);
@@ -1634,14 +1726,9 @@ completion_token_output llama_rn_context_completion::nextToken()
 
         llama_token new_token_id = common_sampler_sample(ctx_sampling, parent_ctx->ctx, -1);
 
-        const int32_t n_probs = parent_ctx->params.sampling.n_probs;
-        if (n_probs > 0) {
-          llama_token_data_array cur_p = *common_sampler_get_candidates(ctx_sampling, true);
-          for (size_t i = 0; i < std::min(cur_p.size, (size_t)n_probs); ++i)
-          {
-              result.probs.push_back({cur_p.data[i].id, cur_p.data[i].p});
-          }
-        }
+        result.probs = get_token_probabilities(
+            parent_ctx->ctx, ctx_sampling, -1,
+            parent_ctx->params.sampling.n_probs, parent_ctx->post_sampling_probs);
 
         if (llama_vocab_is_eog(vocab, new_token_id)) {
             has_next_token = false;
@@ -1751,16 +1838,14 @@ completion_token_output llama_rn_context_completion::doCompletion()
 completion_chat_output llama_rn_context_completion::parseChatOutput(bool is_partial) {
     common_chat_parser_params syntax;
     syntax.format = static_cast<common_chat_format>(current_chat_format);
-    syntax.reasoning_format = current_reasoning_format;
-    syntax.generation_prompt = current_generation_prompt;
-    syntax.parse_tool_calls = true;
+    syntax.generation_prompt = common_chat_input(current_generation_prompt);
 
     // Load the PEG parser if available (required for COMMON_CHAT_FORMAT_PEG_* formats)
     if (!current_chat_parser.empty()) {
         syntax.parser.load(current_chat_parser);
     }
 
-    common_chat_msg parsed_msg = common_chat_parse(prefill_text + generated_text, is_partial, syntax);
+    common_chat_msg parsed_msg = common_chat_parse(common_chat_input(prefill_text + generated_text), is_partial, syntax);
 
     completion_chat_output result;
 
@@ -1787,7 +1872,8 @@ std::vector<float> llama_rn_context_completion::embedding(common_params &embd_pa
     doCompletion();
     endCompletion();
 
-    static const int n_embd = llama_model_n_embd(llama_get_model(parent_ctx->ctx));
+    // Output width can differ from the hidden size (e.g. EmbeddingGemma 2)
+    const int n_embd = llama_model_n_embd_out(parent_ctx->model);
     if (!embd_params.embedding)
     {
         LOG_WARNING("embedding disabled, embedding: %s", embd_params.embedding);
@@ -1869,15 +1955,15 @@ std::vector<float> llama_rn_context_completion::rerank(const std::string &query,
     return scores;
 }
 
-std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
+json llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
     if (is_predicting) {
         LOG_ERROR("cannot benchmark while predicting", "");
-        return std::string("{}");
+        return json::object();
     }
 
     if (pp <= 0 || tg <= 0 || pl <= 0 || nr <= 0) {
         LOG_ERROR("invalid benchmark parameters pp=%d tg=%d pl=%d nr=%d", pp, tg, pl, nr);
-        return std::string("{}");
+        return json::object();
     }
 
     is_predicting = true;
@@ -1903,7 +1989,7 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
     if (n_ctx_req > n_kv_max) {
         LOG_ERROR("benchmark requires n_ctx=%d but only %d available", n_ctx_req, n_kv_max);
         endCompletion();
-        return std::string("{}");
+        return json::object();
     }
 
     const llama_vocab * vocab = llama_model_get_vocab(model);
@@ -1956,7 +2042,7 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
     if (!decode_helper(batch, n_batch, true)) {
         llama_batch_free(batch);
         endCompletion();
-        return std::string("{}");
+        return json::object();
     }
 
     double acc_t_pp = 0.0;
@@ -1982,14 +2068,14 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
 
         llama_memory_clear(mem, false);
 
-        const auto t_pp_start = lm_ggml_time_us();
+        const auto t_pp_start = ggml_time_us();
         if (!decode_helper(batch, n_batch, false)) {
             run_failed = true;
             break;
         }
 
         llama_synchronize(ctx);
-        const auto t_pp_end = lm_ggml_time_us();
+        const auto t_pp_end = ggml_time_us();
 
         if (is_pp_shared && pl > 1) {
             for (int32_t seq = 1; seq < pl; ++seq) {
@@ -2011,7 +2097,7 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
             break;
         }
 
-        const auto t_tg_start = lm_ggml_time_us();
+        const auto t_tg_start = ggml_time_us();
 
         for (int i = 0; i < tg; ++i) {
             llama_batch_clear(&batch);
@@ -2030,7 +2116,7 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
             break;
         }
 
-        const auto t_tg_end = lm_ggml_time_us();
+        const auto t_tg_end = ggml_time_us();
 
         const double t_pp = (t_pp_end - t_pp_start) / 1e6;
         const double t_tg = (t_tg_end - t_tg_start) / 1e6;
@@ -2081,7 +2167,7 @@ std::string llama_rn_context_completion::bench(int pp, int tg, int pl, int nr) {
     llama_batch_free(batch);
     endCompletion();
 
-    return result_json.dump();
+    return result_json;
 }
 
 void llama_rn_context_completion::processMedia(
